@@ -3,6 +3,7 @@ import app from './app';
 import connectToDB from './db/connect';
 
 import dotenv from 'dotenv';
+import logger from './utils/logger';
 dotenv.config();
 
 const { PORT } = process.env;
@@ -12,7 +13,7 @@ const startServer = async () => {
 
   app.listen(PORT || 6000, () => {
     if (process.env.NODE_ENV !== 'test') {
-      console.info(`
+      logger.info(`
                 ################################################
                 🛡️  Server listening on port: ${PORT} 🛡️
                 ################################################

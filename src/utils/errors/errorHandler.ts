@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import AppError from './AppError';
+import logger from '../logger';
 
 const { NODE_ENV } = process.env;
 const DEVELOPMENT = 'development';
@@ -21,7 +22,7 @@ const errorMiddleWare = async (error: AppError, req: Request, res: Response, nex
   if (NODE_ENV !== DEVELOPMENT && error.statusCode >= 500) {
     body.message = 'Something went very wrong';
   }
-  console.error(error.message);
+  logger.error(error.message);
   res.status(error.statusCode).json(body);
   return;
 };
