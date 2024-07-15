@@ -1,16 +1,28 @@
+import 'reflect-metadata';
+
 import express, { Request, Response } from 'express';
 import { Container } from 'inversify';
 import { InversifyExpressServer } from 'inversify-express-utils';
 import cors from 'cors';
 import morgan from 'morgan';
+import { Model } from 'mongoose';
 
 import { env } from './config';
 import './controllers';
+import errorMiddleWare from './utils/errors/errorHandler';
+import { IUser } from './models';
+import TYPES from './di';
+import { User } from './models';
+import { IAuthService, AuthService } from './services';
 
 const { NODE_ENV } = env;
 const container = new Container();
 
-// const app = express();
+// bind all models to the container
+container.bind<Model<IUser>>(TYPES.User).toConstantValue(User);
+
+// bind all services to the container
+container.bind<IAuthService>(TYPES.AuthService).to(AuthService);
 
 const server = new InversifyExpressServer(container);
 
@@ -30,10 +42,9 @@ server.setErrorConfig((app) => {
       message: 'This endpoint does not exist on this server',
     });
   });
+
+  app.use(errorMiddleWare);
 });
-// app.get('/', (req, res) => {
-//   res.send('Hello World!');
-// });
 
 const app = server.build();
 export { container };
