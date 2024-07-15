@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 // import logger from '../utils/logger';
 
 import { env } from '../config';
+import logger from '../utils/logger';
 
 const { MONGO_URL } = env;
 
@@ -9,9 +10,9 @@ const { MONGO_URL } = env;
 const connectToDB = async (): Promise<void> => {
   try {
     await mongoose.connect(MONGO_URL as string);
-    console.info('Database connected successfully!');
+    logger.info('Database connected successfully!');
   } catch (err) {
-    console.error(err);
+    logger.error(err);
   }
 };
 
