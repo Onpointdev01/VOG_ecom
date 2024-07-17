@@ -10,6 +10,9 @@ export interface IUser extends Document {
   email: string;
   password: string;
   profileImageUrl: string;
+  nationality: string;
+  phoneNumber: string;
+  currentLocation: string;
   passwordResetToken?: string;
   passwordResetExpires?: Date;
   banned: boolean;
@@ -18,7 +21,6 @@ export interface IUser extends Document {
   verified: boolean;
   verifyCode?: string;
   verifyCodeExpires?: Date;
-  nationality: string;
 }
 
 const userSchema: Schema = new Schema<IUser>(

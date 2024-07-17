@@ -39,6 +39,7 @@ server.setConfig((app) => {
 server.setErrorConfig((app) => {
   app.all('*', (req: Request, res: Response) => {
     res.status(404).json({
+      status: 'error',
       message: 'This endpoint does not exist on this server',
     });
   });
