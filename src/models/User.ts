@@ -83,6 +83,9 @@ const userSchema: Schema = new Schema<IUser>(
     nationality: {
       type: String,
     },
+    currentLocation: {
+      type: String,
+    },
   },
   { timestamps: true }
 );

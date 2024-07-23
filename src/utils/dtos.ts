@@ -10,3 +10,14 @@ export interface SignUpUserDTO extends LoginDTO {
   phoneNumber: string;
   currentLocation: string;
 }
+
+export interface ResetPasswordDTO {
+  email: string;
+  code: string;
+  password: string;
+}
+
+export interface VerifyEmailDTO {
+  email: string;
+  code: string;
+}
