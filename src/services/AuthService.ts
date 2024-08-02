@@ -8,6 +8,7 @@ import { IUser } from '../models';
 import { SignUpUserDTO } from '../utils/dtos';
 import AppError from '../utils/errors/AppError';
 import { generateAccessToken, generateCode } from '../utils/helpers';
+import { sendEmail, renderTemplate } from '../utils/helpers/sendMail';
 
 export interface IAuthService {
   signupUser(payload: SignUpUserDTO): Promise<Partial<IUser>>;
@@ -83,6 +84,7 @@ export class AuthService implements IAuthService {
     user.passwordResetExpires = new Date(Date.now() + expiresIn * 60 * 1000);
 
     await user.save();
+    await this.sendVerificationCode();
     //TODO: send email with code
   }
 
@@ -129,5 +131,20 @@ export class AuthService implements IAuthService {
 
     if (user.verified) throw new AppError('Email already verified', 403);
     //TODO: send email with code
+  }
+
+  private async sendVerificationCode() {
+    const code = generateCode(6);
+    // const minutesToExpire = 10;
+    // user.verifyCode = crypto.createHash('md5').update(code).digest('hex');
+    // user.verifyCodeExpires = new Date(Date.now() + minutesToExpire * 60 * 1000); //should expire in 10 minutes
+
+    // await user.save();
+    const usersName = 'benjys' as string;
+    await sendEmail({
+      to: ['smtpbenjo@gmail.com'],
+      subject: 'Email Verification',
+      html: renderTemplate('src/utils/templates/password-reset.html', { usersName, code }),
+    });
   }
 }

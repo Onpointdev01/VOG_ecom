@@ -4,6 +4,7 @@ import connectToDB from './db/connect';
 
 import dotenv from 'dotenv';
 import logger from './utils/logger';
+
 dotenv.config();
 
 const { PORT } = process.env;
