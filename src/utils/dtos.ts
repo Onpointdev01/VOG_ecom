@@ -21,3 +21,14 @@ export interface VerifyEmailDTO {
   email: string;
   code: string;
 }
+
+export interface EmailCheckResult {
+  isValid: boolean;
+  isAvailable: boolean;
+  message: string;
+}
+
+export interface socialLoginDTO {
+  idToken: string;
+  provider: string;
+}

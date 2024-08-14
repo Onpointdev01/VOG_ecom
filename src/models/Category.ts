@@ -1,0 +1,37 @@
+import { Document, Model, model, Schema } from 'mongoose';
+import constants from '../utils/constants';
+
+const { CATEGORY } = constants.mongooseModels;
+
+export interface ICategory extends Document {
+  name: string;
+  description: string;
+  imageUrl: string;
+  isActive: boolean;
+}
+
+const categorySchema: Schema = new Schema<ICategory>(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+      unique: true,
+    },
+    description: {
+      type: String,
+      required: true,
+    },
+    imageUrl: {
+      type: String,
+      default: 'https://example.com/default-category-image.jpg',
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  { timestamps: true }
+);
+
+export const Category: Model<ICategory> = model<ICategory>(CATEGORY, categorySchema);

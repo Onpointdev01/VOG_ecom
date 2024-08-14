@@ -5,7 +5,7 @@ import { Response } from 'express';
 import { BaseController } from './BaseController';
 import TYPES from '../di';
 import { IAuthService } from '../services';
-import { LoginDTO, ResetPasswordDTO, SignUpUserDTO, VerifyEmailDTO } from '../utils/dtos';
+import { LoginDTO, ResetPasswordDTO, SignUpUserDTO, socialLoginDTO, VerifyEmailDTO } from '../utils/dtos';
 import logger from '../utils/logger';
 import AppError from '../utils/errors/AppError';
 
@@ -22,6 +22,7 @@ export class AuthController extends BaseController {
     return this.sendResponse(res, 201, 'created user successfully', newUser);
   }
 
+  //login
   @httpPost('/login')
   async login(@response() res: Response, @requestBody() payload: LoginDTO) {
     const { email, password } = payload;
@@ -30,6 +31,17 @@ export class AuthController extends BaseController {
     return this.sendResponse(res, 200, 'Successfully logged in', result);
   }
 
+  @httpPost('/social-login')
+  async socialLogin(@response() res: Response, @requestBody() payload: socialLoginDTO) {
+    const { idToken, provider } = payload;
+    if (!idToken || !provider) throw new AppError('All fields are required', 400);
+
+    logger.info(`Social login attempt for provider: ${provider}`);
+    const result = await this.authService.socialLogin(idToken, provider);
+    return this.sendResponse(res, 200, 'Successfully logged in', result);
+  }
+
+  //forgot password
   @httpPost('/forgot-password')
   async forgotPassword(@response() res: Response, @requestBody() payload: { email: string }) {
     const { email } = payload;
@@ -38,6 +50,7 @@ export class AuthController extends BaseController {
     return this.sendResponse(res, 200, 'Password reset code sent');
   }
 
+  //reset password
   @httpPost('/reset-password')
   async resetPassword(@response() res: Response, @requestBody() payload: ResetPasswordDTO) {
     const { email, code, password } = payload;
@@ -46,6 +59,7 @@ export class AuthController extends BaseController {
     return this.sendResponse(res, 200, 'Password reset successful');
   }
 
+  //verify email
   @httpPost('/verify-email')
   async verifyEmail(@response() res: Response, @requestBody() payload: VerifyEmailDTO) {
     const { email, code } = payload;
@@ -54,11 +68,30 @@ export class AuthController extends BaseController {
     return this.sendResponse(res, 200, 'Email verified', { token });
   }
 
+  //resend verification code
   @httpPost('/resend-verification')
   async resendVerification(@response() res: Response, @requestBody() payload: { email: string }) {
     const { email } = payload;
     if (!email) throw new AppError('Email is required', 400);
     await this.authService.resendVerification(email);
     return this.sendResponse(res, 200, 'Verification code sent');
+  }
+
+  //check email
+  @httpPost('/check-email')
+  async checkEmail(@response() res: Response, @requestBody() payload: { email: string }) {
+    const { email } = payload;
+    if (!email) throw new AppError('Email is required', 400);
+    const result = await this.authService.checkEmail(email);
+
+    if (!result.isValid) {
+      throw new AppError(result.message, 400);
+    }
+
+    if (!result.isAvailable) {
+      throw new AppError(result.message, 409);
+    }
+
+    return this.sendResponse(res, 200, result.message, result);
   }
 }

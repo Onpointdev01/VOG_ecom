@@ -12,14 +12,16 @@ import './controllers';
 import errorMiddleWare from './utils/errors/errorHandler';
 import { IUser } from './models';
 import TYPES from './di';
-import { User } from './models';
+import { User, Category } from './models';
 import { IAuthService, AuthService } from './services';
+import { ICategory } from './models/Category';
 
 const { NODE_ENV } = env;
 const container = new Container();
 
 // bind all models to the container
 container.bind<Model<IUser>>(TYPES.User).toConstantValue(User);
+container.bind<Model<ICategory>>(TYPES.Category).toConstantValue(Category);
 
 // bind all services to the container
 container.bind<IAuthService>(TYPES.AuthService).to(AuthService);

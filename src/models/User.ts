@@ -4,6 +4,10 @@ import constants from '../utils/constants';
 
 const { USER } = constants.mongooseModels;
 
+export interface ISocialLogin {
+  provider: string;
+  providerId: string;
+}
 export interface IUser extends Document {
   firstName: string;
   lastName: string;
@@ -21,7 +25,23 @@ export interface IUser extends Document {
   verified: boolean;
   verifyCode?: string;
   verifyCodeExpires?: Date;
+  socialLogin: ISocialLogin[];
 }
+
+const socialLoginSchema: Schema = new Schema<ISocialLogin>(
+  {
+    provider: {
+      type: String,
+      required: true,
+      enum: ['google', 'facebook', 'apple'], // Add or remove providers as needed
+    },
+    providerId: {
+      type: String,
+      required: true,
+    },
+  },
+  { _id: false }
+);
 
 const userSchema: Schema = new Schema<IUser>(
   {
@@ -44,7 +64,7 @@ const userSchema: Schema = new Schema<IUser>(
     password: {
       type: String,
       select: false,
-      required: [true, 'Password is required'],
+      required: false,
     },
     profileImageUrl: {
       type: String,
@@ -86,8 +106,10 @@ const userSchema: Schema = new Schema<IUser>(
     currentLocation: {
       type: String,
     },
+    socialLogin: [socialLoginSchema],
   },
   { timestamps: true }
 );
 
+userSchema.index({ email: 1 }, { unique: true });
 export const User: Model<IUser> = model<IUser>(USER, userSchema);
