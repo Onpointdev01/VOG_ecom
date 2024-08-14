@@ -1,5 +1,4 @@
 import 'reflect-metadata';
-
 import express, { Request, Response } from 'express';
 import { Container } from 'inversify';
 import { InversifyExpressServer } from 'inversify-express-utils';
@@ -13,18 +12,19 @@ import errorMiddleWare from './utils/errors/errorHandler';
 import { IUser } from './models';
 import TYPES from './di';
 import { User, Category } from './models';
-import { IAuthService, AuthService } from './services';
+import { IAuthService, AuthService, ICategoryService, CategoryService } from './services';
 import { ICategory } from './models/Category';
 
 const { NODE_ENV } = env;
 const container = new Container();
 
-// bind all models to the container
+// Bind all models to the container
 container.bind<Model<IUser>>(TYPES.User).toConstantValue(User);
 container.bind<Model<ICategory>>(TYPES.Category).toConstantValue(Category);
 
-// bind all services to the container
+// Bind all services to the container
 container.bind<IAuthService>(TYPES.AuthService).to(AuthService);
+container.bind<ICategoryService>(TYPES.CategoryService).to(CategoryService);
 
 const server = new InversifyExpressServer(container);
 
@@ -51,5 +51,4 @@ server.setErrorConfig((app) => {
 
 const app = server.build();
 export { container };
-
 export default app;
