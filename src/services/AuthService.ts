@@ -87,39 +87,102 @@ export class AuthService extends BaseService implements IAuthService {
     let payload: any;
 
     if (provider === 'google') {
-      const ticket = await this.oAuth2Client.verifyIdToken({
-        idToken,
-        audience: process.env.GOOGLE_CLIENT_ID,
-      });
-      payload = ticket.getPayload();
-    }
-    // Add more providers (e.g., Facebook) as needed
-    else {
+      try {
+        const ticket = await this.oAuth2Client.verifyIdToken({
+          idToken,
+          audience: process.env.GOOGLE_CLIENT_ID,
+        });
+        payload = ticket.getPayload();
+        // console.log(payload);
+      } catch (error) {
+        // Handle specific Google token verification errors, look for better way to handle it
+        if (error instanceof Error) {
+          const errorMessage = error.message.toLowerCase();
+
+          if (/invalid token signature/i.test(errorMessage)) {
+            throw new AppError('Invalid Google token', 401);
+          } else if (/token used too late/i.test(errorMessage)) {
+            throw new AppError('Google token has expired', 401);
+          } else if (
+            /wrong number of segments/i.test(errorMessage) ||
+            /not enough or too many segments/i.test(errorMessage)
+          ) {
+            throw new AppError('Malformed Google token', 400);
+          } else if (/no pem found for envelope/i.test(errorMessage)) {
+            throw new AppError('Invalid Google token format', 400);
+          } else if (/invalid audience/i.test(errorMessage)) {
+            throw new AppError('Invalid audience in Google token', 401);
+          } else if (/invalid issuer/i.test(errorMessage)) {
+            throw new AppError('Invalid issuer in Google token', 401);
+          } else {
+            console.error('Google token verification error:', error);
+            throw new AppError('Failed to verify Google token', 500);
+          }
+        } else {
+          console.error('Unknown error during Google token verification:', error);
+          throw new AppError('An unexpected error occurred', 500);
+        }
+      }
+    } else {
       throw new AppError('Unsupported provider', 400);
     }
+
     const socialId = payload?.sub;
     if (!socialId) {
       throw new AppError('No user ID found in token payload', 400);
     }
 
+    // Rest of your function remains the same
     let user = await this.User.findOne({
-      'socialLogins.providerId': socialId,
-      'socialLogins.provider': provider,
+      'socialLogin.providerId': socialId,
+      'socialLogin.provider': provider,
     });
+
     if (!user) {
-      // Register new user if not found
-      user = new this.User({
-        email: payload?.email,
-        name: payload?.name,
-        socialLogins: [{ provider: provider, providerId: socialId }],
-      });
-      await user.save();
+      const userWithEmail = await this.User.findOne({ email: payload?.email });
+      if (userWithEmail) {
+        userWithEmail.socialLogin.push({ provider: provider, providerId: socialId });
+        await userWithEmail.save();
+
+        const trimedUser: Partial<IUser> = {
+          _id: userWithEmail._id,
+          email: userWithEmail.email,
+          firstName: userWithEmail.firstName,
+          lastName: userWithEmail.lastName,
+          profileImageUrl: userWithEmail.profileImageUrl,
+          nationality: userWithEmail.nationality,
+          currentLocation: userWithEmail.currentLocation,
+          banned: userWithEmail.banned,
+          verified: userWithEmail.verified,
+        };
+        return { user: trimedUser, token: generateAccessToken(userWithEmail._id as string) };
+      } else {
+        // Register new user if not found
+        user = new this.User({
+          email: payload?.email,
+          firstName: payload?.given_name,
+          lastName: payload?.family_name,
+          profileImageUrl: payload?.picture,
+          socialLogins: [{ provider: provider, providerId: socialId }],
+        });
+        await user.save();
+      }
     }
 
     const token = await generateAccessToken(user._id as string);
-    return { user: user, token: token };
+    const trimedUser: Partial<IUser> = {
+      _id: user._id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      profileImageUrl: user.profileImageUrl,
+      nationality: user.nationality,
+      currentLocation: user.currentLocation,
+      banned: user.banned,
+      verified: user.verified,
+    };
+    return { user: trimedUser, token: token };
   }
-
   async forgotPassword(email: string): Promise<void> {
     const user = await this.User.findOne({ email });
     if (!user) throw new AppError('User not found', 404);
