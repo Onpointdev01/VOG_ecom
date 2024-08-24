@@ -22,6 +22,7 @@ export interface IAuthService {
   verifyEmail(code: string, email: string): Promise<string>;
   resendVerification(email: string): Promise<void>;
   checkEmail(email: string): Promise<EmailCheckResult>;
+  checkBannedOrDeleted(userId: string): Promise<Partial<IUser>>;
 }
 
 @injectable()
@@ -30,6 +31,19 @@ export class AuthService extends BaseService implements IAuthService {
   constructor(@inject(TYPES.User) private User: Model<IUser>) {
     super();
     this.oAuth2Client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+  }
+  async checkBannedOrDeleted(userId: string): Promise<IUser> {
+    const user = await this.User.findById(userId);
+
+    if (!user) {
+      throw new AppError('user not found', 404);
+    }
+
+    if (user?.banned) {
+      throw new AppError('You cannot log in', 403);
+    }
+
+    return user;
   }
 
   async signupUser(payload: SignUpUserDTO): Promise<Partial<IUser>> {

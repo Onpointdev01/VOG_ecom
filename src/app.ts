@@ -9,10 +9,17 @@ import { Model } from 'mongoose';
 import { env } from './config';
 import './controllers';
 import errorMiddleWare from './utils/errors/errorHandler';
-import { IUser } from './models';
+import { IProduct, IUser, Product } from './models';
 import TYPES from './di';
 import { User, Category } from './models';
-import { IAuthService, AuthService, ICategoryService, CategoryService } from './services';
+import {
+  IAuthService,
+  AuthService,
+  ICategoryService,
+  CategoryService,
+  IProductService,
+  ProductService,
+} from './services';
 import { ICategory } from './models/Category';
 
 const { NODE_ENV } = env;
@@ -21,10 +28,12 @@ const container = new Container();
 // Bind all models to the container
 container.bind<Model<IUser>>(TYPES.User).toConstantValue(User);
 container.bind<Model<ICategory>>(TYPES.Category).toConstantValue(Category);
+container.bind<Model<IProduct>>(TYPES.Product).toConstantValue(Product);
 
 // Bind all services to the container
 container.bind<IAuthService>(TYPES.AuthService).to(AuthService);
 container.bind<ICategoryService>(TYPES.CategoryService).to(CategoryService);
+container.bind<IProductService>(TYPES.ProductService).to(ProductService);
 
 const server = new InversifyExpressServer(container);
 

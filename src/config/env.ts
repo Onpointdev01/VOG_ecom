@@ -7,6 +7,10 @@ const requiredString = Joi.string().required();
 const schema = {
   NODE_ENV: requiredString.default('development'),
   MONGO_URL: requiredString,
+  JWT_SECRET: requiredString,
+  JWT_EXPIRES: requiredString.default('1d'),
+  JWT_REFRESH_SECRET: requiredString,
+  JWT_REFRESH_EXPIRES: requiredString.default('7d'),
 };
 
 const envSchema = Joi.object(schema);
@@ -14,6 +18,10 @@ const envSchema = Joi.object(schema);
 export interface Env {
   NODE_ENV: string;
   MONGO_URL: string;
+  JWT_SECRET: string;
+  JWT_EXPIRES: string;
+  JWT_REFRESH_SECRET: string;
+  JWT_REFRESH_EXPIRES: string;
 }
 
 const tenv: any = {};

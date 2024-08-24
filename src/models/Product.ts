@@ -17,7 +17,7 @@ export interface IProduct extends Document {
   color: string;
   quantityAvailable: number;
   images: string[];
-  store: Schema.Types.ObjectId;
+  owner: Schema.Types.ObjectId;
   isActive: boolean;
 }
 
@@ -80,12 +80,11 @@ const productSchema: Schema<IProduct> = new Schema<IProduct>(
       type: [String],
       required: true,
     },
-    store: {
+    owner: {
       type: Schema.Types.ObjectId,
-      ref: 'Store',
+      ref: 'Seller',
       required: true,
     },
-
     isActive: {
       type: Boolean,
       default: true,
@@ -94,4 +93,10 @@ const productSchema: Schema<IProduct> = new Schema<IProduct>(
   { timestamps: true }
 );
 
+productSchema.pre('save', function (next) {
+  if (this.isModified('reviews') && this.reviews.length > 0) {
+    this.noOfReviews = this.reviews.length;
+  }
+  next();
+});
 export const Product: Model<IProduct> = model<IProduct>(PRODUCT, productSchema);
