@@ -1,65 +1,45 @@
-// src/controllers/reviewController.ts
-import { Request, Response } from 'express';
-import { getAllReviews, getReviewById, createReview, updateReview, deleteReview } from '../services/ReviewServices';
+import { inject } from 'inversify';
+import { controller, httpPost, httpGet, httpPut, httpDelete, requestParam, requestBody, response } from 'inversify-express-utils';
+import { Response } from 'express';
 
-export const getReviews = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const reviews = await getAllReviews();
-    res.json(reviews);
-  } catch (error) {
-    res.status(500).json({ message: 'Internal Server Error' });
-  }
-};
+import { BaseController } from './BaseController';
+import TYPES from '../di';
+import { IReviewService } from '../services';
+import { IReview } from '../models';
 
-export const getReview = async (req: Request, res: Response): Promise<void> => {
-  const { id } = req.params;
-  try {
-    const review = await getReviewById(id);
-    if (review) {
-      res.json(review);
-    } else {
-      res.status(404).json({ message: 'Review not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Internal Server Error' });
+@controller('/api/v1/reviews')
+export class ReviewController extends BaseController {
+  constructor(@inject(TYPES.ReviewService) private reviewService: IReviewService) {
+    super();
   }
-};
 
-export const addReview = async (req: Request, res: Response): Promise<void> => {
-  const reviewData = req.body;
-  try {
-    const newReview = await createReview(reviewData);
-    res.status(201).json(newReview);
-  } catch (error) {
-    res.status(500).json({ message: 'Internal Server Error' });
+  @httpPost('/')
+  async createReview(@response() res: Response, @requestBody() payload: Partial<IReview>) {
+    const newReview = await this.reviewService.createReview(payload);
+    return this.sendResponse(res, 201, 'Review created successfully', newReview);
   }
-};
 
-export const modifyReview = async (req: Request, res: Response): Promise<void> => {
-  const { id } = req.params;
-  const updateData = req.body;
-  try {
-    const updatedReview = await updateReview(id, updateData);
-    if (updatedReview) {
-      res.json(updatedReview);
-    } else {
-      res.status(404).json({ message: 'Review not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Internal Server Error' });
+  @httpGet('/:id')
+  async getReviewById(@response() res: Response, @requestParam('id') id: string) {
+    const review = await this.reviewService.getReviewById(id);
+    return this.sendResponse(res, 200, 'Review retrieved successfully', review);
   }
-};
 
-export const removeReview = async (req: Request, res: Response): Promise<void> => {
-  const { id } = req.params;
-  try {
-    const deletedReview = await deleteReview(id);
-    if (deletedReview) {
-      res.status(204).end();
-    } else {
-      res.status(404).json({ message: 'Review not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Internal Server Error' });
+  @httpGet('/')
+  async getAllReviews(@response() res: Response) {
+    const reviews = await this.reviewService.getAllReviews();
+    return this.sendResponse(res, 200, 'Reviews retrieved successfully', reviews);
   }
-};
+
+  @httpPut('/:id')
+  async updateReview(@response() res: Response, @requestParam('id') id: string, @requestBody() payload: Partial<IReview>) {
+    const updatedReview = await this.reviewService.updateReview(id, payload);
+    return this.sendResponse(res, 200, 'Review updated successfully', updatedReview);
+  }
+
+  @httpDelete('/:id')
+  async deleteReview(@response() res: Response, @requestParam('id') id: string) {
+    await this.reviewService.deleteReview(id);
+    return this.sendResponse(res, 204, 'Review deleted successfully');
+  }
+}

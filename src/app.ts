@@ -19,6 +19,8 @@ import {
   CategoryService,
   IProductService,
   ProductService,
+  IReviewService,
+  ReviewService
 } from './services';
 import { ICategory } from './models/Category';
 
