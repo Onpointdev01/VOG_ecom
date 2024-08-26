@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Request, Response } from 'express';
-import { controller, httpGet, response } from 'inversify-express-utils';
+import { controller, httpGet, httpPost, response, request } from 'inversify-express-utils';
 import { successResponse } from '../utils/helpers/response';
 import AppError from '../utils/errors/AppError';
+import upload from '../utils/aws';
 
 @controller('')
 export class BaseController {
@@ -39,6 +40,21 @@ export class BaseController {
     } catch (error) {
       //   healthCheck.message = error.message;
       return this.sendResponse(res, 503, 'Health check failed', healthCheck);
+    }
+  }
+
+  @httpPost('/api/v1/upload-single-file', upload.fields([{ name: 'image', maxCount: 1 }]))
+  async uploadSingleFile(@request() req: Request, @response() res: Response) {
+    try {
+      if (!req.files) {
+        throw new AppError('No file uploaded.', 400);
+      }
+      const files = req.files as { [key: string]: Express.MulterS3.File[] };
+      const fileUrl = files.image[0].location;
+      return this.sendResponse(res, 200, 'File uploaded successfully', { fileUrl });
+    } catch (error) {
+      console.log(error);
+      throw new AppError('file uploaded not successful', 500);
     }
   }
 }
