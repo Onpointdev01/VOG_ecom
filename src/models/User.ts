@@ -17,6 +17,7 @@ export interface IUser extends Document {
   nationality: string;
   phoneNumber: string;
   currentLocation: string;
+  role: string;
   passwordResetToken?: string;
   passwordResetExpires?: Date;
   banned: boolean;
@@ -25,6 +26,7 @@ export interface IUser extends Document {
   verified: boolean;
   verifyCode?: string;
   verifyCodeExpires?: Date;
+  refreshToken?: string;
   socialLogin: ISocialLogin[];
 }
 
@@ -70,6 +72,21 @@ const userSchema: Schema = new Schema<IUser>(
       type: String,
       default: 'https://ui-avatars.com/api/?name=New+User',
     },
+    nationality: {
+      type: String,
+    },
+    phoneNumber: {
+      type: String,
+      validate: [validator.isMobilePhone, 'Invalid phone number'],
+    },
+    currentLocation: {
+      type: String,
+    },
+    role: {
+      type: String,
+      enum: ['user', 'seller', 'admin'],
+      default: 'user',
+    },
     passwordResetToken: {
       type: String,
       default: null,
@@ -100,16 +117,25 @@ const userSchema: Schema = new Schema<IUser>(
     verifyCodeExpires: {
       type: Date,
     },
-    nationality: {
+    refreshToken: {
       type: String,
     },
-    currentLocation: {
-      type: String,
-    },
+
     socialLogin: [socialLoginSchema],
   },
   { timestamps: true }
 );
 
 userSchema.index({ email: 1 }, { unique: true });
+
+userSchema.pre('save', function (next) {
+  if (this.isModified('firstName') || this.isModified('lastName') || !this.profileImageUrl) {
+    const firstName = this.firstName || '';
+    const lastName = this.lastName || '';
+    const name = `${firstName}+${lastName}`;
+    this.profileImageUrl = `https://ui-avatars.com/api/?background=random&name=${name}`;
+  }
+  next();
+});
+
 export const User: Model<IUser> = model<IUser>(USER, userSchema);

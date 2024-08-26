@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Request, Response } from 'express';
 import { controller, httpGet, response } from 'inversify-express-utils';
 import { successResponse } from '../utils/helpers/response';
