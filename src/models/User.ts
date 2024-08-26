@@ -50,7 +50,7 @@ const userSchema: Schema = new Schema<IUser>(
     firstName: {
       type: String,
       trim: true,
-      required: [true, "User's first name is required"],
+      required: [true, 'firstname is required'],
     },
     lastName: {
       type: String,

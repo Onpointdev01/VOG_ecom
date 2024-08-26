@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import dotenv from 'dotenv';
 dotenv.config();
 import Joi from 'joi';
@@ -11,6 +12,9 @@ const schema = {
   JWT_EXPIRES: requiredString.default('1d'),
   JWT_REFRESH_SECRET: requiredString,
   JWT_REFRESH_EXPIRES: requiredString.default('7d'),
+  BUCKET_NAME: requiredString,
+  SECRET_ACCESS_KEY: requiredString,
+  ACCESS_KEY_ID: requiredString,
 };
 
 const envSchema = Joi.object(schema);
@@ -22,6 +26,9 @@ export interface Env {
   JWT_EXPIRES: string;
   JWT_REFRESH_SECRET: string;
   JWT_REFRESH_EXPIRES: string;
+  BUCKET_NAME: string;
+  SECRET_ACCESS_KEY: string;
+  ACCESS_KEY_ID: string;
 }
 
 const tenv: any = {};
