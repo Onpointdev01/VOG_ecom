@@ -20,6 +20,7 @@ export interface IProduct extends Document {
   images: string[];
   owner: PopulatedDoc<ISeller>;
   isActive: boolean;
+  isFlash: boolean;
 }
 
 const productSchema: Schema<IProduct> = new Schema<IProduct>(
@@ -89,6 +90,10 @@ const productSchema: Schema<IProduct> = new Schema<IProduct>(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    isFlash: {
+      type: Boolean,
+      default: false,
     },
   },
   { timestamps: true }
