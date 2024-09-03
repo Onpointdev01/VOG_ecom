@@ -43,7 +43,7 @@ export class RequireSignIn extends BaseMiddleware {
         const user = await this.authService.checkBannedOrDeleted(userId);
 
         req.user = user as IUser;
-        res.locals.user = user;
+        res.locals.user = userId;
 
         next();
       });

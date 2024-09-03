@@ -1,5 +1,14 @@
 import { inject } from 'inversify';
-import { controller, httpPost, httpGet, httpPut, httpDelete, requestParam, requestBody, response } from 'inversify-express-utils';
+import {
+  controller,
+  httpPost,
+  httpGet,
+  httpPut,
+  httpDelete,
+  requestParam,
+  requestBody,
+  response,
+} from 'inversify-express-utils';
 import { Response } from 'express';
 
 import { BaseController } from './BaseController';
@@ -13,7 +22,7 @@ export class ReviewController extends BaseController {
     super();
   }
 
-  @httpPost('/')
+  @httpPost('/', TYPES.RequireSignIn)
   async createReview(@response() res: Response, @requestBody() payload: Partial<IReview>) {
     const newReview = await this.reviewService.createReview(payload);
     return this.sendResponse(res, 201, 'Review created successfully', newReview);
@@ -32,7 +41,11 @@ export class ReviewController extends BaseController {
   }
 
   @httpPut('/:id')
-  async updateReview(@response() res: Response, @requestParam('id') id: string, @requestBody() payload: Partial<IReview>) {
+  async updateReview(
+    @response() res: Response,
+    @requestParam('id') id: string,
+    @requestBody() payload: Partial<IReview>
+  ) {
     const updatedReview = await this.reviewService.updateReview(id, payload);
     return this.sendResponse(res, 200, 'Review updated successfully', updatedReview);
   }

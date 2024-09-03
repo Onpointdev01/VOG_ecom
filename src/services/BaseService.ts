@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { injectable } from 'inversify';
 import { Model } from 'mongoose';
 import validator from 'validator';

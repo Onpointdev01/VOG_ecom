@@ -15,7 +15,7 @@ import { BaseController } from './BaseController';
 import TYPES from '../di';
 import { IProductService } from '../services';
 import { IProduct } from '../models';
-import { createProductDTO } from '../utils/dtos';
+import { createProductDTO, createReviewDTO } from '../utils/dtos';
 
 @controller('/api/v1/products')
 export class ProductController extends BaseController {
@@ -56,5 +56,21 @@ export class ProductController extends BaseController {
   async deleteProduct(@response() res: Response, @requestParam('id') id: string) {
     await this.productService.deleteProduct(id);
     return this.sendResponse(res, 204, 'Product deleted successfully');
+  }
+
+  //pruduct reviews
+  @httpPost('/:id/reviews', TYPES.RequireSignIn)
+  async createReview(
+    @response() res: Response,
+    @requestParam('id') id: string,
+    @requestBody() payload: createReviewDTO
+  ) {
+    payload.user = res.locals.user;
+    payload.product = id;
+    payload.reviewType = 'product';
+
+    console.log(payload);
+    const newReview = await this.productService.reviewProduct(payload);
+    return this.sendResponse(res, 201, 'Review created successfully', newReview);
   }
 }

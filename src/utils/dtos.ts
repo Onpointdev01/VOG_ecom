@@ -54,6 +54,14 @@ export interface createProductDTO {
   images: string[];
 }
 
+export interface createReviewDTO {
+  user: string;
+  reviewType: string;
+  rating: number;
+  comment: string;
+  product: string;
+  seller: string;
+}
 export interface getAllProductsResponse {
   product: {
     name: string;
