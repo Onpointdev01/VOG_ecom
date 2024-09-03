@@ -1,11 +1,21 @@
 import { inject } from 'inversify';
-import { controller, httpPost, httpGet, httpPut, httpDelete, requestParam, requestBody, response } from 'inversify-express-utils';
+import {
+  controller,
+  httpPost,
+  httpGet,
+  httpPut,
+  httpDelete,
+  requestParam,
+  requestBody,
+  response,
+} from 'inversify-express-utils';
 import { Response } from 'express';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
 import { IProductService } from '../services';
 import { IProduct } from '../models';
+import { createProductDTO } from '../utils/dtos';
 
 @controller('/api/v1/products')
 export class ProductController extends BaseController {
@@ -13,8 +23,9 @@ export class ProductController extends BaseController {
     super();
   }
 
-  @httpPost('/')
-  async createProduct(@response() res: Response, @requestBody() payload: Partial<IProduct>) {
+  @httpPost('/', TYPES.RequireSignIn, TYPES.RequireSeller)
+  async createProduct(@response() res: Response, @requestBody() payload: createProductDTO) {
+    payload.owner = res.locals.user.seller;
     const newProduct = await this.productService.createProduct(payload);
     return this.sendResponse(res, 201, 'Product created successfully', newProduct);
   }
@@ -32,7 +43,11 @@ export class ProductController extends BaseController {
   }
 
   @httpPut('/:id')
-  async updateProduct(@response() res: Response, @requestParam('id') id: string, @requestBody() payload: Partial<IProduct>) {
+  async updateProduct(
+    @response() res: Response,
+    @requestParam('id') id: string,
+    @requestBody() payload: Partial<IProduct>
+  ) {
     const updatedProduct = await this.productService.updateProduct(id, payload);
     return this.sendResponse(res, 200, 'Product updated successfully', updatedProduct);
   }

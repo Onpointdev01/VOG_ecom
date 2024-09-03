@@ -11,6 +11,13 @@ export interface SignUpUserDTO extends LoginDTO {
   currentLocation: string;
 }
 
+export interface SignUpSellerDTO {
+  user: string;
+  type: string;
+  name: string;
+  logo: string;
+  official: boolean;
+}
 export interface ResetPasswordDTO {
   email: string;
   code: string;
@@ -31,4 +38,41 @@ export interface EmailCheckResult {
 export interface socialLoginDTO {
   idToken: string;
   provider: string;
+}
+
+export interface createProductDTO {
+  name: string;
+  description: string;
+  price: number;
+  originalPrice: number;
+  brand: string;
+  condition: string;
+  sizes: string[];
+  color: string;
+  quantityAvailable: number;
+  owner: string;
+  images: string[];
+}
+
+export interface getAllProductsResponse {
+  product: {
+    name: string;
+    description: string;
+    price: number;
+    originalPrice: number;
+    images: string[];
+  };
+  description: {
+    brand: string;
+    condition: string;
+    sizes: string[];
+    color: string;
+    quantityAvailable: number;
+  };
+  seller: {
+    name: string;
+    rating: number;
+    logo: string;
+    official: boolean;
+  };
 }

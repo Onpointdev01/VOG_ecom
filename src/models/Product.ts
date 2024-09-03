@@ -1,7 +1,8 @@
-import { Document, Model, model, Schema } from 'mongoose';
+import { Document, Model, model, PopulatedDoc, Schema } from 'mongoose';
 import constants from '../utils/constants';
+import { ISeller } from '.';
 
-const { PRODUCT } = constants.mongooseModels;
+const { PRODUCT, SELLER, REVIEW } = constants.mongooseModels;
 
 export interface IProduct extends Document {
   name: string;
@@ -17,7 +18,7 @@ export interface IProduct extends Document {
   color: string;
   quantityAvailable: number;
   images: string[];
-  owner: Schema.Types.ObjectId;
+  owner: PopulatedDoc<ISeller>;
   isActive: boolean;
 }
 
@@ -47,7 +48,7 @@ const productSchema: Schema<IProduct> = new Schema<IProduct>(
     },
     reviews: {
       type: [Schema.Types.ObjectId],
-      ref: 'Review',
+      ref: REVIEW,
     },
     noOfReviews: {
       type: Number,
@@ -82,7 +83,7 @@ const productSchema: Schema<IProduct> = new Schema<IProduct>(
     },
     owner: {
       type: Schema.Types.ObjectId,
-      ref: 'Seller',
+      ref: SELLER,
       required: true,
     },
     isActive: {

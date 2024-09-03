@@ -1,8 +1,9 @@
-import { Document, Model, model, Schema } from 'mongoose';
+import { Document, Model, model, PopulatedDoc, Schema } from 'mongoose';
 import validator from 'validator';
 import constants from '../utils/constants';
+import { ISeller } from './';
 
-const { USER } = constants.mongooseModels;
+const { USER, SELLER } = constants.mongooseModels;
 
 export interface ISocialLogin {
   provider: string;
@@ -28,6 +29,7 @@ export interface IUser extends Document {
   verifyCodeExpires?: Date;
   refreshToken?: string;
   socialLogin: ISocialLogin[];
+  seller?: PopulatedDoc<ISeller>;
 }
 
 const socialLoginSchema: Schema = new Schema<ISocialLogin>(
@@ -122,6 +124,10 @@ const userSchema: Schema = new Schema<IUser>(
     },
 
     socialLogin: [socialLoginSchema],
+    seller: {
+      type: Schema.Types.ObjectId,
+      ref: SELLER,
+    },
   },
   { timestamps: true }
 );

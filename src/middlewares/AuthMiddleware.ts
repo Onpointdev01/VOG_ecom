@@ -52,3 +52,28 @@ export class RequireSignIn extends BaseMiddleware {
     }
   }
 }
+
+@injectable()
+export class RequireSeller extends BaseMiddleware {
+  handler(
+    req: Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>,
+    res: Response<any, Record<string, any>>,
+    next: NextFunction
+  ): void {
+    try {
+      const user = req.user as IUser;
+
+      if (!user) {
+        return next(new AppError('User not authenticated', 401));
+      }
+
+      if (!user.seller) {
+        return next(new AppError('Operation not allowed', 403));
+      }
+
+      next();
+    } catch (err) {
+      next(err);
+    }
+  }
+}

@@ -5,16 +5,18 @@ import crypto from 'crypto';
 import { Model } from 'mongoose';
 import { TYPES } from '../di';
 import { IUser } from '../models';
-import { EmailCheckResult, SignUpUserDTO } from '../utils/dtos';
+import { EmailCheckResult, SignUpSellerDTO, SignUpUserDTO } from '../utils/dtos';
 import AppError from '../utils/errors/AppError';
 import { generateAccessToken, generateCode } from '../utils/helpers';
 import { sendEmail, renderTemplate } from '../utils/helpers/sendMail';
 import validator from 'validator';
 import { OAuth2Client } from 'google-auth-library';
 import { BaseService } from './BaseService';
+import { ISeller } from '../models/Seller';
 
 export interface IAuthService {
   signupUser(payload: SignUpUserDTO): Promise<Partial<IUser>>;
+  signupSeller(payload: SignUpSellerDTO): Promise<Partial<ISeller>>;
   login(email: string, password: string): Promise<{ user: Partial<IUser>; token: string }>;
   socialLogin(idToken: string, provider: string): Promise<{ user: Partial<IUser>; token: string }>;
   forgotPassword(email: string): Promise<void>;
@@ -28,7 +30,7 @@ export interface IAuthService {
 @injectable()
 export class AuthService extends BaseService implements IAuthService {
   private oAuth2Client: OAuth2Client;
-  constructor(@inject(TYPES.User) private User: Model<IUser>) {
+  constructor(@inject(TYPES.User) private User: Model<IUser>, @inject(TYPES.Seller) private Seller: Model<ISeller>) {
     super();
     this.oAuth2Client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
   }
@@ -68,6 +70,33 @@ export class AuthService extends BaseService implements IAuthService {
     //TODO: generate and send verification email
 
     return { _id: newUser._id, email, firstName, lastName };
+  }
+
+  //signup as seller add more validation and the likes
+  async signupSeller(payload: SignUpSellerDTO): Promise<Partial<ISeller>> {
+    const { name, type, logo, official, user } = payload;
+
+    console.log('name: ', name, 'user: ', user);
+
+    const prevUser = await this.User.findById(user);
+    if (!prevUser) throw new AppError(`User not found`, 404);
+
+    //check if user is already a seller
+    const prevSeller = await this.Seller.findOne({ user });
+    if (prevSeller) throw new AppError(`User is already a seller`, 400);
+
+    const newSeller = await this.Seller.create({
+      user,
+      name,
+      type,
+      logo,
+      official,
+    });
+
+    // Update the user's seller field
+    await this.User.findByIdAndUpdate(user, { seller: newSeller._id });
+
+    return { _id: newSeller._id, name, type, logo, official };
   }
 
   login = async (email: string, password: string): Promise<{ user: Partial<IUser>; token: string }> => {

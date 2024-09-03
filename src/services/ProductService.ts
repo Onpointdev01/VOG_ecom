@@ -4,11 +4,12 @@ import TYPES from '../di';
 import { IProduct } from '../models/Product';
 import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
+import { createProductDTO, getAllProductsResponse } from '../utils/dtos';
 
 export interface IProductService {
-  createProduct(payload: Partial<IProduct>): Promise<IProduct>;
+  createProduct(payload: createProductDTO): Promise<IProduct>;
   getProductById(id: string): Promise<IProduct>;
-  getAllProducts(): Promise<IProduct[]>;
+  getAllProducts(): Promise<getAllProductsResponse[]>;
   updateProduct(id: string, payload: Partial<IProduct>): Promise<IProduct>;
   deleteProduct(id: string): Promise<void>;
 }
@@ -19,11 +20,10 @@ export class ProductService extends BaseService implements IProductService {
     super();
   }
 
-  async createProduct(payload: Partial<IProduct>): Promise<IProduct> {
-    const { name } = payload;
+  async createProduct(payload: createProductDTO): Promise<IProduct> {
     // Check if product exists by name or another unique identifier
-    const existingProduct = await this.Product.findOne({ name });
-    if (existingProduct) throw new AppError('Product already exists', 400);
+    // const existingProduct = await this.Product.findOne({ name });
+    // if (existingProduct) throw new AppError('Product already exists', 400);
 
     const newProduct = await this.Product.create(payload);
     return newProduct;
@@ -35,8 +35,11 @@ export class ProductService extends BaseService implements IProductService {
     return product;
   }
 
-  async getAllProducts(): Promise<IProduct[]> {
-    return this.Product.find();
+  async getAllProducts(): Promise<getAllProductsResponse[]> {
+    return this.Product.find()
+      .select('-createdAt -updatedAt -__v')
+      .populate('owner', 'name rating logo official')
+      .lean();
   }
 
   async updateProduct(id: string, payload: Partial<IProduct>): Promise<IProduct> {

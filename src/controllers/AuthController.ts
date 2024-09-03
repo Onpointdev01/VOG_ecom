@@ -5,7 +5,14 @@ import { Response } from 'express';
 import { BaseController } from './BaseController';
 import TYPES from '../di';
 import { IAuthService } from '../services';
-import { LoginDTO, ResetPasswordDTO, SignUpUserDTO, socialLoginDTO, VerifyEmailDTO } from '../utils/dtos';
+import {
+  LoginDTO,
+  ResetPasswordDTO,
+  SignUpSellerDTO,
+  SignUpUserDTO,
+  socialLoginDTO,
+  VerifyEmailDTO,
+} from '../utils/dtos';
 import logger from '../utils/logger';
 import AppError from '../utils/errors/AppError';
 
@@ -20,6 +27,13 @@ export class AuthController extends BaseController {
   async signUpUser(@response() res: Response, @requestBody() payload: SignUpUserDTO) {
     const newUser = await this.authService.signupUser(payload);
     return this.sendResponse(res, 201, 'created user successfully', newUser);
+  }
+
+  //signup seller
+  @httpPost('/signup-seller')
+  async signUpSeller(@response() res: Response, @requestBody() payload: SignUpSellerDTO) {
+    const newSeller = await this.authService.signupSeller(payload);
+    return this.sendResponse(res, 201, 'created seller successfully', newSeller);
   }
 
   //login

@@ -9,9 +9,9 @@ import { Model } from 'mongoose';
 import { env } from './config';
 import './controllers';
 import errorMiddleWare from './utils/errors/errorHandler';
-import { IProduct, IReview, IUser, Product, Review } from './models';
+import { Category, ICategory, IProduct, IReview, ISeller, IUser, Product, Review, Seller, User } from './models';
 import TYPES from './di';
-import { User, Category } from './models';
+
 import {
   IAuthService,
   AuthService,
@@ -22,7 +22,7 @@ import {
   IReviewService,
   ReviewService,
 } from './services';
-import { ICategory } from './models/Category';
+import { RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
 
 const { NODE_ENV } = env;
 const container = new Container();
@@ -32,6 +32,10 @@ container.bind<Model<IUser>>(TYPES.User).toConstantValue(User);
 container.bind<Model<ICategory>>(TYPES.Category).toConstantValue(Category);
 container.bind<Model<IProduct>>(TYPES.Product).toConstantValue(Product);
 container.bind<Model<IReview>>(TYPES.Review).toConstantValue(Review);
+container.bind<Model<ISeller>>(TYPES.Seller).toConstantValue(Seller);
+
+container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
+container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);
 
 // Bind all services to the container
 container.bind<IAuthService>(TYPES.AuthService).to(AuthService);
