@@ -84,3 +84,9 @@ export interface getAllProductsResponse {
     official: boolean;
   };
 }
+
+export interface getAllProductsQuery {
+  isFlash?: string | boolean;
+  category?: string;
+  search?: string;
+}

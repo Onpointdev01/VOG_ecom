@@ -5,6 +5,7 @@ import { Product, Seller } from '.';
 const { REVIEW, USER, PRODUCT, SELLER } = constants.mongooseModels;
 
 export interface IReview extends Document {
+  _id: Schema.Types.ObjectId;
   user: Schema.Types.ObjectId;
   reviewType: string;
   rating: number;
@@ -46,7 +47,17 @@ const reviewSchema: Schema<IReview> = new Schema<IReview>(
       ref: SELLER, // Reference to the Seller collection
     },
   },
-  { timestamps: true }
+
+  {
+    timestamps: true,
+    toObject: {
+      transform: (doc, ret) => {
+        delete ret.createdAt;
+        delete ret.updatedAt;
+        return ret;
+      },
+    },
+  }
 );
 
 reviewSchema.index({ product: 1, seller: 1, reviewer: 1 });
@@ -73,7 +84,7 @@ async function updateMetrics(review: IReview) {
 
       product.noOfReviews = totalReviews;
       product.rating = averageRating;
-      // product.reviews.push(review._id);
+      product.reviews.push(review._id);
       await product.save();
     }
   } else if (review.reviewType === 'seller' && review.seller) {
@@ -87,6 +98,7 @@ async function updateMetrics(review: IReview) {
 
       seller.rating = totalReviews;
       seller.noOfRating = averageRating;
+      // seller.reviews.push(review._id);
       await seller.save();
     }
   }

@@ -2,7 +2,7 @@ import { Document, Model, model, PopulatedDoc, Schema } from 'mongoose';
 import constants from '../utils/constants';
 import { ISeller } from '.';
 
-const { PRODUCT, SELLER, REVIEW } = constants.mongooseModels;
+const { PRODUCT, SELLER, REVIEW, CATEGORY } = constants.mongooseModels;
 
 export interface IProduct extends Document {
   name: string;
@@ -10,6 +10,7 @@ export interface IProduct extends Document {
   price: number;
   originalPrice: number;
   rating: number;
+  category: Schema.Types.ObjectId;
   reviews: Schema.Types.ObjectId[];
   noOfReviews: number;
   brand: string;
@@ -46,6 +47,11 @@ const productSchema: Schema<IProduct> = new Schema<IProduct>(
       type: Number,
       required: true,
       default: 0.0,
+    },
+    category: {
+      type: Schema.Types.ObjectId,
+      ref: CATEGORY,
+      required: true,
     },
     reviews: {
       type: [Schema.Types.ObjectId],

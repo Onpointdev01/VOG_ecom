@@ -1,5 +1,5 @@
 import { inject, injectable } from 'inversify';
-import { Model } from 'mongoose';
+import { FilterQuery, Model } from 'mongoose';
 import TYPES from '../di';
 import { IProduct } from '../models/Product';
 import AppError from '../utils/errors/AppError';
@@ -10,7 +10,7 @@ import { IReview, IUser } from '../models';
 export interface IProductService {
   createProduct(payload: createProductDTO): Promise<IProduct>;
   getProductById(id: string): Promise<IProduct>;
-  getAllProducts(): Promise<getAllProductsResponse[]>;
+  getAllProducts(filter: FilterQuery<IProduct>, category?: string, search?: string): Promise<getAllProductsResponse[]>;
   updateProduct(id: string, payload: Partial<IProduct>): Promise<IProduct>;
   deleteProduct(id: string): Promise<void>;
   reviewProduct(review: createReviewDTO): Promise<IReview>;
@@ -41,11 +41,109 @@ export class ProductService extends BaseService implements IProductService {
     return product;
   }
 
-  async getAllProducts(): Promise<getAllProductsResponse[]> {
-    return this.Product.find()
-      .select('-createdAt -updatedAt -__v')
-      .populate('owner', 'name rating logo official')
-      .lean();
+  // async getAllProducts(filter: FilterQuery<IProduct>): Promise<getAllProductsResponse[]> {
+  //   return (
+  //     this.Product.find(filter)
+  //       .select('-createdAt -updatedAt -__v')
+  //       .populate('owner', 'name rating logo official')
+  //       // .populate({
+  //       //   path: 'reviews',
+  //       //   select: '-createdAt -updatedAt -__v',
+  //       //   populate: {
+  //       //     path: 'user',
+  //       //     select: 'firstName profilePicture',
+  //       //   },
+  //       // })
+  //       .lean()
+  //   );
+  // }
+  async getAllProducts(
+    filter: FilterQuery<IProduct>,
+    category?: string,
+    search?: string
+  ): Promise<getAllProductsResponse[]> {
+    let categoryMatch = {};
+    if (category) {
+      categoryMatch = { 'categoryData.name': category };
+    }
+    if (search) {
+      const regexp = new RegExp(`.*${search}.*`, 'i');
+      filter.$or = [{ name: { $regex: regexp } }, { description: { $regex: regexp } }];
+      // { 'categoryData.name': { $regex: regexp } } to add category to the search
+    }
+    return this.Product.aggregate([
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category',
+          foreignField: '_id',
+          as: 'categoryData',
+        },
+      },
+      { $unwind: '$categoryData' },
+      {
+        $match: {
+          $and: [filter, categoryMatch],
+        },
+      },
+      {
+        $lookup: {
+          from: 'sellers',
+          localField: 'owner',
+          foreignField: '_id',
+          as: 'ownerData',
+        },
+      },
+      {
+        $addFields: {
+          owner: {
+            $cond: {
+              if: { $eq: [{ $size: '$ownerData' }, 0] },
+              then: null,
+              else: { $arrayElemAt: ['$ownerData', 0] },
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          description: 1,
+          price: 1,
+          originalPrice: 1,
+          rating: 1,
+          noOfReviews: 1,
+          images: 1,
+          isActive: 1,
+          isFlash: 1,
+          category: {
+            _id: '$categoryData._id',
+            name: '$categoryData.name',
+          },
+          owner: {
+            $cond: {
+              if: { $ne: ['$owner', null] },
+              then: {
+                _id: '$owner._id',
+                name: '$owner.name',
+                rating: '$owner.rating',
+                logo: '$owner.logo',
+                official: '$owner.official',
+              },
+              else: null,
+            },
+          },
+          itemDetails: {
+            brand: '$brand',
+            condition: '$condition',
+            sizes: '$sizes',
+            color: '$color',
+            quantityAvailable: '$quantityAvailable',
+          },
+        },
+      },
+    ]).exec();
   }
 
   async updateProduct(id: string, payload: Partial<IProduct>): Promise<IProduct> {
