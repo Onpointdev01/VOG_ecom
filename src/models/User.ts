@@ -3,12 +3,13 @@ import validator from 'validator';
 import constants from '../utils/constants';
 import { ISeller } from './';
 
-const { USER, SELLER } = constants.mongooseModels;
+const { USER, SELLER, PRODUCT } = constants.mongooseModels;
 
 export interface ISocialLogin {
   provider: string;
   providerId: string;
 }
+
 export interface IUser extends Document {
   firstName: string;
   lastName: string;
@@ -30,6 +31,7 @@ export interface IUser extends Document {
   refreshToken?: string;
   socialLogin: ISocialLogin[];
   seller?: PopulatedDoc<ISeller>;
+  wishlist: Schema.Types.ObjectId[]; // Array of product IDs for the wishlist
 }
 
 const socialLoginSchema: Schema = new Schema<ISocialLogin>(
@@ -128,6 +130,12 @@ const userSchema: Schema = new Schema<IUser>(
       type: Schema.Types.ObjectId,
       ref: SELLER,
     },
+    wishlist: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: PRODUCT, // Reference to the Product model
+      },
+    ],
   },
   { timestamps: true }
 );
