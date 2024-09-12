@@ -1,10 +1,9 @@
 import { inject } from 'inversify';
 import {
   controller,
-  httpPost,
   httpGet,
   httpPut,
-  httpDelete,
+  httpPost,
   requestParam,
   requestBody,
   response,
@@ -20,19 +19,6 @@ import { IUser } from '../models/User';
 export class UserController extends BaseController {
   constructor(@inject(TYPES.UserService) private userService: IUserService) {
     super();
-  }
-
-  @httpPost('/create')
-  public async createUser(
-    @requestBody() userData: Partial<IUser>,
-    @response() res: Response
-  ) {
-    try {
-      const newUser = await this.userService.createUser(userData);
-      return this.sendResponse(res, 201, 'User created successfully', newUser);
-    } catch (error) {
-      return this.sendResponse(res, 400, 'Unable to create user');
-    }
   }
 
   @httpGet('/:userId/profile')
@@ -62,19 +48,6 @@ export class UserController extends BaseController {
     }
   }
 
-  @httpGet('/:userId/wishlist')
-  public async getWishlist(
-    @requestParam('userId') userId: string,
-    @response() res: Response
-  ) {
-    try {
-      const wishlist = await this.userService.getWishlist(userId);
-      return this.sendResponse(res, 200, 'Wishlist fetched successfully', wishlist);
-    } catch (error) {
-      return this.sendResponse(res, 404, 'Unable to fetch wishlist');
-    }
-  }
-
   @httpPost('/:userId/wishlist/add')
   public async addToWishlist(
     @requestParam('userId') userId: string,
@@ -89,6 +62,19 @@ export class UserController extends BaseController {
     }
   }
 
+  @httpGet('/:userId/wishlist')
+  public async getWishlist(
+    @requestParam('userId') userId: string,
+    @response() res: Response
+  ) {
+    try {
+      const wishlist = await this.userService.getWishlist(userId);
+      return this.sendResponse(res, 200, 'Wishlist fetched successfully', wishlist);
+    } catch (error) {
+      return this.sendResponse(res, 404, 'Unable to fetch wishlist');
+    }
+  }
+
   @httpPost('/:userId/wishlist/remove')
   public async removeFromWishlist(
     @requestParam('userId') userId: string,
@@ -100,16 +86,6 @@ export class UserController extends BaseController {
       return this.sendResponse(res, 200, 'Item removed from wishlist successfully', updatedUser);
     } catch (error) {
       return this.sendResponse(res, 404, 'Unable to remove item from wishlist');
-    }
-  }
-
-  @httpGet('/')
-  public async getAllUsers(@response() res: Response) {
-    try {
-      const users = await this.userService.getAllUsers();
-      return this.sendResponse(res, 200, 'Users retrieved successfully', users);
-    } catch (error) {
-      return this.sendResponse(res, 500, 'Unable to retrieve users');
     }
   }
 }
