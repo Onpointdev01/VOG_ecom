@@ -12,7 +12,7 @@ export class UserController extends BaseController {
     super();
   }
 
-  @httpPost('/create')
+  @httpPost('/')
   public async createUser(
     @requestBody() userData: Partial<IUser>,
     @response() res: Response
@@ -24,7 +24,7 @@ export class UserController extends BaseController {
       return this.sendResponse(res, 400, 'Unable to create user');
     }
   }
-  
+
   @httpGet('/:userId/profile')
   public async getUserProfile(@requestParam('userId') userId: string, @response() res: Response) {
     try {
