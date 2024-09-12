@@ -21,6 +21,7 @@ export class UserController extends BaseController {
     super();
   }
 
+  // Get user profile
   @httpGet('/:userId/profile')
   public async getUserProfile(
     @requestParam('userId') userId: string,
@@ -34,6 +35,7 @@ export class UserController extends BaseController {
     }
   }
 
+  // Update user profile
   @httpPut('/:userId/profile')
   public async updateUserProfile(
     @requestParam('userId') userId: string,
@@ -48,6 +50,32 @@ export class UserController extends BaseController {
     }
   }
 
+  // Get all users
+  @httpGet('/')
+  public async getAllUsers(@response() res: Response) {
+    try {
+      const users = await this.userService.getAllUsers();
+      return this.sendResponse(res, 200, 'Users retrieved successfully', users);
+    } catch (error) {
+      return this.sendResponse(res, 500, 'Unable to retrieve users');
+    }
+  }
+
+  // Get wishlist
+  @httpGet('/:userId/wishlist')
+  public async getWishlist(
+    @requestParam('userId') userId: string,
+    @response() res: Response
+  ) {
+    try {
+      const wishlist = await this.userService.getWishlist(userId);
+      return this.sendResponse(res, 200, 'Wishlist fetched successfully', wishlist);
+    } catch (error) {
+      return this.sendResponse(res, 404, 'Unable to fetch wishlist');
+    }
+  }
+
+  // Add item to wishlist
   @httpPost('/:userId/wishlist/add')
   public async addToWishlist(
     @requestParam('userId') userId: string,
@@ -62,19 +90,7 @@ export class UserController extends BaseController {
     }
   }
 
-  @httpGet('/:userId/wishlist')
-  public async getWishlist(
-    @requestParam('userId') userId: string,
-    @response() res: Response
-  ) {
-    try {
-      const wishlist = await this.userService.getWishlist(userId);
-      return this.sendResponse(res, 200, 'Wishlist fetched successfully', wishlist);
-    } catch (error) {
-      return this.sendResponse(res, 404, 'Unable to fetch wishlist');
-    }
-  }
-
+  // Remove item from wishlist
   @httpPost('/:userId/wishlist/remove')
   public async removeFromWishlist(
     @requestParam('userId') userId: string,

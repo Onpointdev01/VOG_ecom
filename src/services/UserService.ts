@@ -8,8 +8,9 @@ import { BaseService } from './BaseService';
 export interface IUserService {
   getUserProfile(userId: string): Promise<IUser>;
   updateUserProfile(userId: string, payload: Partial<IUser>): Promise<IUser>;
-  addToWishlist(userId: string, productId: any): Promise<IUser>;
+  getAllUsers(): Promise<IUser[]>;
   getWishlist(userId: string): Promise<IUser['wishlist']>;
+  addToWishlist(userId: string, productId: any): Promise<IUser>;
   removeFromWishlist(userId: string, productId: any): Promise<IUser>;
 }
 
@@ -31,6 +32,21 @@ export class UserService extends BaseService implements IUserService {
     return updatedUser;
   }
 
+  async getAllUsers(): Promise<IUser[]> {
+    try {
+      const users = await this.User.find().exec();
+      return users;
+    } catch (error) {
+      throw new AppError('Unable to fetch users', 500);
+    }
+  }
+
+  async getWishlist(userId: string): Promise<IUser['wishlist']> {
+    const user = await this.User.findById(userId).populate('wishlist');
+    if (!user) throw new AppError('User not found', 404);
+    return user.wishlist;
+  }
+
   async addToWishlist(userId: string, productId: any): Promise<IUser> {
     const user = await this.User.findById(userId);
     if (!user) throw new AppError('User not found', 404);
@@ -41,12 +57,6 @@ export class UserService extends BaseService implements IUserService {
     }
 
     return user;
-  }
-
-  async getWishlist(userId: string): Promise<IUser['wishlist']> {
-    const user = await this.User.findById(userId).populate('wishlist');
-    if (!user) throw new AppError('User not found', 404);
-    return user.wishlist;
   }
 
   async removeFromWishlist(userId: string, productId: any): Promise<IUser> {
