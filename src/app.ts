@@ -21,6 +21,8 @@ import {
   ProductService,
   IReviewService,
   ReviewService,
+  IUserService,
+  UserService,
 } from './services';
 import { RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
 
@@ -42,6 +44,7 @@ container.bind<IAuthService>(TYPES.AuthService).to(AuthService);
 container.bind<ICategoryService>(TYPES.CategoryService).to(CategoryService);
 container.bind<IProductService>(TYPES.ProductService).to(ProductService);
 container.bind<IReviewService>(TYPES.ReviewService).to(ReviewService);
+container.bind<IUserService>(TYPES.UserService).to(UserService);
 
 const server = new InversifyExpressServer(container);
 
