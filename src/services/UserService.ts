@@ -6,14 +6,14 @@ import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
 
 export interface IUserService {
-    getUserProfile(userId: string): Promise<IUser>;
-    updateUserProfile(userId: string, payload: Partial<IUser>): Promise<IUser>;
-    getWishlist(userId: string): Promise<IUser['wishlist']>;
-    addToWishlist(userId: string, productId: any): Promise<IUser>;
-    removeFromWishlist(userId: string, productId: any): Promise<IUser>;
-    createUser(userData: Partial<IUser>): Promise<IUser>; // Add this line
-  }
-  
+  getUserProfile(userId: string): Promise<IUser>;
+  updateUserProfile(userId: string, payload: Partial<IUser>): Promise<IUser>;
+  getWishlist(userId: string): Promise<IUser['wishlist']>;
+  addToWishlist(userId: string, productId: any): Promise<IUser>;
+  removeFromWishlist(userId: string, productId: any): Promise<IUser>;
+  createUser(userData: Partial<IUser>): Promise<IUser>;
+  getAllUsers(): Promise<IUser[]>; // Add this line
+}
 
 @injectable()
 export class UserService extends BaseService implements IUserService {
@@ -71,5 +71,14 @@ export class UserService extends BaseService implements IUserService {
     await user.save();
 
     return user;
+  }
+
+  async getAllUsers(): Promise<IUser[]> {
+    try {
+      const users = await this.User.find().exec();
+      return users;
+    } catch (error) {
+      throw new AppError('Unable to fetch users', 500);
+    }
   }
 }
