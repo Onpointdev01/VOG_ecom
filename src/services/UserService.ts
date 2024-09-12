@@ -6,17 +6,29 @@ import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
 
 export interface IUserService {
-  getUserProfile(userId: string): Promise<IUser>;
-  updateUserProfile(userId: string, payload: Partial<IUser>): Promise<IUser>;
-  getWishlist(userId: string): Promise<IUser['wishlist']>;
-  addToWishlist(userId: string, productId: any): Promise<IUser>;
-  removeFromWishlist(userId: string, productId: any): Promise<IUser>;
-}
+    getUserProfile(userId: string): Promise<IUser>;
+    updateUserProfile(userId: string, payload: Partial<IUser>): Promise<IUser>;
+    getWishlist(userId: string): Promise<IUser['wishlist']>;
+    addToWishlist(userId: string, productId: any): Promise<IUser>;
+    removeFromWishlist(userId: string, productId: any): Promise<IUser>;
+    createUser(userData: Partial<IUser>): Promise<IUser>; // Add this line
+  }
+  
 
 @injectable()
 export class UserService extends BaseService implements IUserService {
   constructor(@inject(TYPES.User) private User: Model<IUser>) {
     super();
+  }
+
+  async createUser(userData: Partial<IUser>): Promise<IUser> {
+    try {
+      const newUser = new this.User(userData);
+      await newUser.save();
+      return newUser;
+    } catch (error) {
+      throw new AppError('Error creating user', 400);
+    }
   }
 
   async getUserProfile(userId: string): Promise<IUser> {

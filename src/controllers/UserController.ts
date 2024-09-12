@@ -12,6 +12,19 @@ export class UserController extends BaseController {
     super();
   }
 
+  @httpPost('/create')
+  public async createUser(
+    @requestBody() userData: Partial<IUser>,
+    @response() res: Response
+  ) {
+    try {
+      const newUser = await this.userService.createUser(userData);
+      return this.sendResponse(res, 201, 'User created successfully', newUser);
+    } catch (error) {
+      return this.sendResponse(res, 400, 'Unable to create user');
+    }
+  }
+  
   @httpGet('/:userId/profile')
   public async getUserProfile(@requestParam('userId') userId: string, @response() res: Response) {
     try {
