@@ -12,7 +12,7 @@ export class UserController extends BaseController {
     super();
   }
 
-  @httpPost('/')
+  @httpPost('/create')
   public async createUser(
     @requestBody() userData: Partial<IUser>,
     @response() res: Response
