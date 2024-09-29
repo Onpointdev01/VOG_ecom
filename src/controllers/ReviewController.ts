@@ -28,7 +28,7 @@ export class ReviewController extends BaseController {
     return this.sendResponse(res, 201, 'Review created successfully', newReview);
   }
 
-  @httpGet('/:id')
+  @httpGet('product/:id')
   async getReviewById(@response() res: Response, @requestParam('id') id: string) {
     const review = await this.reviewService.getReviewById(id);
     return this.sendResponse(res, 200, 'Review retrieved successfully', review);
