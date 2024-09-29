@@ -55,4 +55,12 @@ export class ReviewController extends BaseController {
     await this.reviewService.deleteReview(id);
     return this.sendResponse(res, 204, 'Review deleted successfully');
   }
+
+  @httpGet('/product/:productId')
+  async getReviewsByProduct(@response() res: Response, @requestParam('productId') productId: string) {
+    const reviews = await this.reviewService.getReviewsByProduct(productId);
+    return this.sendResponse(res, 200, 'Reviews retrieved successfully', reviews);
+  }
+
+
 }

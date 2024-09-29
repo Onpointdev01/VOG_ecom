@@ -7,6 +7,7 @@ import { BaseService } from './BaseService';
 
 export interface IReviewService {
   getAllReviews(): Promise<IReview[]>;
+  getReviewsByProduct(productId: string): Promise<IReview[]>;
   getReviewById(id: string): Promise<IReview>;
   createReview(payload: Partial<IReview>): Promise<IReview>;
   updateReview(id: string, payload: Partial<IReview>): Promise<IReview>;
@@ -20,14 +21,15 @@ export class ReviewService extends BaseService implements IReviewService {
   }
 
   async getAllReviews(): Promise<IReview[]> {
-    return this.Review.find();
+    return this.Review.find().populate('user', 'firstName lastName'); // Fetch first and last name
   }
 
   async getReviewById(id: string): Promise<IReview> {
-    const review = await this.Review.findById(id);
+    const review = await this.Review.findById(id).populate('user', 'firstName lastName'); // Fetch first and last name
     if (!review) throw new AppError('Review not found', 404);
     return review;
   }
+  
 
   async createReview(payload: Partial<IReview>): Promise<IReview> {
     // Optional: Add any business logic, e.g., checking if product exists
@@ -44,5 +46,9 @@ export class ReviewService extends BaseService implements IReviewService {
   async deleteReview(id: string): Promise<void> {
     const result = await this.Review.findByIdAndDelete(id);
     if (!result) throw new AppError('Review not found', 404);
+  }
+
+  async getReviewsByProduct(productId: string): Promise<IReview[]> {
+    return this.Review.find({ product: productId }).populate('user', 'firstName lastName'); // Fetch first and last name
   }
 }
