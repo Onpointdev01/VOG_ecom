@@ -1,3 +1,5 @@
+import { Schema } from 'mongoose';
+
 export interface LoginDTO {
   email: string;
   password: string;
@@ -102,4 +104,36 @@ export interface addressDTO {
   postalCode?: string;
   country?: string;
   isDefault?: boolean;
+}
+
+export interface updateCartItemDTO {
+  quantity: number;
+}
+
+export interface addToCartDTO {
+  user: string;
+  productId: string;
+  quantity: number;
+  bidId?: string;
+}
+
+export interface cartItemResponse {
+  // _id: Schema.Types.ObjectId;
+  product: {
+    // _id: Schema.Types.ObjectId;
+    name: string;
+    images: string[];
+    price: number;
+  };
+  quantity: number;
+  price: number;
+  isBidItem: boolean;
+  bid?: Schema.Types.ObjectId;
+}
+
+export interface cartResponse {
+  _id: Schema.Types.ObjectId;
+  user: Schema.Types.ObjectId;
+  items: cartItemResponse[];
+  totalAmount: number;
 }

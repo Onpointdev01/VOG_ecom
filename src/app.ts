@@ -11,17 +11,19 @@ import './controllers';
 import errorMiddleWare from './utils/errors/errorHandler';
 import {
   Address,
-  Category,
   IAddress,
+  Category,
   ICategory,
-  IProduct,
-  IReview,
-  ISeller,
-  IUser,
   Product,
+  IProduct,
   Review,
+  IReview,
   Seller,
+  ISeller,
   User,
+  IUser,
+  Cart,
+  ICart,
 } from './models';
 import TYPES from './di';
 
@@ -51,6 +53,7 @@ container.bind<Model<IProduct>>(TYPES.Product).toConstantValue(Product);
 container.bind<Model<IReview>>(TYPES.Review).toConstantValue(Review);
 container.bind<Model<ISeller>>(TYPES.Seller).toConstantValue(Seller);
 container.bind<Model<IAddress>>(TYPES.Address).toConstantValue(Address);
+container.bind<Model<ICart>>(TYPES.Cart).toConstantValue(Cart);
 
 container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
 container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);

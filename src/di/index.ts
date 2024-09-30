@@ -5,6 +5,7 @@ export const TYPES = {
   Review: Symbol.for('Review'),
   Seller: Symbol.for('Seller'),
   Address: Symbol.for('Address'),
+  Cart: Symbol.for('Cart'),
 
   AuthService: Symbol.for('AuthService'),
   CategoryService: Symbol.for('CategoryService'),

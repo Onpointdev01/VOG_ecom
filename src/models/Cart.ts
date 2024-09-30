@@ -1,6 +1,8 @@
 import { Document, Model, model, Schema } from 'mongoose';
+import constants from '../utils/constants';
 
-import PRODUCT from '../utils/constants';
+const { PRODUCT, USER, CART } = constants.mongooseModels;
+
 interface ICartItem {
   product: Schema.Types.ObjectId;
   quantity: number;
@@ -25,7 +27,7 @@ const cartItemSchema = new Schema<ICartItem>({
 
 const cartSchema: Schema<ICart> = new Schema<ICart>(
   {
-    user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    user: { type: Schema.Types.ObjectId, ref: USER, required: true },
     items: [cartItemSchema],
     totalAmount: { type: Number, default: 0 },
   },
@@ -37,4 +39,4 @@ cartSchema.pre('save', function (next) {
   next();
 });
 
-export const Cart: Model<ICart> = model<ICart>('Cart', cartSchema);
+export const Cart: Model<ICart> = model<ICart>(CART, cartSchema);
