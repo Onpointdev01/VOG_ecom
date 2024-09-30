@@ -5,6 +5,7 @@ const constants = {
     PRODUCT: 'Product',
     CATEGORY: 'Category',
     REVIEW: 'Review',
+    ADDRESS: 'Address',
   },
 };
 export default constants;

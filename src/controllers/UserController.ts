@@ -1,32 +1,25 @@
 import { inject } from 'inversify';
-import {
-  controller,
-  httpGet,
-  httpPut,
-  httpPost,
-  requestParam,
-  requestBody,
-  response,
-} from 'inversify-express-utils';
+import { controller, httpGet, httpPut, httpPost, requestParam, requestBody, response } from 'inversify-express-utils';
 import { Response } from 'express';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
-import { IUserService } from '../services';
+import { IAddressService, IUserService } from '../services';
 import { IUser } from '../models/User';
+import { addressDTO } from '../utils/dtos';
 
 @controller('/api/v1/user')
 export class UserController extends BaseController {
-  constructor(@inject(TYPES.UserService) private userService: IUserService) {
+  constructor(
+    @inject(TYPES.UserService) private userService: IUserService,
+    @inject(TYPES.AddressService) private addressService: IAddressService
+  ) {
     super();
   }
 
   // Get user profile
   @httpGet('/:userId/profile')
-  public async getUserProfile(
-    @requestParam('userId') userId: string,
-    @response() res: Response
-  ) {
+  public async getUserProfile(@requestParam('userId') userId: string, @response() res: Response) {
     try {
       const userProfile = await this.userService.getUserProfile(userId);
       return this.sendResponse(res, 200, 'User profile fetched successfully', userProfile);
@@ -63,10 +56,7 @@ export class UserController extends BaseController {
 
   // Get wishlist
   @httpGet('/:userId/wishlist')
-  public async getWishlist(
-    @requestParam('userId') userId: string,
-    @response() res: Response
-  ) {
+  public async getWishlist(@requestParam('userId') userId: string, @response() res: Response) {
     try {
       const wishlist = await this.userService.getWishlist(userId);
       return this.sendResponse(res, 200, 'Wishlist fetched successfully', wishlist);
@@ -102,6 +92,47 @@ export class UserController extends BaseController {
       return this.sendResponse(res, 200, 'Item removed from wishlist successfully', updatedUser);
     } catch (error) {
       return this.sendResponse(res, 404, 'Unable to remove item from wishlist');
+    }
+  }
+
+  //get users address
+  @httpGet('/address', TYPES.RequireSignIn)
+  public async getUserAddress(@requestParam('id') id: string, @response() res: Response) {
+    const userID = res.locals.user;
+    try {
+      const address = await this.addressService.findAddressesByUser(userID);
+      return this.sendResponse(res, 200, 'Address fetched successfully', address);
+    } catch (error) {
+      return this.sendResponse(res, 404, 'Unable to fetch address');
+    }
+  }
+
+  //add address
+  @httpPost('/address', TYPES.RequireSignIn)
+  public async addAddress(@requestBody() payload: addressDTO, @response() res: Response) {
+    payload.user = res.locals.user;
+    try {
+      const newAddress = await this.addressService.addAddress(payload);
+      return this.sendResponse(res, 201, 'Address added successfully', newAddress);
+    } catch (error) {
+      return this.sendResponse(res, 404, 'Unable to add address');
+    }
+  }
+
+  //update address
+  @httpPut('/address/:id', TYPES.RequireSignIn)
+  public async updateAddress(
+    @requestParam('id') id: string,
+    @requestBody() payload: addressDTO,
+    @response() res: Response
+  ) {
+    payload.user = res.locals.user;
+    try {
+      const updatedAddress = await this.addressService.updateAddress(payload, id);
+      return this.sendResponse(res, 200, 'Address updated successfully', updatedAddress);
+    } catch (error) {
+      console.log(error);
+      return this.sendResponse(res, 404, 'Unable to update address');
     }
   }
 }

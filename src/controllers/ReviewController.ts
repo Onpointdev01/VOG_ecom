@@ -61,6 +61,4 @@ export class ReviewController extends BaseController {
     const reviews = await this.reviewService.getReviewsByProduct(productId);
     return this.sendResponse(res, 200, 'Reviews retrieved successfully', reviews);
   }
-
-
 }

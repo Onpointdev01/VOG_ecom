@@ -1,6 +1,9 @@
 import { Document, Model, model, Schema } from 'mongoose';
+import constants from '../utils/constants';
 
-export interface Address extends Document {
+const { USER, ADDRESS } = constants.mongooseModels;
+export interface IAddress extends Document {
+  user: Schema.Types.ObjectId;
   fullName: string;
   phoneNumber: string;
   homeAddress: string;
@@ -11,8 +14,13 @@ export interface Address extends Document {
   isDefault: boolean;
 }
 
-const AddressSchema: Schema = new Schema<Address>(
+const AddressSchema: Schema = new Schema<IAddress>(
   {
+    user: {
+      type: Schema.Types.ObjectId,
+      ref: USER,
+      required: true,
+    },
     fullName: {
       type: String,
       required: [true, 'Full name is required'],
@@ -47,7 +55,7 @@ const AddressSchema: Schema = new Schema<Address>(
       type: String,
       required: [true, 'Country is required'],
       trim: true,
-      default: 'Nigeria', // Assuming Nigeria is the default
+      default: 'Congo', // Assuming Nigeria is the default
     },
     isDefault: {
       type: Boolean,
@@ -57,4 +65,4 @@ const AddressSchema: Schema = new Schema<Address>(
   { timestamps: true }
 );
 
-export const Address: Model<Address> = model<Address>('Address', AddressSchema);
+export const Address: Model<IAddress> = model<IAddress>(ADDRESS, AddressSchema);

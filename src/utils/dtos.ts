@@ -90,3 +90,16 @@ export interface getAllProductsQuery {
   category?: string;
   search?: string;
 }
+
+export interface addressDTO {
+  id?: string;
+  user?: string;
+  fullName?: string;
+  phoneNumber?: string;
+  homeAddress?: string;
+  state?: string;
+  city?: string;
+  postalCode?: string;
+  country?: string;
+  isDefault?: boolean;
+}

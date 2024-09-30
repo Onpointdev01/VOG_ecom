@@ -9,7 +9,20 @@ import { Model } from 'mongoose';
 import { env } from './config';
 import './controllers';
 import errorMiddleWare from './utils/errors/errorHandler';
-import { Category, ICategory, IProduct, IReview, ISeller, IUser, Product, Review, Seller, User } from './models';
+import {
+  Address,
+  Category,
+  IAddress,
+  ICategory,
+  IProduct,
+  IReview,
+  ISeller,
+  IUser,
+  Product,
+  Review,
+  Seller,
+  User,
+} from './models';
 import TYPES from './di';
 
 import {
@@ -23,6 +36,8 @@ import {
   ReviewService,
   IUserService,
   UserService,
+  IAddressService,
+  AddressService,
 } from './services';
 import { RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
 
@@ -35,6 +50,7 @@ container.bind<Model<ICategory>>(TYPES.Category).toConstantValue(Category);
 container.bind<Model<IProduct>>(TYPES.Product).toConstantValue(Product);
 container.bind<Model<IReview>>(TYPES.Review).toConstantValue(Review);
 container.bind<Model<ISeller>>(TYPES.Seller).toConstantValue(Seller);
+container.bind<Model<IAddress>>(TYPES.Address).toConstantValue(Address);
 
 container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
 container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);
@@ -45,6 +61,7 @@ container.bind<ICategoryService>(TYPES.CategoryService).to(CategoryService);
 container.bind<IProductService>(TYPES.ProductService).to(ProductService);
 container.bind<IReviewService>(TYPES.ReviewService).to(ReviewService);
 container.bind<IUserService>(TYPES.UserService).to(UserService);
+container.bind<IAddressService>(TYPES.AddressService).to(AddressService);
 
 const server = new InversifyExpressServer(container);
 

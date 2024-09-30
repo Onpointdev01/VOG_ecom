@@ -63,9 +63,7 @@ export class UserService extends BaseService implements IUserService {
     const user = await this.User.findById(userId);
     if (!user) throw new AppError('User not found', 404);
 
-    user.wishlist = user.wishlist.filter(
-      (wishlistItem) => wishlistItem.toString() !== productId.toString()
-    );
+    user.wishlist = user.wishlist.filter((wishlistItem) => wishlistItem.toString() !== productId.toString());
     await user.save();
 
     return user;

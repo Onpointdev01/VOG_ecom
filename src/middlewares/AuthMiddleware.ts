@@ -4,7 +4,7 @@ import { ParamsDictionary } from 'express-serve-static-core';
 import { inject, injectable } from 'inversify';
 import { BaseMiddleware } from 'inversify-express-utils';
 import { ParsedQs } from 'qs';
-import jwt from 'jsonwebtoken';
+import jwt, { TokenExpiredError } from 'jsonwebtoken';
 import AppError from '../utils/errors/AppError';
 import TYPES from '../di';
 import { IAuthService } from '../services';
@@ -28,10 +28,13 @@ export class RequireSignIn extends BaseMiddleware {
       }
 
       const token: string = authHeader.replace('Bearer ', '');
-
+      // console.log('token', token);
       //verify JWT
       jwt.verify(token, env.JWT_SECRET, async (err: any, decoded: any) => {
         if (err) {
+          if (err instanceof TokenExpiredError) {
+            return next(new AppError('Token has expired. Please log in again.', 401));
+          }
           return next(new AppError('Invalid token provided', 403));
         }
         // console.log(decoded);
