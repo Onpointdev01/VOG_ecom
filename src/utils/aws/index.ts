@@ -54,7 +54,7 @@ const upload = multer({
     fileSize: 1024 * 1024 * 250, //Maximum of 200Mb file size
   },
   storage: multers3({
-    acl: 'public-read',
+    // acl: 'public-read',
     s3,
     bucket: BUCKET_NAME,
     contentType: multers3.AUTO_CONTENT_TYPE,
