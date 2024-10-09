@@ -97,7 +97,7 @@ export class UserController extends BaseController {
 
   //get users address
   @httpGet('/address', TYPES.RequireSignIn)
-  public async getUserAddress(@requestParam('id') id: string, @response() res: Response) {
+  public async getUserAddress(@response() res: Response) {
     const userID = res.locals.user;
     try {
       const address = await this.addressService.findAddressesByUser(userID);

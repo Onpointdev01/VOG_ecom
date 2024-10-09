@@ -40,6 +40,8 @@ import {
   UserService,
   IAddressService,
   AddressService,
+  ICartService,
+  CartService,
 } from './services';
 import { RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
 
@@ -65,6 +67,7 @@ container.bind<IProductService>(TYPES.ProductService).to(ProductService);
 container.bind<IReviewService>(TYPES.ReviewService).to(ReviewService);
 container.bind<IUserService>(TYPES.UserService).to(UserService);
 container.bind<IAddressService>(TYPES.AddressService).to(AddressService);
+container.bind<ICartService>(TYPES.CartService).to(CartService);
 
 const server = new InversifyExpressServer(container);
 

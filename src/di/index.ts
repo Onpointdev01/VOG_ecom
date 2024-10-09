@@ -13,6 +13,7 @@ export const TYPES = {
   ReviewService: Symbol.for('ReviewServices'),
   UserService: Symbol.for('UserService'),
   AddressService: Symbol.for('AddressService'),
+  CartService: Symbol.for('CartService'),
 
   RequireSignIn: Symbol.for('RequireSignIn'),
   RequireSeller: Symbol.for('RequireSeller'),

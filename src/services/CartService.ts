@@ -4,12 +4,12 @@ import TYPES from '../di';
 import { ICart, IProduct, IUser } from '../models';
 import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
-import { addToCartDTO, updateCartItemDTO } from '../utils/dtos';
+import { AddToCartDTO, CartResponse } from '../utils/dtos';
 
 export interface ICartService {
-  addToCart(payload: addToCartDTO): Promise<ICart>;
-  //   getCartByUserId(userId: string): Promise<cartResponse>;
-  updateCartItem(userId: string, itemId: string, payload: updateCartItemDTO): Promise<ICart>;
+  addToCart(payload: AddToCartDTO): Promise<ICart>;
+  getCartByUserId(userId: string): Promise<CartResponse>;
+  // updateCartItem(userId: string, itemId: string, payload: UpdateCartItemDTO): Promise<ICart>;
   removeCartItem(userId: string, itemId: string): Promise<ICart>;
   clearCart(userId: string): Promise<void>;
 }
@@ -24,104 +24,201 @@ export class CartService extends BaseService implements ICartService {
     super();
   }
 
-  async addToCart(payload: addToCartDTO): Promise<ICart> {
-    const { user, productId, quantity, bidId } = payload;
+  async addToCart(payload: AddToCartDTO): Promise<ICart> {
+    const { user, productId, quantity, size, color } = payload;
+
     await this.verifyUser(user);
     const product = await this.verifyProduct(productId);
 
-    let price = product.price;
-    let isBidItem = false;
-
-    if (bidId) {
-      const bid = await this.verifyBid(bidId);
-      if (bid.status !== 'accepted') throw new AppError('Bid not accepted', 400);
-      price = bid.amount;
-      isBidItem = true;
+    if (!product.sizes.includes(size)) {
+      throw new AppError('Invalid size selected', 400);
     }
 
-    const cart = await this.Cart.findOneAndUpdate(
-      { user: user },
-      {
-        $push: {
-          items: {
-            product: productId,
-            quantity,
-            price,
-            isBidItem,
-            bid: bidId,
-          },
-        },
-      },
-      { new: true, upsert: true }
-    );
+    if (product.color !== color) {
+      throw new AppError('Invalid color selected', 400);
+    }
 
-    return cart;
+    const existingCart = await this.Cart.findOne({ user });
+
+    if (existingCart) {
+      const existingItem = existingCart.items.find(
+        (item) => item.product.toString() === productId && item.size === size && item.color === color
+      );
+
+      if (existingItem) {
+        const newQuantity = existingItem.quantity + quantity;
+
+        if (product.quantityAvailable < newQuantity) {
+          throw new AppError('Requested quantity exceeds available stock', 400);
+        }
+
+        existingItem.quantity = newQuantity; // Update the quantity
+      } else {
+        // Add new item if not already in the cart
+        existingCart.items.push({
+          product: product,
+          quantity,
+          size,
+          color,
+          price: product.price,
+          _id: productId,
+        });
+      }
+
+      // Save the cart to trigger the pre-save hook
+      await existingCart.save();
+
+      return existingCart;
+    }
+
+    // Create a new cart if it doesn't exist
+    const newCart = new this.Cart({
+      user,
+      items: [
+        {
+          product: productId,
+          quantity,
+          size,
+          color,
+          price: product.price,
+        },
+      ],
+    });
+
+    await newCart.save();
+
+    return newCart;
   }
 
-  //   async getCartByUserId(userId: string): Promise<cartResponse> {
-  //     await this.verifyUser(userId);
-  //     const cart = await this.Cart.findOne({ user: userId }).populate('items.product', 'name images price').lean();
+  async getCartByUserId(userId: string): Promise<CartResponse> {
+    await this.verifyUser(userId);
 
-  //     if (!cart) throw new AppError('Cart not found', 404);
+    const cart = await this.Cart.findOne({ user: userId })
+      .populate('items.product', 'name images price sizes color')
+      .lean();
 
-  //     return {
-  //       // _id: cart._id,
-  //       user: cart.user,
-  //       items: cart.items.map((item) => ({
-  //         // _id: item._id,
-  //         product: item.product,
-  //         quantity: item.quantity,
-  //         price: item.price,
-  //         isBidItem: item.isBidItem,
-  //         bid: item.bid,
-  //       })),
-  //       totalAmount: cart.totalAmount,
-  //     };
+    if (!cart) {
+      return {
+        _id: '', // Can be set to null or undefined
+        user: userId,
+        items: [], // Return empty array to indicate no items in the cart
+        totalPrice: 0, // Total price is 0 for an empty cart
+        updatedAt: new Date(), // Current date as a fallback
+      };
+    }
+
+    return {
+      _id: cart._id.toString(),
+      user: cart.user.toString(),
+      items: cart.items.map((item) => ({
+        // _id: item._id.toString(),
+        product: {
+          _id: (item.product as IProduct)._id,
+          name: (item.product as IProduct).name,
+          images: (item.product as IProduct).images,
+          price: (item.product as IProduct).price,
+        },
+        quantity: item.quantity,
+        size: item.size,
+        color: item.color,
+        price: item.price,
+      })),
+      totalPrice: cart.totalPrice,
+      updatedAt: cart.updatedAt,
+    };
+  }
+
+  // async updateCartItem(userId: string, itemId: string, payload: UpdateCartItemDTO): Promise<ICart> {
+  //   const { quantity, size, color } = payload;
+
+  //   // Verify cart exists and contains item
+  //   const cart = await this.Cart.findOne({ user: userId, 'items._id': itemId }).populate(
+  //     'items.product',
+  //     'quantityAvailable sizes color'
+  //   );
+
+  //   if (!cart) {
+  //     throw new AppError('Cart or item not found', 404);
   //   }
 
-  async updateCartItem(userId: string, itemId: string, payload: updateCartItemDTO): Promise<ICart> {
-    const { quantity } = payload;
-    const cart = await this.Cart.findOneAndUpdate(
-      { user: userId, 'items._id': itemId },
-      { $set: { 'items.$.quantity': quantity } },
-      { new: true }
-    );
+  //   const item = cart.items.find((item) => item._id.toString() === itemId);
+  //   if (!item) {
+  //     throw new AppError('Item not found in cart', 404);
+  //   }
 
-    if (!cart) throw new AppError('Cart or item not found', 404);
+  //   const product = item.product as IProduct;
 
-    return cart;
-  }
+  //   const updateFields: Record<string, any> = {};
+
+  //   // Validate and update quantity if provided
+  //   if (quantity !== undefined) {
+  //     if (product.quantityAvailable < quantity) {
+  //       throw new AppError('Requested quantity not available', 400);
+  //     }
+  //     updateFields['items.$.quantity'] = quantity;
+  //   }
+
+  //   // Validate and update size if provided
+  //   if (size !== undefined) {
+  //     if (!product.sizes.includes(size)) {
+  //       throw new AppError('Invalid size selected', 400);
+  //     }
+  //     updateFields['items.$.size'] = size;
+  //   }
+
+  //   // Validate and update color if provided
+  //   if (color !== undefined) {
+  //     if (product.color !== color) {
+  //       throw new AppError('Invalid color selected', 400);
+  //     }
+  //     updateFields['items.$.color'] = color;
+  //   }
+
+  //   // Update cart item
+  //   const updatedCart = await this.Cart.findOneAndUpdate(
+  //     { user: userId, 'items._id': itemId },
+  //     { $set: updateFields },
+  //     { new: true }
+  //   ).populate('items.product', 'name images price sizes color');
+
+  //   return updatedCart;
+  // }
 
   async removeCartItem(userId: string, itemId: string): Promise<ICart> {
     const cart = await this.Cart.findOneAndUpdate(
       { user: userId },
       { $pull: { items: { _id: itemId } } },
       { new: true }
-    );
+    ).populate('items.product', 'name images price sizes color');
 
-    if (!cart) throw new AppError('Cart or item not found', 404);
+    if (!cart) {
+      throw new AppError('Cart or item not found', 404);
+    }
 
     return cart;
   }
 
   async clearCart(userId: string): Promise<void> {
     const result = await this.Cart.findOneAndDelete({ user: userId });
-    if (!result) throw new AppError('Cart not found', 404);
+    if (!result) {
+      throw new AppError('Cart not found', 404);
+    }
   }
 
   // Private methods
-  private async verifyUser(userId: string) {
-    return await this.verifyDoc(userId, this.User);
+  private async verifyUser(userId: string): Promise<IUser> {
+    const user = await this.User.findById(userId);
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+    return user;
   }
 
-  private async verifyProduct(productId: string) {
-    return await this.verifyDoc(productId, this.Product);
-  }
-
-  private async verifyBid(bidId: string) {
-    // Assuming you have a Bid model, you would inject it in the constructor
-    // and use it here. For now, we'll just return a mock bid.
-    console.log('Verifying bid', bidId);
-    return { status: 'accepted', amount: 100 };
+  private async verifyProduct(productId: string): Promise<IProduct> {
+    const product = await this.Product.findById(productId);
+    if (!product) {
+      throw new AppError('Product not found', 404);
+    }
+    return product;
   }
 }
