@@ -7,6 +7,7 @@ const constants = {
     REVIEW: 'Review',
     ADDRESS: 'Address',
     CART: 'Cart',
+    PAYMENT_OPTION: 'PaymentOption',
   },
 };
 export default constants;

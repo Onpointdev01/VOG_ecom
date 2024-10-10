@@ -24,6 +24,8 @@ import {
   IUser,
   Cart,
   ICart,
+  PaymentOption,
+  IPaymentOption,
 } from './models';
 import TYPES from './di';
 
@@ -42,6 +44,8 @@ import {
   AddressService,
   ICartService,
   CartService,
+  IPaymentOptionService,
+  PaymentOptionService,
 } from './services';
 import { RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
 
@@ -56,6 +60,7 @@ container.bind<Model<IReview>>(TYPES.Review).toConstantValue(Review);
 container.bind<Model<ISeller>>(TYPES.Seller).toConstantValue(Seller);
 container.bind<Model<IAddress>>(TYPES.Address).toConstantValue(Address);
 container.bind<Model<ICart>>(TYPES.Cart).toConstantValue(Cart);
+container.bind<Model<IPaymentOption>>(TYPES.PaymentOption).toConstantValue(PaymentOption);
 
 container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
 container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);
@@ -68,6 +73,7 @@ container.bind<IReviewService>(TYPES.ReviewService).to(ReviewService);
 container.bind<IUserService>(TYPES.UserService).to(UserService);
 container.bind<IAddressService>(TYPES.AddressService).to(AddressService);
 container.bind<ICartService>(TYPES.CartService).to(CartService);
+container.bind<IPaymentOptionService>(TYPES.PaymentOptionService).to(PaymentOptionService);
 
 const server = new InversifyExpressServer(container);
 

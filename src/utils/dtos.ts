@@ -139,3 +139,20 @@ export interface CartResponse {
   totalPrice: number;
   updatedAt: Date;
 }
+
+//payment
+export interface CreatePaymentOptionDTO {
+  name: string;
+  code: 'MPESA' | 'ORANGE_MONEY' | 'AIRTEL_MONEY';
+  logoUrl?: string;
+  isEnabled?: boolean;
+  processingFee?: number;
+}
+
+export interface UpdatePaymentOptionDTO {
+  name?: string;
+  code?: 'MPESA' | 'ORANGE_MONEY' | 'AIRTEL_MONEY';
+  logoUrl?: string;
+  isEnabled?: boolean;
+  processingFee?: number;
+}
