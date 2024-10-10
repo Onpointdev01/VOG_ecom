@@ -4,9 +4,11 @@ import TYPES from '../di';
 import { ICart, IProduct, IUser } from '../models';
 import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
-import { AddToCartDTO, CartResponse } from '../utils/dtos';
+import { AddToCartDTO, CartItemUpdateDTO, CartResponse } from '../utils/dtos';
 
 export interface ICartService {
+  decreaseItemQuantity(userID: string, itemId: string): Promise<CartItemUpdateDTO>;
+  increaseItemQuantity(userID: string, itemId: string): Promise<CartItemUpdateDTO>;
   addToCart(payload: AddToCartDTO): Promise<ICart>;
   getCartByUserId(userId: string): Promise<CartResponse>;
   // updateCartItem(userId: string, itemId: string, payload: UpdateCartItemDTO): Promise<ICart>;
@@ -22,6 +24,59 @@ export class CartService extends BaseService implements ICartService {
     @inject(TYPES.Product) private Product: Model<IProduct>
   ) {
     super();
+  }
+  async decreaseItemQuantity(userID: string, itemId: string): Promise<CartItemUpdateDTO> {
+    const cart = await this.Cart.findOne({ user: userID, 'items._id': itemId });
+
+    if (!cart) {
+      throw new AppError('Cart or item not found', 404);
+    }
+
+    const item = cart.items.find((item) => item._id.toString() === itemId);
+    if (!item) {
+      throw new AppError('Item not found in cart', 404);
+    }
+
+    if (item.quantity <= 1) {
+      throw new AppError('Item quantity cannot be less than 1', 400);
+    }
+
+    item.quantity -= 1;
+    await cart.save();
+
+    return {
+      quantity: item.quantity,
+      price: item.price,
+      totalPrice: cart.totalPrice,
+    };
+  }
+
+  async increaseItemQuantity(userID: string, itemId: string): Promise<CartItemUpdateDTO> {
+    console.log('user id: ', userID, 'item id: ', itemId);
+    const cart = await this.Cart.findOne({ user: userID, 'items._id': itemId }).populate('items.product');
+
+    if (!cart) {
+      throw new AppError('Cart or item not found', 404);
+    }
+
+    const item = cart.items.find((item) => item._id.toString() === itemId);
+    if (!item) {
+      throw new AppError('Item not found in cart', 404);
+    }
+
+    const product = item.product as IProduct;
+    if (product.quantityAvailable < item.quantity + 1) {
+      throw new AppError('Requested quantity exceeds available stock', 400);
+    }
+
+    item.quantity += 1;
+    await cart.save();
+
+    return {
+      quantity: item.quantity,
+      price: item.price,
+      totalPrice: cart.totalPrice,
+    };
   }
 
   async addToCart(payload: AddToCartDTO): Promise<ICart> {
@@ -106,12 +161,12 @@ export class CartService extends BaseService implements ICartService {
         updatedAt: new Date(), // Current date as a fallback
       };
     }
-
+    console.log('cart: ', cart);
     return {
       _id: cart._id.toString(),
       user: cart.user.toString(),
       items: cart.items.map((item) => ({
-        // _id: item._id.toString(),
+        _id: item._id,
         product: {
           _id: (item.product as IProduct)._id,
           name: (item.product as IProduct).name,

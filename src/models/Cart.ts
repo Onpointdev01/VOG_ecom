@@ -12,7 +12,6 @@ export interface ICartItem {
   size: string;
   color: string;
   price: number;
-  // discount: number;
 }
 
 export interface ICart extends Document {
@@ -22,29 +21,26 @@ export interface ICart extends Document {
   updatedAt: Date;
 }
 
-const cartItemSchema: Schema<ICartItem> = new Schema(
-  {
-    product: {
-      type: Schema.Types.ObjectId,
-      ref: PRODUCT,
-      required: true,
-    },
-    quantity: {
-      type: Number,
-      required: true,
-      min: 1,
-    },
-    size: {
-      type: String,
-      required: true,
-    },
-    color: {
-      type: String,
-      required: true,
-    },
+const cartItemSchema: Schema<ICartItem> = new Schema({
+  product: {
+    type: Schema.Types.ObjectId,
+    ref: PRODUCT,
+    required: true,
   },
-  { _id: false }
-);
+  quantity: {
+    type: Number,
+    required: true,
+    min: 1,
+  },
+  size: {
+    type: String,
+    required: true,
+  },
+  color: {
+    type: String,
+    required: true,
+  },
+});
 
 const cartSchema: Schema<ICart> = new Schema({
   user: {

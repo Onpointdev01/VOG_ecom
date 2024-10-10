@@ -1,5 +1,5 @@
 import { inject } from 'inversify';
-import { controller, httpGet, httpPost, requestBody, response } from 'inversify-express-utils';
+import { controller, httpGet, httpPatch, httpPost, requestBody, requestParam, response } from 'inversify-express-utils';
 import { Response } from 'express';
 import TYPES from '../di';
 import { ICartService } from '../services';
@@ -29,5 +29,23 @@ export class CartController extends BaseController {
 
     const cart = await this.cartService.addToCart(payload);
     return this.sendResponse(res, 200, 'added to cart', cart);
+  }
+
+  //increase item quantity
+  @httpPatch('/increase/:itemId', TYPES.RequireSignIn)
+  public async increaseItemQuantity(@response() res: Response, @requestParam('itemId') itemId: string) {
+    const userID = res.locals.user;
+
+    const cart = await this.cartService.increaseItemQuantity(userID, itemId);
+    return this.sendResponse(res, 200, 'item quantity increased', cart);
+  }
+
+  //decrease item quantity
+  @httpPatch('/decrease/:itemId', TYPES.RequireSignIn)
+  public async decreaseItemQuantity(@response() res: Response, @requestParam('itemId') itemId: string) {
+    const userID = res.locals.user;
+
+    const cart = await this.cartService.decreaseItemQuantity(userID, itemId);
+    return this.sendResponse(res, 200, 'item quantity decreased', cart);
   }
 }

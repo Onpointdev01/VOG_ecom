@@ -119,7 +119,7 @@ export interface AddToCartDTO {
 }
 
 export interface CartItemResponse {
-  // _id: string;
+  _id: string;
   product: {
     _id: string;
     name: string;
@@ -138,6 +138,13 @@ export interface CartResponse {
   items: CartItemResponse[];
   totalPrice: number;
   updatedAt: Date;
+}
+
+//modify cart response
+export interface CartItemUpdateDTO {
+  quantity: number;
+  price: number;
+  totalPrice?: number; // Optional: if you want to include cart total
 }
 
 //payment
