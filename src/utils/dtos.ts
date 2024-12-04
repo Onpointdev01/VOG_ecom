@@ -163,3 +163,19 @@ export interface UpdatePaymentOptionDTO {
   isEnabled?: boolean;
   processingFee?: number;
 }
+
+//bid
+export interface AddBidDTO {
+  userId: string;
+  productId: string;
+  bidPrice: number;
+}
+
+export interface BidResponseDTO {
+  id: string;
+  user: string;
+  product: string;
+  bidPrice: number;
+  status: string;
+  expiresAt: Date;
+}

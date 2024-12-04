@@ -7,3 +7,5 @@ export * from './User';
 export * from './Address';
 export * from './Cart';
 export * from './PaymentOption';
+export * from './ProductBid';
+export * from './BidMessages';

@@ -7,6 +7,8 @@ export const TYPES = {
   Address: Symbol.for('Address'),
   Cart: Symbol.for('Cart'),
   PaymentOption: Symbol.for('PaymentOption'),
+  Bid: Symbol.for('Bid'),
+  BidMessages: Symbol.for('BidMessages'),
 
   AuthService: Symbol.for('AuthService'),
   CategoryService: Symbol.for('CategoryService'),
@@ -16,6 +18,7 @@ export const TYPES = {
   AddressService: Symbol.for('AddressService'),
   CartService: Symbol.for('CartService'),
   PaymentOptionService: Symbol.for('PaymentOptionService'),
+  ProductBidService: Symbol.for('ProductBidService'),
 
   RequireSignIn: Symbol.for('RequireSignIn'),
   RequireSeller: Symbol.for('RequireSeller'),

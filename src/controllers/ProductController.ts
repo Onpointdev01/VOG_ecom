@@ -17,14 +17,17 @@ import { FilterQuery } from 'mongoose';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
-import { IProductService } from '../services';
+import { IProductBidService, IProductService } from '../services';
 import { IProduct } from '../models';
 import { createProductDTO, createReviewDTO, getAllProductsQuery } from '../utils/dtos';
 import { getAllProductsSchema } from '../validators';
 
 @controller('/api/v1/products')
 export class ProductController extends BaseController {
-  constructor(@inject(TYPES.ProductService) private productService: IProductService) {
+  constructor(
+    @inject(TYPES.ProductService) private productService: IProductService,
+    @inject(TYPES.ProductBidService) private productBidService: IProductBidService
+  ) {
     super();
   }
 
@@ -86,5 +89,16 @@ export class ProductController extends BaseController {
     console.log(payload);
     const newReview = await this.productService.reviewProduct(payload);
     return this.sendResponse(res, 201, 'Review created successfully', newReview);
+  }
+
+  //bid for a product
+  @httpPost('/:id/bid', TYPES.RequireSignIn)
+  async bidForProduct(
+    @response() res: Response,
+    @requestParam('id') id: string,
+    @requestBody() payload: { bidAmount: number }
+  ) {
+    const bid = await this.productBidService.createBid(id, res.locals.user, payload.bidAmount);
+    return this.sendResponse(res, 200, 'Bid placed successfully', bid);
   }
 }

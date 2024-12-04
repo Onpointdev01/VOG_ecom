@@ -1,7 +1,7 @@
 import { Document, Model, model, Schema } from 'mongoose';
 import constants from '../utils/constants';
 
-const { SELLER } = constants.mongooseModels;
+const { SELLER, USER } = constants.mongooseModels;
 
 export interface ISeller extends Document {
   user: Schema.Types.ObjectId; // Reference to the user model
@@ -19,7 +19,7 @@ export interface ISeller extends Document {
 
 const sellerSchema: Schema<ISeller> = new Schema<ISeller>(
   {
-    user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    user: { type: Schema.Types.ObjectId, ref: USER, required: true },
     type: { type: String, enum: ['individual', 'company'], required: true },
     name: { type: String, required: true },
     logo: { type: String, default: '' },

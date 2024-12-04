@@ -1,7 +1,7 @@
 import { inject, injectable } from 'inversify';
 import { Model } from 'mongoose';
 import TYPES from '../di';
-import { ICart, IProduct, IUser } from '../models';
+import { IBid, ICart, IProduct, IUser } from '../models';
 import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
 import { AddToCartDTO, CartItemUpdateDTO, CartResponse } from '../utils/dtos';
@@ -21,7 +21,8 @@ export class CartService extends BaseService implements ICartService {
   constructor(
     @inject(TYPES.Cart) private Cart: Model<ICart>,
     @inject(TYPES.User) private User: Model<IUser>,
-    @inject(TYPES.Product) private Product: Model<IProduct>
+    @inject(TYPES.Product) private Product: Model<IProduct>,
+    @inject(TYPES.Bid) private Bid: Model<IBid>
   ) {
     super();
   }
@@ -93,6 +94,16 @@ export class CartService extends BaseService implements ICartService {
       throw new AppError('Invalid color selected', 400);
     }
 
+    // Check for an accepted bid
+    const acceptedBid = await this.Bid.findOne({
+      product: productId,
+      buyer: user,
+      status: 'ACCEPTED',
+      expiresAt: { $gte: new Date() },
+    });
+
+    const price = acceptedBid ? acceptedBid.bidPrice : product.price;
+
     const existingCart = await this.Cart.findOne({ user });
 
     if (existingCart) {
@@ -115,7 +126,7 @@ export class CartService extends BaseService implements ICartService {
           quantity,
           size,
           color,
-          price: product.price,
+          price: price,
           _id: productId,
         });
       }
@@ -135,7 +146,7 @@ export class CartService extends BaseService implements ICartService {
           quantity,
           size,
           color,
-          price: product.price,
+          price: price,
         },
       ],
     });

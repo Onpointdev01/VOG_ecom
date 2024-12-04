@@ -8,6 +8,8 @@ const constants = {
     ADDRESS: 'Address',
     CART: 'Cart',
     PAYMENT_OPTION: 'PaymentOption',
+    BID: 'Bid',
+    BIDMESSAGES: 'BidMessages',
   },
 };
 export default constants;
