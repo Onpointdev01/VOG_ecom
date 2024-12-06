@@ -7,7 +7,7 @@ import { TYPES } from '../di';
 import { IUser } from '../models';
 import { EmailCheckResult, SignUpSellerDTO, SignUpUserDTO } from '../utils/dtos';
 import AppError from '../utils/errors/AppError';
-import { generateAccessToken, generateCode } from '../utils/helpers';
+import { generateAccessToken, generateCode, generateRefreshToken } from '../utils/helpers';
 import { sendEmail, renderTemplate } from '../utils/helpers/sendMail';
 import validator from 'validator';
 import { OAuth2Client } from 'google-auth-library';
@@ -17,8 +17,11 @@ import { ISeller } from '../models/Seller';
 export interface IAuthService {
   signupUser(payload: SignUpUserDTO): Promise<Partial<IUser>>;
   signupSeller(payload: SignUpSellerDTO): Promise<Partial<ISeller>>;
-  login(email: string, password: string): Promise<{ user: Partial<IUser>; token: string }>;
-  socialLogin(idToken: string, provider: string): Promise<{ user: Partial<IUser>; token: string }>;
+  login(email: string, password: string): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
+  socialLogin(
+    idToken: string,
+    provider: string
+  ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
   forgotPassword(email: string): Promise<void>;
   resetPassword(email: string, code: string, password: string): Promise<void>;
   verifyEmail(code: string, email: string): Promise<string>;
@@ -99,7 +102,10 @@ export class AuthService extends BaseService implements IAuthService {
     return { _id: newSeller._id, name, type, logo, official };
   }
 
-  login = async (email: string, password: string): Promise<{ user: Partial<IUser>; token: string }> => {
+  login = async (
+    email: string,
+    password: string
+  ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }> => {
     const user: IUser | null = await this.User.findOne({ email }, '+password');
     if (!user) {
       throw new AppError('Invalid email or password', 400);
@@ -111,6 +117,7 @@ export class AuthService extends BaseService implements IAuthService {
     }
 
     const token = generateAccessToken(user._id as string);
+    const refreshToken = generateRefreshToken(user._id as string);
 
     const trimedUser: Partial<IUser> = {
       _id: user._id,
@@ -123,10 +130,13 @@ export class AuthService extends BaseService implements IAuthService {
       banned: user.banned,
       verified: user.verified,
     };
-    return { user: trimedUser, token: token };
+    return { user: trimedUser, token: token, refreshToken: refreshToken };
   };
 
-  async socialLogin(idToken: string, provider: string): Promise<{ user: Partial<IUser>; token: string }> {
+  async socialLogin(
+    idToken: string,
+    provider: string
+  ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }> {
     let payload: any;
 
     if (provider === 'google') {
@@ -198,7 +208,11 @@ export class AuthService extends BaseService implements IAuthService {
           banned: userWithEmail.banned,
           verified: userWithEmail.verified,
         };
-        return { user: trimedUser, token: generateAccessToken(userWithEmail._id as string) };
+        return {
+          user: trimedUser,
+          token: generateAccessToken(userWithEmail._id as string),
+          refreshToken: generateRefreshToken(userWithEmail._id as string),
+        };
       } else {
         // Register new user if not found
         user = new this.User({
@@ -213,6 +227,7 @@ export class AuthService extends BaseService implements IAuthService {
     }
 
     const token = await generateAccessToken(user._id as string);
+    const refreshToken = await generateRefreshToken(user._id as string);
     const trimedUser: Partial<IUser> = {
       _id: user._id,
       email: user.email,
@@ -224,7 +239,7 @@ export class AuthService extends BaseService implements IAuthService {
       banned: user.banned,
       verified: user.verified,
     };
-    return { user: trimedUser, token: token };
+    return { user: trimedUser, token: token, refreshToken: refreshToken };
   }
   async forgotPassword(email: string): Promise<void> {
     const user = await this.User.findOne({ email });
