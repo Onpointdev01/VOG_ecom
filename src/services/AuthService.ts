@@ -7,7 +7,7 @@ import { TYPES } from '../di';
 import { IUser } from '../models';
 import { EmailCheckResult, SignUpSellerDTO, SignUpUserDTO } from '../utils/dtos';
 import AppError from '../utils/errors/AppError';
-import { generateAccessToken, generateCode, generateRefreshToken } from '../utils/helpers';
+import { generateAccessToken, generateCode, generateRefreshToken, decodeToken } from '../utils/helpers';
 import { sendEmail, renderTemplate } from '../utils/helpers/sendMail';
 import validator from 'validator';
 import { OAuth2Client } from 'google-auth-library';
@@ -28,6 +28,7 @@ export interface IAuthService {
   resendVerification(email: string): Promise<void>;
   checkEmail(email: string): Promise<EmailCheckResult>;
   checkBannedOrDeleted(userId: string): Promise<Partial<IUser>>;
+  refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string }>;
 }
 
 @injectable()
@@ -118,6 +119,8 @@ export class AuthService extends BaseService implements IAuthService {
 
     const token = generateAccessToken(user._id as string);
     const refreshToken = generateRefreshToken(user._id as string);
+
+    await this.User.findByIdAndUpdate(user._id, { refreshToken: refreshToken });
 
     const trimedUser: Partial<IUser> = {
       _id: user._id,
@@ -328,5 +331,30 @@ export class AuthService extends BaseService implements IAuthService {
       subject: 'Email Verification',
       html: renderTemplate('src/utils/templates/password-reset.html', { usersName, code }),
     });
+  }
+
+  async refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string }> {
+    try {
+      const decoded = await decodeToken(refreshToken, true);
+      const userId = decoded.id;
+
+      const user = await this.User.findById(userId);
+      if (!user) {
+        throw new AppError('User not found', 404);
+      }
+
+      if (user.refreshToken !== refreshToken) {
+        throw new AppError('Invalid refresh token', 401);
+      }
+
+      const newAccessToken = generateAccessToken(user._id as string);
+      const newRefreshToken = generateRefreshToken(user._id as string);
+
+      await this.User.findByIdAndUpdate(userId, { refreshToken: newRefreshToken });
+
+      return { token: newAccessToken, refreshToken: newRefreshToken };
+    } catch (error) {
+      throw new AppError('Invalid refresh token', 401);
+    }
   }
 }

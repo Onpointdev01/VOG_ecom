@@ -108,4 +108,14 @@ export class AuthController extends BaseController {
 
     return this.sendResponse(res, 200, result.message, result);
   }
+
+  //refresh token
+  @httpPost('/refresh-token')
+  async refreshToken(@response() res: Response, @requestBody() payload: { refreshToken: string }) {
+    const { refreshToken } = payload;
+    if (!refreshToken) throw new AppError('Refresh token is required', 400);
+
+    const result = await this.authService.refreshToken(refreshToken);
+    return this.sendResponse(res, 200, 'Token refreshed successfully', result);
+  }
 }
