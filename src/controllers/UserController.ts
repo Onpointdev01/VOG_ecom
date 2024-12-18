@@ -1,5 +1,14 @@
 import { inject } from 'inversify';
-import { controller, httpGet, httpPut, httpPost, requestParam, requestBody, response } from 'inversify-express-utils';
+import {
+  controller,
+  httpGet,
+  httpPut,
+  httpPost,
+  requestParam,
+  requestBody,
+  response,
+  httpDelete,
+} from 'inversify-express-utils';
 import { Response } from 'express';
 
 import { BaseController } from './BaseController';
@@ -54,11 +63,11 @@ export class UserController extends BaseController {
     }
   }
 
-  // Get wishlist
-  @httpGet('/:userId/wishlist')
-  public async getWishlist(@requestParam('userId') userId: string, @response() res: Response) {
+  // Get users wishlist
+  @httpGet('/wishlist', TYPES.RequireSignIn)
+  public async getWishlist(@response() res: Response) {
     try {
-      const wishlist = await this.userService.getWishlist(userId);
+      const wishlist = await this.userService.getWishlist(res.locals.user);
       return this.sendResponse(res, 200, 'Wishlist fetched successfully', wishlist);
     } catch (error) {
       return this.sendResponse(res, 404, 'Unable to fetch wishlist');
@@ -66,14 +75,10 @@ export class UserController extends BaseController {
   }
 
   // Add item to wishlist
-  @httpPost('/:userId/wishlist/add')
-  public async addToWishlist(
-    @requestParam('userId') userId: string,
-    @requestBody() { productId }: { productId: any },
-    @response() res: Response
-  ) {
+  @httpPost('/wishlist', TYPES.RequireSignIn)
+  public async addToWishlist(@requestBody() { productId }: { productId: string }, @response() res: Response) {
     try {
-      const updatedUser = await this.userService.addToWishlist(userId, productId);
+      const updatedUser = await this.userService.addToWishlist(res.locals.user, productId);
       return this.sendResponse(res, 200, 'Item added to wishlist successfully', updatedUser);
     } catch (error) {
       return this.sendResponse(res, 404, 'Unable to add item to wishlist');
@@ -81,14 +86,10 @@ export class UserController extends BaseController {
   }
 
   // Remove item from wishlist
-  @httpPost('/:userId/wishlist/remove')
-  public async removeFromWishlist(
-    @requestParam('userId') userId: string,
-    @requestBody() { productId }: { productId: any },
-    @response() res: Response
-  ) {
+  @httpDelete('/wishlist/:productId', TYPES.RequireSignIn)
+  public async removeFromWishlist(@requestParam('productId') productId: string, @response() res: Response) {
     try {
-      const updatedUser = await this.userService.removeFromWishlist(userId, productId);
+      const updatedUser = await this.userService.removeFromWishlist(res.locals.user, productId);
       return this.sendResponse(res, 200, 'Item removed from wishlist successfully', updatedUser);
     } catch (error) {
       return this.sendResponse(res, 404, 'Unable to remove item from wishlist');
