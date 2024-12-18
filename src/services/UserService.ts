@@ -5,6 +5,8 @@ import { IUser } from '../models/User';
 import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
 import { IProduct } from '../models';
+import { pickBy } from 'lodash';
+import { nonUpdatableFields } from '../utils/helpers';
 
 export interface IUserService {
   getUserProfile(userId: string): Promise<IUser>;
@@ -28,7 +30,9 @@ export class UserService extends BaseService implements IUserService {
   }
 
   async updateUserProfile(userId: string, payload: Partial<IUser>): Promise<IUser> {
-    const updatedUser = await this.User.findByIdAndUpdate(userId, payload, { new: true });
+    // Remove undefined fields from the payload
+    const filteredPayload = pickBy(payload, (value, key) => !nonUpdatableFields.includes(key));
+    const updatedUser = await this.User.findByIdAndUpdate(userId, filteredPayload, { new: true });
     if (!updatedUser) throw new AppError('User not found', 404);
     return updatedUser;
   }

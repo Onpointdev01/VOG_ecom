@@ -32,6 +32,8 @@ export interface IUser extends Document {
   socialLogin: ISocialLogin[];
   seller?: PopulatedDoc<ISeller>;
   wishlist: Schema.Types.ObjectId[]; // Array of product IDs for the wishlist
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const socialLoginSchema: Schema = new Schema<ISocialLogin>(

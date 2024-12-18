@@ -8,6 +8,7 @@ import {
   requestBody,
   response,
   httpDelete,
+  httpPatch,
 } from 'inversify-express-utils';
 import { Response } from 'express';
 
@@ -16,6 +17,7 @@ import TYPES from '../di';
 import { IAddressService, IUserService } from '../services';
 import { IUser } from '../models/User';
 import { addressDTO } from '../utils/dtos';
+import { mapUserProfile } from '../utils/helpers';
 
 @controller('/api/v1/user')
 export class UserController extends BaseController {
@@ -27,26 +29,24 @@ export class UserController extends BaseController {
   }
 
   // Get user profile
-  @httpGet('/:userId/profile')
-  public async getUserProfile(@requestParam('userId') userId: string, @response() res: Response) {
+  @httpGet('/profile', TYPES.RequireSignIn)
+  public async getUserProfile(@response() res: Response) {
     try {
-      const userProfile = await this.userService.getUserProfile(userId);
-      return this.sendResponse(res, 200, 'User profile fetched successfully', userProfile);
+      const userProfile = await this.userService.getUserProfile(res.locals.user);
+      const filteredProfile = mapUserProfile(userProfile);
+      return this.sendResponse(res, 200, 'User profile fetched successfully', filteredProfile);
     } catch (error) {
       return this.sendResponse(res, 404, 'Unable to fetch user profile');
     }
   }
 
   // Update user profile
-  @httpPut('/:userId/profile')
-  public async updateUserProfile(
-    @requestParam('userId') userId: string,
-    @requestBody() payload: Partial<IUser>,
-    @response() res: Response
-  ) {
+  @httpPatch('/profile', TYPES.RequireSignIn)
+  public async updateUserProfile(@requestBody() payload: Partial<IUser>, @response() res: Response) {
     try {
-      const updatedProfile = await this.userService.updateUserProfile(userId, payload);
-      return this.sendResponse(res, 200, 'User profile updated successfully', updatedProfile);
+      const updatedProfile = await this.userService.updateUserProfile(res.locals.user, payload);
+      const filteredProfile = mapUserProfile(updatedProfile);
+      return this.sendResponse(res, 200, 'User profile updated successfully', filteredProfile);
     } catch (error) {
       return this.sendResponse(res, 404, 'Unable to update user profile');
     }
