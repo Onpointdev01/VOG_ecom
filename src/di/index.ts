@@ -22,5 +22,6 @@ export const TYPES = {
 
   RequireSignIn: Symbol.for('RequireSignIn'),
   RequireSeller: Symbol.for('RequireSeller'),
+  OptionalAuth: Symbol.for('OptionalAuth'),
 };
 export default TYPES;

@@ -80,3 +80,54 @@ export class RequireSeller extends BaseMiddleware {
     }
   }
 }
+
+@injectable()
+export class OptionalAuth extends BaseMiddleware {
+  constructor(@inject(TYPES.AuthService) private authService: IAuthService) {
+    super();
+  }
+
+  async handler(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const authHeader: string = req.headers['authorization'] || '';
+
+      // If the authorization header is present, decode the token
+      if (authHeader) {
+        const token: string = authHeader.replace('Bearer ', '');
+
+        // Verify JWT token
+        jwt.verify(token, env.JWT_SECRET, async (err: any, decoded: any) => {
+          if (err) {
+            if (err instanceof TokenExpiredError) {
+              return next(new AppError('Token has expired. Please log in again.', 401));
+            }
+            return next(new AppError('Invalid token provided', 403));
+          }
+
+          const userId = decoded.id.toString();
+
+          if (!userId) return next(new AppError('Invalid token provided', 403));
+
+          // Retrieve user details and attach to request object
+          const user = await this.authService.checkBannedOrDeleted(userId);
+
+          if (!user) {
+            return next(new AppError('User not found or is banned', 403));
+          }
+
+          req.user = user as IUser; // Attach user to req object for later use in controller
+          res.locals.user = user as IUser; // Store user ID in res.locals to make it available in controllers
+          return next(); // Make sure to call next() only after everything is set
+        });
+
+        // If token is verified correctly, return and do not continue further
+        return;
+      }
+
+      // If no token provided, simply move to the next middleware
+      return next();
+    } catch (err) {
+      return next(err);
+    }
+  }
+}

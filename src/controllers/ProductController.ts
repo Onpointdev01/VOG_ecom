@@ -44,7 +44,7 @@ export class ProductController extends BaseController {
     return this.sendResponse(res, 200, 'Product retrieved successfully', product);
   }
 
-  @httpGet('/', joiMiddleware(getAllProductsSchema, 'query'))
+  @httpGet('/', joiMiddleware(getAllProductsSchema, 'query'), TYPES.OptionalAuth)
   async getAllProducts(@request() req: Request, @response() res: Response, @queryParam() query: getAllProductsQuery) {
     const { isFlash, category, search } = query;
     const filter: FilterQuery<IProduct> = {};
@@ -55,7 +55,7 @@ export class ProductController extends BaseController {
     //   filter.category = category;
     // }
 
-    const products = await this.productService.getAllProducts(filter, category, search);
+    const products = await this.productService.getAllProducts(filter, category, search, res.locals.user);
     return this.sendResponse(res, 200, 'Products retrieved successfully', products);
   }
 

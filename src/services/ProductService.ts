@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { inject, injectable } from 'inversify';
 import { FilterQuery, Model } from 'mongoose';
 import TYPES from '../di';
@@ -10,7 +11,12 @@ import { IReview, IUser } from '../models';
 export interface IProductService {
   createProduct(payload: createProductDTO): Promise<IProduct>;
   getProductById(id: string): Promise<IProduct>;
-  getAllProducts(filter: FilterQuery<IProduct>, category?: string, search?: string): Promise<getAllProductsResponse[]>;
+  getAllProducts(
+    filter: FilterQuery<IProduct>,
+    category?: string,
+    search?: string,
+    user?: IUser
+  ): Promise<getAllProductsResponse[]>;
   updateProduct(id: string, payload: Partial<IProduct>): Promise<IProduct>;
   deleteProduct(id: string): Promise<void>;
   reviewProduct(review: createReviewDTO): Promise<IReview>;
@@ -60,7 +66,8 @@ export class ProductService extends BaseService implements IProductService {
   async getAllProducts(
     filter: FilterQuery<IProduct>,
     category?: string,
-    search?: string
+    search?: string,
+    user?: IUser
   ): Promise<getAllProductsResponse[]> {
     let categoryMatch = {};
     if (category) {
@@ -71,7 +78,7 @@ export class ProductService extends BaseService implements IProductService {
       filter.$or = [{ name: { $regex: regexp } }, { description: { $regex: regexp } }];
       // { 'categoryData.name': { $regex: regexp } } to add category to the search
     }
-    return this.Product.aggregate([
+    const aggregationPipeline: any[] = [
       {
         $lookup: {
           from: 'categories',
@@ -143,7 +150,28 @@ export class ProductService extends BaseService implements IProductService {
           },
         },
       },
-    ]).exec();
+    ];
+    // If the user is authenticated, check their wishlist
+    if (user) {
+      aggregationPipeline.push({
+        $addFields: {
+          isWishlist: {
+            $cond: {
+              if: {
+                $in: [
+                  '$_id', // The product's _id
+                  user.wishlist, // The user's wishlist array
+                ],
+              },
+              then: true,
+              else: false,
+            },
+          },
+        },
+      });
+    }
+
+    return this.Product.aggregate(aggregationPipeline).exec();
   }
 
   async updateProduct(id: string, payload: Partial<IProduct>): Promise<IProduct> {

@@ -51,7 +51,7 @@ import {
   IProductBidService,
   ProductBidService,
 } from './services';
-import { RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
+import { OptionalAuth, RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
 
 const { NODE_ENV } = env;
 const container = new Container();
@@ -69,6 +69,7 @@ container.bind<Model<IBid>>(TYPES.Bid).toConstantValue(Bid);
 
 container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
 container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);
+container.bind<OptionalAuth>(TYPES.OptionalAuth).to(OptionalAuth);
 
 // Bind all services to the container
 container.bind<IAuthService>(TYPES.AuthService).to(AuthService);
