@@ -39,4 +39,14 @@ const categorySchema: Schema = new Schema<ICategory>(
   { timestamps: true }
 );
 
+// Transform _id to id for API responses
+categorySchema.set('toJSON', {
+  transform: (doc, ret) => {
+    ret.id = ret._id.toString();
+    delete ret._id;
+    delete ret.__v;
+    return ret;
+  }
+});
+
 export const Category: Model<ICategory> = model<ICategory>(CATEGORY, categorySchema);

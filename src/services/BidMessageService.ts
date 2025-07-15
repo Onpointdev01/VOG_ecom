@@ -6,7 +6,11 @@ import { Model } from 'mongoose';
 import { BaseService } from './BaseService';
 
 export interface IBidMessageService {
-  createBidProposalMessage(payloadId: string, buyer: string): Promise<IBidMessages>;
+  createBidProposalMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
+  createBidAcceptedMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
+  createBidRejectedMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
+  getBidMessages(userId: string, productId?: string): Promise<IBidMessages[]>;
+  markMessageAsRead(messageId: string, userId: string): Promise<IBidMessages>;
 }
 
 @injectable()
@@ -17,23 +21,94 @@ export class BidMessageService extends BaseService implements IBidMessageService
   ) {
     super();
   }
-  async createBidProposalMessage(payloadId: string, buyer: string): Promise<IBidMessages> {
-    console.log('payloadId: ', payloadId, 'buyer: ', buyer);
-    const newBidMessage = new this.BidMessage();
+
+  async createBidProposalMessage(
+    senderId: string, 
+    recipientId: string, 
+    productId: string, 
+    bidId: string, 
+    message: string
+  ): Promise<IBidMessages> {
+    const newBidMessage = await this.BidMessage.create({
+      sender: senderId,
+      recipient: recipientId,
+      product: productId,
+      bid: bidId,
+      type: 'BID_PROPOSAL',
+      message: message
+    });
+
     return newBidMessage;
   }
-  //   async createBidProposalMessage(payloadId: string, buyer: string, ): Promise<IBidMessage> {
-  //     // Check if bid exists
-  //     const existingBid = await this.BidMessage.findById(bid);
-  //     if (!existingBid) {
-  //       throw new AppError('Bid not found', 404);
-  //     }
-  //     // Check if sender exists
-  //     const existingSender = await this.User.findById(sender);
-  //     if (!existingSender) {
-  //       throw new AppError('Sender not found', 404);
-  //     }
-  //     const newBidMessage = new this.BidMessage(payload);
-  //     await newBidMessage.save();
-  //     return newBidMessage;
+
+  async createBidAcceptedMessage(
+    senderId: string, 
+    recipientId: string, 
+    productId: string, 
+    bidId: string, 
+    message: string
+  ): Promise<IBidMessages> {
+    const newBidMessage = await this.BidMessage.create({
+      sender: senderId,
+      recipient: recipientId,
+      product: productId,
+      bid: bidId,
+      type: 'BID_ACCEPTED',
+      message: message
+    });
+
+    return newBidMessage;
+  }
+
+  async createBidRejectedMessage(
+    senderId: string, 
+    recipientId: string, 
+    productId: string, 
+    bidId: string, 
+    message: string
+  ): Promise<IBidMessages> {
+    const newBidMessage = await this.BidMessage.create({
+      sender: senderId,
+      recipient: recipientId,
+      product: productId,
+      bid: bidId,
+      type: 'BID_REJECTED',
+      message: message
+    });
+
+    return newBidMessage;
+  }
+
+  async getBidMessages(userId: string, productId?: string): Promise<IBidMessages[]> {
+    const filter: any = {
+      $or: [
+        { sender: userId },
+        { recipient: userId }
+      ]
+    };
+
+    if (productId) {
+      filter.product = productId;
+    }
+
+    return await this.BidMessage.find(filter)
+      .populate('sender', 'firstName lastName email')
+      .populate('recipient', 'firstName lastName email')
+      .populate('product', 'name images price')
+      .populate('bid')
+      .sort({ createdAt: -1 });
+  }
+
+  async markMessageAsRead(messageId: string, userId: string): Promise<IBidMessages> {
+    const message = await this.BidMessage.findOne({
+      _id: messageId,
+      recipient: userId
+    });
+
+    if (!message) {
+      throw new Error('Message not found or you are not the recipient');
+    }
+
+    return message;
+  }
 }

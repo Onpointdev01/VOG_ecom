@@ -14,6 +14,8 @@ export interface IBid extends Document {
   expiresAt?: Date;
   cooldownUntil?: Date;
   isWithinPriceRange: boolean;
+  convertedToCart?: boolean;
+  convertedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -64,6 +66,14 @@ const bidSchema: Schema<IBid> = new Schema<IBid>(
     isWithinPriceRange: {
       type: Boolean,
       default: false,
+    },
+    convertedToCart: {
+      type: Boolean,
+      default: false,
+    },
+    convertedAt: {
+      type: Date,
+      default: null,
     },
   },
   {
@@ -121,5 +131,15 @@ bidSchema.methods.isAllowedToBid = async function () {
 
   return !existingBid;
 };
+
+// Transform _id to id for API responses
+bidSchema.set('toJSON', {
+  transform: (doc, ret) => {
+    ret.id = ret._id.toString();
+    delete ret._id;
+    delete ret.__v;
+    return ret;
+  }
+});
 
 export const Bid: Model<IBid> = model<IBid>(BID, bidSchema);

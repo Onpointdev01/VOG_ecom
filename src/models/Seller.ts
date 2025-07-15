@@ -34,5 +34,15 @@ const sellerSchema: Schema<ISeller> = new Schema<ISeller>(
   }
 );
 
+// Transform _id to id for API responses
+sellerSchema.set('toJSON', {
+  transform: (doc, ret) => {
+    ret.id = ret._id.toString();
+    delete ret._id;
+    delete ret.__v;
+    return ret;
+  }
+});
+
 // Creating the Seller model
 export const Seller: Model<ISeller> = model<ISeller>(SELLER, sellerSchema);

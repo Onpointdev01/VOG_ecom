@@ -15,6 +15,10 @@ export interface IProductBidService {
   rejectBid(bidId: string, sellerId: string): Promise<IBid>;
   checkBidExpiration(bidId: string): Promise<IBid | null>;
   getBidsForProduct(productId: string): Promise<IBid[]>;
+  getBidById(bidId: string): Promise<IBid | null>;
+  getUserBids(userId: string, status?: string, page?: number, limit?: number): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }>;
+  getSellerBids(sellerId: string, status?: string, page?: number, limit?: number): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }>;
+  markBidAsConverted(bidId: string): Promise<IBid>;
 }
 @injectable()
 export class ProductBidService implements IProductBidService {
@@ -35,7 +39,14 @@ export class ProductBidService implements IProductBidService {
       return { isValid: false, message: 'Product not found' };
     }
 
-    // Check price range
+    // Check price range - only for products with defined price
+    if (!product.price) {
+      return {
+        isValid: false,
+        message: 'Cannot bid on products without a defined price (variable products)',
+      };
+    }
+    
     const lowerBound = product.price * 0.75;
     const upperBound = product.price * 1.25;
 
@@ -164,7 +175,92 @@ export class ProductBidService implements IProductBidService {
       product: productId,
       status: { $in: ['PENDING', 'ACCEPTED'] },
     })
-      .populate('buyer', 'name email')
+      .populate('buyer', 'firstName lastName email')
       .sort({ createdAt: -1 });
+  }
+
+  /**
+   * Get a specific bid by ID
+   */
+  async getBidById(bidId: string): Promise<IBid | null> {
+    return await this.Bid.findById(bidId)
+      .populate('buyer', 'firstName lastName email')
+      .populate('seller', 'name')
+      .populate('product', 'name images price');
+  }
+
+  /**
+   * Get bids for a specific user (buyer)
+   */
+  async getUserBids(
+    userId: string, 
+    status?: string, 
+    page: number = 1, 
+    limit: number = 10
+  ): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
+    const filter: any = { buyer: userId };
+    
+    if (status) {
+      filter.status = status.toUpperCase();
+    }
+
+    const skip = (page - 1) * limit;
+    const total = await this.Bid.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    const bids = await this.Bid.find(filter)
+      .populate('product', 'name images price')
+      .populate('seller', 'name')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return { bids, total, page, totalPages };
+  }
+
+  /**
+   * Get bids for a specific seller
+   */
+  async getSellerBids(
+    sellerId: string, 
+    status?: string, 
+    page: number = 1, 
+    limit: number = 10
+  ): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
+    const filter: any = { seller: sellerId };
+    
+    if (status) {
+      filter.status = status.toUpperCase();
+    }
+
+    const skip = (page - 1) * limit;
+    const total = await this.Bid.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    const bids = await this.Bid.find(filter)
+      .populate('buyer', 'firstName lastName email')
+      .populate('product', 'name images price')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return { bids, total, page, totalPages };
+  }
+
+  /**
+   * Mark bid as converted to cart
+   */
+  async markBidAsConverted(bidId: string): Promise<IBid> {
+    const bid = await this.Bid.findById(bidId);
+    
+    if (!bid) {
+      throw new AppError('Bid not found', 404);
+    }
+
+    // Add a converted flag to track this
+    (bid as any).convertedToCart = true;
+    (bid as any).convertedAt = new Date();
+    
+    return await bid.save();
   }
 }

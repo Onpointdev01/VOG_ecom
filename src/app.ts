@@ -16,6 +16,8 @@ import {
   ICategory,
   Product,
   IProduct,
+  ProductVariant,
+  IProductVariant,
   Review,
   IReview,
   Seller,
@@ -28,6 +30,8 @@ import {
   IPaymentOption,
   IBid,
   Bid,
+  IBidMessages,
+  Message,
 } from './models';
 import TYPES from './di';
 
@@ -50,8 +54,11 @@ import {
   PaymentOptionService,
   IProductBidService,
   ProductBidService,
+  IBidMessageService,
+  BidMessageService,
 } from './services';
 import { OptionalAuth, RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
+import mongoErrorHandler from './middlewares/mongoErrorHandler';
 
 const { NODE_ENV } = env;
 const container = new Container();
@@ -60,12 +67,14 @@ const container = new Container();
 container.bind<Model<IUser>>(TYPES.User).toConstantValue(User);
 container.bind<Model<ICategory>>(TYPES.Category).toConstantValue(Category);
 container.bind<Model<IProduct>>(TYPES.Product).toConstantValue(Product);
+container.bind<Model<IProductVariant>>(TYPES.ProductVariant).toConstantValue(ProductVariant);
 container.bind<Model<IReview>>(TYPES.Review).toConstantValue(Review);
 container.bind<Model<ISeller>>(TYPES.Seller).toConstantValue(Seller);
 container.bind<Model<IAddress>>(TYPES.Address).toConstantValue(Address);
 container.bind<Model<ICart>>(TYPES.Cart).toConstantValue(Cart);
 container.bind<Model<IPaymentOption>>(TYPES.PaymentOption).toConstantValue(PaymentOption);
 container.bind<Model<IBid>>(TYPES.Bid).toConstantValue(Bid);
+container.bind<Model<IBidMessages>>(TYPES.BidMessages).toConstantValue(Message);
 
 container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
 container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);
@@ -81,6 +90,7 @@ container.bind<IAddressService>(TYPES.AddressService).to(AddressService);
 container.bind<ICartService>(TYPES.CartService).to(CartService);
 container.bind<IPaymentOptionService>(TYPES.PaymentOptionService).to(PaymentOptionService);
 container.bind<IProductBidService>(TYPES.ProductBidService).to(ProductBidService);
+container.bind<IBidMessageService>(TYPES.BidMessageService).to(BidMessageService);
 
 const server = new InversifyExpressServer(container);
 
@@ -102,6 +112,8 @@ server.setErrorConfig((app) => {
     });
   });
 
+  // Add MongoDB error handler before the general error middleware
+  // app.use(mongoErrorHandler);
   app.use(errorMiddleWare);
 });
 

@@ -1,115 +1,115 @@
 import { Document, Model, model, PopulatedDoc, Schema } from 'mongoose';
 import constants from '../utils/constants';
-import { ISeller } from '.';
+import { ISeller, IProductVariant } from '.';
 
-const { PRODUCT, SELLER, REVIEW, CATEGORY } = constants.mongooseModels;
+const { PRODUCT, SELLER, REVIEW, CATEGORY, PRODUCT_VARIANT } = constants.mongooseModels;
 
 export interface IProduct extends Document {
-  _id: string;
   name: string;
   description: string;
-  price: number;
-  originalPrice: number;
-  rating: number;
+  productType: 'simple' | 'variable';
   category: Schema.Types.ObjectId;
+  owner: PopulatedDoc<ISeller>;
+  brand: string;
+  rating: number;
   reviews: Schema.Types.ObjectId[];
   noOfReviews: number;
-  brand: string;
-  condition: string;
-  sizes: string[];
-  color: string;
-  quantityAvailable: number;
-  images: string[];
-  owner: PopulatedDoc<ISeller>;
   isActive: boolean;
   isFlash: boolean;
+  isRecommended: boolean;
+
+  // Fields for SIMPLE products (optional for variable)
+  price?: number;
+  originalPrice?: number;
+  condition?: 'Brand New' | 'Used' | 'Refurbished';
+  color?: string;
+  quantityAvailable?: number;
+  images?: string[];
+
+  // Fields for VARIABLE products (optional for simple)
+  variants?: PopulatedDoc<IProductVariant>[];
+
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const productSchema: Schema<IProduct> = new Schema<IProduct>(
   {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    description: {
-      type: String,
-      required: true,
-    },
-    price: {
-      type: Number,
-      required: true,
-    },
-    originalPrice: {
-      type: Number,
-      required: true,
-    },
-    rating: {
-      type: Number,
-      required: true,
-      default: 0.0,
-    },
-    category: {
-      type: Schema.Types.ObjectId,
-      ref: CATEGORY,
-      required: true,
-    },
-    reviews: {
-      type: [Schema.Types.ObjectId],
-      ref: REVIEW,
-    },
-    noOfReviews: {
-      type: Number,
-      default: 0,
-    },
-    brand: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    condition: {
-      type: String,
-      required: true,
-      enum: ['Brand New', 'Used', 'Refurbished'],
-    },
-    sizes: {
-      type: [String],
-      required: true,
-    },
-    color: {
-      type: String,
-      required: true,
-    },
-    quantityAvailable: {
-      type: Number,
-      required: true,
-      default: 0,
-    },
-    images: {
-      type: [String],
-      required: true,
-    },
-    owner: {
-      type: Schema.Types.ObjectId,
-      ref: SELLER,
-      required: true,
-    },
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
-    isFlash: {
-      type: Boolean,
-      default: false,
-    },
+    name: { type: String, required: true, trim: true },
+    description: { type: String, required: true },
+    productType: { type: String, enum: ['simple', 'variable'], required: true },
+    category: { type: Schema.Types.ObjectId, ref: CATEGORY, required: true },
+    owner: { type: Schema.Types.ObjectId, ref: SELLER, required: true },
+    brand: { type: String, required: true, trim: true },
+    rating: { type: Number, default: 0.0 },
+    reviews: { type: [Schema.Types.ObjectId], ref: REVIEW },
+    noOfReviews: { type: Number, default: 0 },
+    isActive: { type: Boolean, default: true },
+    isFlash: { type: Boolean, default: false },
+
+    // Fields primarily for SIMPLE products
+    price: { type: Number, min: 0 },
+    originalPrice: { type: Number, min: 0 },
+    condition: { type: String, enum: ['Brand New', 'Used', 'Refurbished'] },
+    color: { type: String },
+    quantityAvailable: { type: Number, default: 0, min: 0 },
+    images: { type: [String] },
+
+    // Fields for VARIABLE products
+    variants: [{ type: Schema.Types.ObjectId, ref: PRODUCT_VARIANT }],
   },
   { timestamps: true }
 );
 
+// Validator to enforce data rules based on product type
+productSchema.pre('validate', function (next) {
+  if (this.productType === 'simple') {
+    // Simple products must have price and quantity
+    if (this.price === undefined || this.price === null) {
+      this.invalidate('price', 'Simple products must have a price');
+    }
+    if (this.quantityAvailable === undefined || this.quantityAvailable === null) {
+      this.invalidate('quantityAvailable', 'Simple products must have quantity available');
+    }
+    if (this.condition === undefined || this.condition === null) {
+      this.invalidate('condition', 'Simple products must have a condition');
+    }
+    if (!this.images || this.images.length === 0) {
+      this.invalidate('images', 'Simple products must have at least one image');
+    }
+    // Simple products should not have variants
+    if (this.variants && this.variants.length > 0) {
+      this.invalidate('variants', 'Simple products cannot have variants');
+    }
+  } else if (this.productType === 'variable') {
+    // Variable products should not have top-level price/quantity
+    if (this.price || this.quantityAvailable) {
+      this.invalidate(
+        'price',
+        'Variable products should not have top-level price or quantity. Define them in variants.'
+      );
+    }
+    // Skip variant check on creation since variants are created separately
+  }
+  next();
+});
+
+// Pre-save middleware to calculate total quantity and reviews
 productSchema.pre('save', function (next) {
   if (this.isModified('reviews') && this.reviews.length > 0) {
     this.noOfReviews = this.reviews.length;
   }
   next();
 });
+
+// Transform _id to id for API responses
+productSchema.set('toJSON', {
+  transform: (doc, ret) => {
+    ret.id = ret._id.toString();
+    delete ret._id;
+    delete ret.__v;
+    return ret;
+  },
+});
+
 export const Product: Model<IProduct> = model<IProduct>(PRODUCT, productSchema);

@@ -32,9 +32,30 @@ export class ProductController extends BaseController {
   }
 
   @httpPost('/', TYPES.RequireSignIn, TYPES.RequireSeller)
-  async createProduct(@response() res: Response, @requestBody() payload: createProductDTO) {
-    payload.owner = res.locals.user;
-    const newProduct = await this.productService.createProduct(payload);
+  async createProduct(@response() res: Response, @requestBody() payload: any, @request() req: any) {
+    // Handle different payload structures
+    let newProduct;
+    const user = req.user; // Get the full user object
+    const sellerId = user.seller; // Get the seller ID from the user
+    
+    if (payload.product && payload.variants) {
+      // Variable product with separate product and variants
+      payload.product.owner = sellerId;
+      newProduct = await this.productService.createVariableProduct(payload);
+    } else if (payload.productType === 'simple') {
+      // Simple product
+      payload.owner = sellerId;
+      newProduct = await this.productService.createSimpleProduct(payload);
+    } else if (payload.productType === 'variable') {
+      // Variable product in flat structure
+      payload.owner = sellerId;
+      newProduct = await this.productService.createVariableProduct(payload);
+    } else {
+      // Fallback to original method for backward compatibility
+      payload.owner = sellerId;
+      newProduct = await this.productService.createProduct(payload);
+    }
+    
     return this.sendResponse(res, 201, 'Product created successfully', newProduct);
   }
 
@@ -100,5 +121,32 @@ export class ProductController extends BaseController {
   ) {
     const bid = await this.productBidService.createBid(id, res.locals.user, payload.bidAmount);
     return this.sendResponse(res, 200, 'Bid placed successfully', bid);
+  }
+
+  //get all bids for a product (sellers only)
+  @httpGet('/:id/bids', TYPES.RequireSignIn, TYPES.RequireSeller)
+  async getProductBids(@response() res: Response, @requestParam('id') id: string) {
+    const bids = await this.productBidService.getBidsForProduct(id);
+    return this.sendResponse(res, 200, 'Product bids retrieved successfully', bids);
+  }
+
+  // Admin helper endpoints
+  @httpPost('/bulk', TYPES.RequireSignIn, TYPES.RequireSeller)
+  async bulkCreateProducts(@response() res: Response, @requestBody() payload: any, @request() req: any) {
+    const user = req.user;
+    const sellerId = user.seller;
+    payload.baseProduct.owner = sellerId;
+    const products = await this.productService.bulkCreateSimpleProducts(payload);
+    return this.sendResponse(res, 201, `${products.length} products created successfully`, products);
+  }
+
+  @httpPost('/:id/duplicate', TYPES.RequireSignIn, TYPES.RequireSeller)
+  async duplicateProduct(
+    @response() res: Response,
+    @requestParam('id') id: string,
+    @requestBody() payload: any
+  ) {
+    const duplicatedProduct = await this.productService.duplicateProduct(id, payload.modifications || {});
+    return this.sendResponse(res, 201, 'Product duplicated successfully', duplicatedProduct);
   }
 }

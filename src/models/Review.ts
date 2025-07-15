@@ -60,7 +60,17 @@ const reviewSchema: Schema<IReview> = new Schema<IReview>(
   }
 );
 
+// Transform _id to id for API responses
 reviewSchema.index({ product: 1, seller: 1, reviewer: 1 });
+
+reviewSchema.set('toJSON', {
+  transform: (doc, ret) => {
+    ret.id = ret._id.toString();
+    delete ret._id;
+    delete ret.__v;
+    return ret;
+  },
+});
 
 // start of pre-save hook for ratings
 reviewSchema.pre('save', async function (next) {

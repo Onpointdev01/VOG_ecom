@@ -2,6 +2,7 @@ export const TYPES = {
   User: Symbol.for('User'),
   Category: Symbol.for('Category'),
   Product: Symbol.for('Product'),
+  ProductVariant: Symbol.for('ProductVariant'),
   Review: Symbol.for('Review'),
   Seller: Symbol.for('Seller'),
   Address: Symbol.for('Address'),
@@ -19,6 +20,7 @@ export const TYPES = {
   CartService: Symbol.for('CartService'),
   PaymentOptionService: Symbol.for('PaymentOptionService'),
   ProductBidService: Symbol.for('ProductBidService'),
+  BidMessageService: Symbol.for('BidMessageService'),
 
   RequireSignIn: Symbol.for('RequireSignIn'),
   RequireSeller: Symbol.for('RequireSeller'),

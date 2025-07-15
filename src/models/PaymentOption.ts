@@ -36,4 +36,14 @@ const paymentOptionSchema: Schema<IPaymentOption> = new Schema(
   { timestamps: true }
 );
 
+// Transform _id to id for API responses
+paymentOptionSchema.set('toJSON', {
+  transform: (doc, ret) => {
+    ret.id = ret._id.toString();
+    delete ret._id;
+    delete ret.__v;
+    return ret;
+  }
+});
+
 export const PaymentOption = model<IPaymentOption>(PAYMENT_OPTION, paymentOptionSchema);

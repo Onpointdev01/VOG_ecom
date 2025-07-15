@@ -9,9 +9,10 @@ export interface ICartItem {
   _id: string;
   product: Schema.Types.ObjectId | IProduct;
   quantity: number;
-  size: string;
-  color: string;
+  size?: string; // Optional for simple products
+  color?: string; // Optional for simple products
   price: number;
+  bidId?: Schema.Types.ObjectId; // Optional bid reference for bid-based purchases
 }
 
 export interface ICart extends Document {
@@ -34,11 +35,16 @@ const cartItemSchema: Schema<ICartItem> = new Schema({
   },
   size: {
     type: String,
-    required: true,
+    required: false,
   },
   color: {
     type: String,
-    required: true,
+    required: false,
+  },
+  bidId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Bid',
+    required: false,
   },
 });
 
@@ -74,6 +80,26 @@ cartSchema.pre('save', async function (next) {
 
   cart.totalPrice = total;
   next();
+});
+
+// Transform _id to id for API responses
+cartSchema.set('toJSON', {
+  transform: (doc, ret) => {
+    ret.id = ret._id.toString();
+    delete ret._id;
+    delete ret.__v;
+    return ret;
+  }
+});
+
+// Transform _id to id for cart items
+cartItemSchema.set('toJSON', {
+  transform: (doc, ret) => {
+    ret.id = ret._id.toString();
+    delete ret._id;
+    delete ret.__v;
+    return ret;
+  }
 });
 
 export const Cart: Model<ICart> = model<ICart>(CART, cartSchema);

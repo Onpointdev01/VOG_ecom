@@ -73,7 +73,7 @@ export class AuthService extends BaseService implements IAuthService {
 
     //TODO: generate and send verification email
 
-    return { _id: newUser._id, email, firstName, lastName };
+    return { id: newUser._id, email, firstName, lastName };
   }
 
   //signup as seller add more validation and the likes
@@ -100,7 +100,7 @@ export class AuthService extends BaseService implements IAuthService {
     // Update the user's seller field
     await this.User.findByIdAndUpdate(user, { seller: newSeller._id });
 
-    return { _id: newSeller._id, name, type, logo, official };
+    return { id: newSeller._id, name, type, logo, official };
   }
 
   login = async (
@@ -123,7 +123,7 @@ export class AuthService extends BaseService implements IAuthService {
     await this.User.findByIdAndUpdate(user._id, { refreshToken: refreshToken });
 
     const trimedUser: Partial<IUser> = {
-      _id: user._id,
+      id: user._id,
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
@@ -232,7 +232,7 @@ export class AuthService extends BaseService implements IAuthService {
     const token = await generateAccessToken(user._id as string);
     const refreshToken = await generateRefreshToken(user._id as string);
     const trimedUser: Partial<IUser> = {
-      _id: user._id,
+      id: user._id,
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,

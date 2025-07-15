@@ -144,6 +144,16 @@ const userSchema: Schema = new Schema<IUser>(
 
 userSchema.index({ email: 1 }, { unique: true });
 
+// Transform _id to id for API responses
+userSchema.set('toJSON', {
+  transform: (doc, ret) => {
+    ret.id = ret._id.toString();
+    delete ret._id;
+    delete ret.__v;
+    return ret;
+  }
+});
+
 userSchema.pre('save', function (next) {
   if (this.isModified('firstName') || this.isModified('lastName') || !this.profileImageUrl) {
     const firstName = this.firstName || '';

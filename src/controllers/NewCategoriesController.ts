@@ -1,5 +1,14 @@
 import { inject } from 'inversify';
-import { controller, httpPost, httpGet, httpPut, httpDelete, requestParam, requestBody, response } from 'inversify-express-utils';
+import {
+  controller,
+  httpPost,
+  httpGet,
+  httpPut,
+  httpDelete,
+  requestParam,
+  requestBody,
+  response,
+} from 'inversify-express-utils';
 import { Response } from 'express';
 
 import { BaseController } from './BaseController';
@@ -12,6 +21,8 @@ export class CategoryController extends BaseController {
   constructor(@inject(TYPES.CategoryService) private categoryService: ICategoryService) {
     super();
   }
+
+  // Basic CRUD Methods
 
   @httpPost('/')
   async createCategory(@response() res: Response, @requestBody() payload: Partial<ICategory>) {
@@ -32,7 +43,11 @@ export class CategoryController extends BaseController {
   }
 
   @httpPut('/:id')
-  async updateCategory(@response() res: Response, @requestParam('id') id: string, @requestBody() payload: Partial<ICategory>) {
+  async updateCategory(
+    @response() res: Response,
+    @requestParam('id') id: string,
+    @requestBody() payload: Partial<ICategory>
+  ) {
     const updatedCategory = await this.categoryService.updateCategory(id, payload);
     return this.sendResponse(res, 200, 'Category updated successfully', updatedCategory);
   }
@@ -43,22 +58,37 @@ export class CategoryController extends BaseController {
     return this.sendResponse(res, 204, 'Category deleted successfully');
   }
 
+  //  Subcategory Management Methods
+
   @httpPost('/:id/subcategories')
-  async addSubcategory(@response() res: Response, @requestParam('id') categoryId: string, @requestBody() payload: { subcategory: string }) {
-    const updatedCategory = await this.categoryService.addSubcategory(categoryId, payload.subcategory);
-    return this.sendResponse(res, 200, 'Subcategory added successfully', updatedCategory);
+  async createSubcategory(
+    @response() res: Response,
+    @requestParam('id') parentId: string,
+    @requestBody() payload: Partial<ICategory>
+  ) {
+    const newSubcategory = await this.categoryService.createSubcategory(parentId, payload);
+    return this.sendResponse(res, 201, 'Subcategory created successfully', newSubcategory);
   }
 
-  @httpPut('/:id/subcategories')
-  async updateSubcategory(@response() res: Response, @requestParam('id') categoryId: string, @requestBody() payload: { oldSubcategory: string, newSubcategory: string }) {
-    const updatedCategory = await this.categoryService.updateSubcategory(categoryId, payload.oldSubcategory, payload.newSubcategory);
-    return this.sendResponse(res, 200, 'Subcategory updated successfully', updatedCategory);
+  @httpPut('/:id/subcategories/:subId')
+  async updateSubcategory(
+    @response() res: Response,
+    @requestParam('id') categoryId: string,
+    @requestParam('subId') subcategoryId: string,
+    @requestBody() payload: Partial<ICategory>
+  ) {
+    const updatedSubcategory = await this.categoryService.updateSubcategory(subcategoryId, payload);
+    return this.sendResponse(res, 200, 'Subcategory updated successfully', updatedSubcategory);
   }
 
-  @httpDelete('/:id/subcategories')
-  async deleteSubcategory(@response() res: Response, @requestParam('id') categoryId: string, @requestBody() payload: { subcategory: string }) {
-    const updatedCategory = await this.categoryService.deleteSubcategory(categoryId, payload.subcategory);
-    return this.sendResponse(res, 200, 'Subcategory deleted successfully', updatedCategory);
+  @httpDelete('/:id/subcategories/:subId')
+  async deleteSubcategory(
+    @response() res: Response,
+    @requestParam('id') categoryId: string,
+    @requestParam('subId') subcategoryId: string
+  ) {
+    await this.categoryService.deleteSubcategory(subcategoryId);
+    return this.sendResponse(res, 204, 'Subcategory deleted successfully');
   }
 
   @httpGet('/:id/subcategories')
@@ -68,7 +98,11 @@ export class CategoryController extends BaseController {
   }
 
   @httpGet('/:id/subcategories/:name')
-  async getSubcategoryByName(@response() res: Response, @requestParam('id') categoryId: string, @requestParam('name') subcategoryName: string) {
+  async getSubcategoryByName(
+    @response() res: Response,
+    @requestParam('id') categoryId: string,
+    @requestParam('name') subcategoryName: string
+  ) {
     const subcategory = await this.categoryService.getSubcategoryByName(categoryId, subcategoryName);
     return this.sendResponse(res, 200, 'Subcategory retrieved successfully', subcategory);
   }

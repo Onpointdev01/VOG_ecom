@@ -3,6 +3,7 @@ const constants = {
     USER: 'User',
     SELLER: 'Seller',
     PRODUCT: 'Product',
+    PRODUCT_VARIANT: 'ProductVariant',
     CATEGORY: 'Category',
     REVIEW: 'Review',
     ADDRESS: 'Address',

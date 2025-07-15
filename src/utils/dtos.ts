@@ -114,14 +114,15 @@ export interface AddToCartDTO {
   user: string;
   productId: string;
   quantity: number;
-  size: string;
-  color: string;
+  size?: string;
+  color?: string;
+  variantId?: string; // For variable products
 }
 
 export interface CartItemResponse {
-  _id: string;
+  id: string;
   product: {
-    _id: string;
+    id: string;
     name: string;
     images: string[];
     price: number;
@@ -133,7 +134,7 @@ export interface CartItemResponse {
 }
 
 export interface CartResponse {
-  _id: string;
+  id: string;
   user: string;
   items: CartItemResponse[];
   totalPrice: number;

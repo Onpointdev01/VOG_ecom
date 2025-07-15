@@ -1,11 +1,13 @@
 export * from './User';
-export * from './Category';
+// export * from './Category'; // Old category model
 export * from './Product';
+export * from './ProductVariant';
 export * from './Review';
 export * from './Seller';
-export * from './User';
 export * from './Address';
 export * from './Cart';
 export * from './PaymentOption';
 export * from './ProductBid';
 export * from './BidMessages';
+
+export * from './newCategory'; // This exports Category and ICategory
