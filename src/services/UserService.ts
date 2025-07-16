@@ -14,7 +14,7 @@ export interface IUserService {
   getAllUsers(): Promise<IUser[]>;
   getWishlist(userId: string): Promise<IUser['wishlist']>;
   addToWishlist(userId: string, productId: any): Promise<IProduct>;
-  removeFromWishlist(userId: string, productId: any): Promise<IProduct>;
+  removeFromWishlist(userId: string, productId: any): Promise<void>;
 }
 
 @injectable()
@@ -58,7 +58,8 @@ export class UserService extends BaseService implements IUserService {
     if (!user) throw new AppError('User not found', 404);
 
     // Check if the product is already in the wishlist
-    if (!user.wishlist.includes(productId)) {
+    const isAlreadyInWishlist = user.wishlist.some(item => item.toString() === productId.toString());
+    if (!isAlreadyInWishlist) {
       user.wishlist.push(productId);
       await user.save();
     }
@@ -70,25 +71,19 @@ export class UserService extends BaseService implements IUserService {
     return product;
   }
 
-  async removeFromWishlist(userId: string, productId: any): Promise<IProduct> {
+  async removeFromWishlist(userId: string, productId: any): Promise<void> {
     // Fetch the user
     const user = await this.User.findById(userId);
     if (!user) throw new AppError('User not found', 404);
 
     // Ensure the product exists in the wishlist before proceeding
-    if (!user.wishlist.includes(productId)) {
+    const isInWishlist = user.wishlist.some(item => item.toString() === productId.toString());
+    if (!isInWishlist) {
       throw new AppError('Product not found in wishlist', 404);
     }
-
-    // Fetch the product details before removing it
-    const product = await this.Product.findById(productId);
-    if (!product) throw new AppError('Product not found', 404);
 
     // Remove the product from the wishlist
     user.wishlist = user.wishlist.filter((wishlistItem) => wishlistItem.toString() !== productId.toString());
     await user.save();
-
-    // Return the removed product details
-    return product;
   }
 }

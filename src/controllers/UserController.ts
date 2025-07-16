@@ -89,8 +89,8 @@ export class UserController extends BaseController {
   @httpDelete('/wishlist/:productId', TYPES.RequireSignIn)
   public async removeFromWishlist(@requestParam('productId') productId: string, @response() res: Response) {
     try {
-      const updatedUser = await this.userService.removeFromWishlist(res.locals.user, productId);
-      return this.sendResponse(res, 200, 'Item removed from wishlist successfully', updatedUser);
+      await this.userService.removeFromWishlist(res.locals.user, productId);
+      return this.sendResponse(res, 204, '');
     } catch (error) {
       return this.sendResponse(res, 404, 'Unable to remove item from wishlist');
     }
