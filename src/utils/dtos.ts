@@ -106,17 +106,19 @@ export interface addressDTO {
 
 export interface UpdateCartItemDTO {
   quantity?: number;
-  size?: string;
-  color?: string;
+  sku?: string; // SKU for variable products (preferred method)
+  size?: string; // Fallback for backward compatibility
+  color?: string; // Fallback for backward compatibility
 }
 
 export interface AddToCartDTO {
   user: string;
   productId: string;
   quantity: number;
-  size?: string;
-  color?: string;
-  variantId?: string; // For variable products
+  sku?: string; // SKU for variable products (preferred method)
+  size?: string; // Fallback for backward compatibility
+  color?: string; // Fallback for backward compatibility
+  variantId?: string; // For variable products (alternative method)
 }
 
 export interface CartItemResponse {

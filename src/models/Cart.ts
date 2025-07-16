@@ -1,4 +1,5 @@
 import { Schema, Document, Model, model } from 'mongoose';
+import mongoose from 'mongoose';
 import { IProduct } from './Product';
 import constants from '../utils/constants';
 import { IUser } from './User';
@@ -9,8 +10,9 @@ export interface ICartItem {
   _id: string;
   product: Schema.Types.ObjectId | IProduct;
   quantity: number;
-  size?: string; // Optional for simple products
-  color?: string; // Optional for simple products
+  sku?: string; // SKU for variable products (more reliable than size/color)
+  size?: string; // Optional for simple products or display purposes
+  color?: string; // Optional for simple products or display purposes
   price: number;
   bidId?: Schema.Types.ObjectId; // Optional bid reference for bid-based purchases
 }
@@ -32,6 +34,10 @@ const cartItemSchema: Schema<ICartItem> = new Schema({
     type: Number,
     required: true,
     min: 1,
+  },
+  sku: {
+    type: String,
+    required: false,
   },
   size: {
     type: String,
@@ -72,6 +78,10 @@ cartSchema.pre('save', async function (next) {
   console.log('in here');
 
   for (const item of cart.items) {
+    if (!mongoose.isValidObjectId(item.product)) {
+      console.error(`Invalid ObjectId: ${item.product}`);
+      continue;
+    }
     const product = await model(PRODUCT).findById(item.product);
     if (product) {
       total += product.price * item.quantity;

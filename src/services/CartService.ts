@@ -1,10 +1,11 @@
 import { inject, injectable } from 'inversify';
 import { Model } from 'mongoose';
+import mongoose from 'mongoose';
 import TYPES from '../di';
 import { IBid, ICart, IProduct, IUser, IProductVariant } from '../models';
 import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
-import { AddToCartDTO, CartItemUpdateDTO, CartResponse } from '../utils/dtos';
+import { AddToCartDTO, CartItemUpdateDTO, CartResponse, UpdateCartItemDTO } from '../utils/dtos';
 
 // Helper to safely get buyer ID from bid
 function getBuyerId(bid: IBid): string {
@@ -23,7 +24,7 @@ export interface ICartService {
   addToCart(payload: AddToCartDTO): Promise<ICart>;
   addBidToCart(userId: string, productId: string, bidPrice: number, size: string, color: string, bidId: string): Promise<ICart>;
   getCartByUserId(userId: string): Promise<CartResponse>;
-  // updateCartItem(userId: string, itemId: string, payload: UpdateCartItemDTO): Promise<ICart>;
+  updateCartItem(userId: string, itemId: string, payload: UpdateCartItemDTO): Promise<ICart>;
   removeCartItem(userId: string, itemId: string): Promise<ICart>;
   clearCart(userId: string): Promise<void>;
 }
@@ -85,12 +86,26 @@ export class CartService extends BaseService implements ICartService {
       availableQuantity = product.quantityAvailable || 0;
     } else if (product.productType === 'variable') {
       // Find the specific variant for this cart item
-      const variant = await this.ProductVariant.findOne({
-        product: product._id,
-        size: item.size,
-        color: item.color,
-        isActive: true
-      });
+      // Priority: SKU > size/color combination
+      let variant;
+      
+      if (item.sku) {
+        // Use SKU if available
+        variant = await this.ProductVariant.findOne({
+          product: product._id,
+          sku: item.sku,
+          isActive: true
+        });
+      } else {
+        // Fall back to size/color combination
+        variant = await this.ProductVariant.findOne({
+          product: product._id,
+          size: item.size,
+          color: item.color,
+          isActive: true
+        });
+      }
+      
       availableQuantity = variant?.quantityAvailable || 0;
     } else {
       throw new AppError('Invalid product type', 400);
@@ -111,7 +126,7 @@ export class CartService extends BaseService implements ICartService {
   }
 
   async addToCart(payload: AddToCartDTO): Promise<ICart> {
-    const { user, productId, quantity, size, color, variantId } = payload;
+    const { user, productId, quantity, sku, size, color, variantId } = payload;
 
     await this.verifyUser(user);
     const product = await this.verifyProduct(productId);
@@ -120,30 +135,39 @@ export class CartService extends BaseService implements ICartService {
     let availableQuantity: number;
 
     if (product.productType === 'simple') {
-      // For simple products, size and color are fixed in the product
-      // Optional validation if provided
-      if (color && product.color && product.color !== color) {
-        throw new AppError('Invalid color selected', 400);
+      // For simple products, use product-level pricing and stock
+      // SKU, size, and color are not relevant for simple products
+      if (sku) {
+        throw new AppError('SKU is not applicable for simple products', 400);
       }
 
       price = product.price!;
       availableQuantity = product.quantityAvailable!;
     } else if (product.productType === 'variable') {
       // For variable products, we need a specific variant
-      if (!variantId && (!size || !color)) {
-        throw new AppError('Size and color are required for variable products, or provide variantId', 400);
-      }
-
+      // Priority: SKU > variantId > size/color combination
       let variant;
-      if (variantId) {
+      
+      if (sku) {
+        // Preferred method: use SKU
+        variant = await this.ProductVariant.findOne({
+          product: productId,
+          sku,
+          isActive: true
+        });
+      } else if (variantId) {
+        // Alternative method: use variantId
         variant = await this.ProductVariant.findById(variantId);
-      } else {
+      } else if (size && color) {
+        // Fallback method: use size/color combination
         variant = await this.ProductVariant.findOne({
           product: productId,
           size,
           color,
           isActive: true
         });
+      } else {
+        throw new AppError('SKU, variantId, or size and color are required for variable products', 400);
       }
 
       if (!variant) {
@@ -171,9 +195,19 @@ export class CartService extends BaseService implements ICartService {
     const existingCart = await this.Cart.findOne({ user });
 
     if (existingCart) {
-      const existingItem = existingCart.items.find(
-        (item) => item.product.toString() === productId && item.size === size && item.color === color
-      );
+      // Optimized uniqueness logic based on product type
+      const existingItem = existingCart.items.find((item) => {
+        if (product.productType === 'simple') {
+          // For simple products, only product ID matters (one variant per product)
+          return item.product.toString() === productId;
+        } else {
+          // For variable products, use SKU for uniqueness (most reliable)
+          // Fall back to size/color if SKU not available
+          return item.product.toString() === productId && 
+                 ((sku && item.sku === sku) || 
+                  (!sku && item.size === size && item.color === color));
+        }
+      });
 
       if (existingItem) {
         const newQuantity = existingItem.quantity + quantity;
@@ -185,14 +219,26 @@ export class CartService extends BaseService implements ICartService {
         existingItem.quantity = newQuantity; // Update the quantity
       } else {
         // Add new item if not already in the cart
-        existingCart.items.push({
+        const newItem: any = {
           product: product,
           quantity,
-          size: size || (product.productType === 'simple' ? 'One Size' : undefined),
-          color: color || (product.productType === 'simple' ? product.color : undefined),
           price: price,
           _id: productId,
-        });
+        };
+
+        if (product.productType === 'variable') {
+          // For variable products, store SKU, size, and color for identification
+          newItem.sku = sku || undefined;
+          newItem.size = size || undefined;
+          newItem.color = color || undefined;
+        } else {
+          // For simple products, don't store SKU (not applicable)
+          // Store size and color only for display purposes
+          newItem.size = 'One Size';
+          newItem.color = product.color || 'Default';
+        }
+
+        existingCart.items.push(newItem);
       }
 
       // Save the cart to trigger the pre-save hook
@@ -202,17 +248,27 @@ export class CartService extends BaseService implements ICartService {
     }
 
     // Create a new cart if it doesn't exist
+    const newItem: any = {
+      product: productId,
+      quantity,
+      price: price,
+    };
+
+    if (product.productType === 'variable') {
+      // For variable products, store SKU, size, and color for identification
+      newItem.sku = sku || undefined;
+      newItem.size = size || undefined;
+      newItem.color = color || undefined;
+    } else {
+      // For simple products, don't store SKU (not applicable)
+      // Store size and color only for display purposes
+      newItem.size = 'One Size';
+      newItem.color = product.color || 'Default';
+    }
+
     const newCart = new this.Cart({
       user,
-      items: [
-        {
-          product: productId,
-          quantity,
-          size: size || (product.productType === 'simple' ? 'One Size' : undefined),
-          color: color || (product.productType === 'simple' ? product.color : undefined),
-          price: price,
-        },
-      ],
+      items: [newItem],
     });
 
     await newCart.save();
@@ -339,6 +395,7 @@ export class CartService extends BaseService implements ICartService {
           price: (item.product as IProduct).price || 0,
         },
         quantity: item.quantity,
+        sku: item.sku || '',
         size: item.size || '',
         color: item.color || '',
         price: item.price,
@@ -348,61 +405,156 @@ export class CartService extends BaseService implements ICartService {
     };
   }
 
-  // async updateCartItem(userId: string, itemId: string, payload: UpdateCartItemDTO): Promise<ICart> {
-  //   const { quantity, size, color } = payload;
+  async updateCartItem(userId: string, itemId: string, payload: UpdateCartItemDTO): Promise<ICart> {
+    const { quantity, sku, size, color } = payload;
 
-  //   // Verify cart exists and contains item
-  //   const cart = await this.Cart.findOne({ user: userId, 'items._id': itemId }).populate(
-  //     'items.product',
-  //     'quantityAvailable sizes color'
-  //   );
+    // Verify cart exists and contains item
+    const cart = await this.Cart.findOne({ user: userId, 'items._id': itemId }).populate('items.product');
 
-  //   if (!cart) {
-  //     throw new AppError('Cart or item not found', 404);
-  //   }
+    if (!cart) {
+      throw new AppError('Cart or item not found', 404);
+    }
 
-  //   const item = cart.items.find((item) => item._id.toString() === itemId);
-  //   if (!item) {
-  //     throw new AppError('Item not found in cart', 404);
-  //   }
+    const item = cart.items.find((item) => item._id.toString() === itemId);
+    if (!item) {
+      throw new AppError('Item not found in cart', 404);
+    }
 
-  //   const product = item.product as IProduct;
+    const product = item.product as IProduct;
+    const updateFields: Record<string, any> = {};
 
-  //   const updateFields: Record<string, any> = {};
+    // Validate and update quantity if provided
+    if (quantity !== undefined) {
+      if (quantity < 1) {
+        throw new AppError('Quantity must be at least 1', 400);
+      }
 
-  //   // Validate and update quantity if provided
-  //   if (quantity !== undefined) {
-  //     if (product.quantityAvailable < quantity) {
-  //       throw new AppError('Requested quantity not available', 400);
-  //     }
-  //     updateFields['items.$.quantity'] = quantity;
-  //   }
+      let availableQuantity: number;
+      
+      if (product.productType === 'simple') {
+        availableQuantity = product.quantityAvailable || 0;
+      } else if (product.productType === 'variable') {
+        // For variable products, check the specific variant
+        // Priority: SKU > size/color combination
+        let variant;
+        
+        if (sku) {
+          // Use SKU if provided
+          variant = await this.ProductVariant.findOne({
+            product: product._id,
+            sku,
+            isActive: true
+          });
+        } else {
+          // Fall back to size/color combination
+          variant = await this.ProductVariant.findOne({
+            product: product._id,
+            size: size || item.size,
+            color: color || item.color,
+            isActive: true
+          });
+        }
+        
+        if (!variant) {
+          throw new AppError('Product variant not found', 404);
+        }
+        
+        availableQuantity = variant.quantityAvailable || 0;
+      } else {
+        throw new AppError('Invalid product type', 400);
+      }
 
-  //   // Validate and update size if provided
-  //   if (size !== undefined) {
-  //     if (!product.sizes.includes(size)) {
-  //       throw new AppError('Invalid size selected', 400);
-  //     }
-  //     updateFields['items.$.size'] = size;
-  //   }
+      if (availableQuantity < quantity) {
+        throw new AppError('Requested quantity exceeds available stock', 400);
+      }
+      
+      updateFields['items.$.quantity'] = quantity;
+    }
 
-  //   // Validate and update color if provided
-  //   if (color !== undefined) {
-  //     if (product.color !== color) {
-  //       throw new AppError('Invalid color selected', 400);
-  //     }
-  //     updateFields['items.$.color'] = color;
-  //   }
+    // Validate and update SKU if provided (only for variable products)
+    if (sku !== undefined) {
+      if (product.productType === 'simple') {
+        throw new AppError('SKU updates are not applicable for simple products', 400);
+      }
+      
+      // Check if variant exists with new SKU
+      const variant = await this.ProductVariant.findOne({
+        product: product._id,
+        sku: sku,
+        isActive: true
+      });
+      
+      if (!variant) {
+        throw new AppError('Product variant with selected SKU not found', 404);
+      }
+      
+      updateFields['items.$.sku'] = sku;
+      updateFields['items.$.size'] = variant.size;
+      updateFields['items.$.color'] = variant.color;
+      updateFields['items.$.price'] = variant.price;
+    }
 
-  //   // Update cart item
-  //   const updatedCart = await this.Cart.findOneAndUpdate(
-  //     { user: userId, 'items._id': itemId },
-  //     { $set: updateFields },
-  //     { new: true }
-  //   ).populate('items.product', 'name images price sizes color');
+    // Validate and update size if provided (only for variable products)
+    // Note: This is a fallback when SKU is not provided
+    if (size !== undefined && sku === undefined) {
+      if (product.productType === 'simple') {
+        throw new AppError('Size updates are not applicable for simple products (they have fixed attributes)', 400);
+      }
+      
+      // Check if variant exists with new size and current/new color
+      const variant = await this.ProductVariant.findOne({
+        product: product._id,
+        size: size,
+        color: color || item.color,
+        isActive: true
+      });
+      
+      if (!variant) {
+        throw new AppError('Product variant with selected size and color not found', 404);
+      }
+      
+      updateFields['items.$.sku'] = variant.sku;
+      updateFields['items.$.size'] = size;
+      updateFields['items.$.price'] = variant.price;
+    }
 
-  //   return updatedCart;
-  // }
+    // Validate and update color if provided (only for variable products)
+    // Note: This is a fallback when SKU is not provided
+    if (color !== undefined && sku === undefined) {
+      if (product.productType === 'simple') {
+        throw new AppError('Color updates are not applicable for simple products (they have fixed attributes)', 400);
+      }
+      
+      // Check if variant exists with current/new size and new color
+      const variant = await this.ProductVariant.findOne({
+        product: product._id,
+        size: size || item.size,
+        color: color,
+        isActive: true
+      });
+      
+      if (!variant) {
+        throw new AppError('Product variant with selected size and color not found', 404);
+      }
+      
+      updateFields['items.$.sku'] = variant.sku;
+      updateFields['items.$.color'] = color;
+      updateFields['items.$.price'] = variant.price;
+    }
+
+    // Update cart item
+    const updatedCart = await this.Cart.findOneAndUpdate(
+      { user: userId, 'items._id': itemId },
+      { $set: updateFields },
+      { new: true }
+    ).populate('items.product', 'name images price');
+
+    if (!updatedCart) {
+      throw new AppError('Failed to update cart item', 500);
+    }
+
+    return updatedCart;
+  }
 
   async removeCartItem(userId: string, itemId: string): Promise<ICart> {
     const cart = await this.Cart.findOneAndUpdate(
@@ -435,6 +587,9 @@ export class CartService extends BaseService implements ICartService {
   }
 
   private async verifyProduct(productId: string): Promise<IProduct> {
+    if (!mongoose.isValidObjectId(productId)) {
+      throw new AppError('Invalid product ID format', 400);
+    }
     const product = await this.Product.findById(productId);
     if (!product) {
       throw new AppError('Product not found', 404);
