@@ -79,6 +79,11 @@ export class OrderService extends BaseService {
     const shippingFee = this.calculateShippingFee(paymentMethod, totalPrice);
     const finalPrice = totalPrice + shippingFee;
 
+    // Generate order number
+    const timestamp = Date.now().toString();
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    const orderNumber = `ORD-${timestamp}-${random}`;
+
     // Create order
     const order = new Order({
       user: userId,
@@ -118,6 +123,7 @@ export class OrderService extends BaseService {
       totalPrice,
       shippingFee,
       finalPrice,
+      orderNumber,
       notes,
       paymentStatus: paymentMethod === 'CASH_ON_DELIVERY' ? 'PENDING' : 'PENDING',
       orderStatus: 'PENDING',
@@ -126,8 +132,17 @@ export class OrderService extends BaseService {
     try {
       await order.save();
     } catch (error: any) {
+      console.error('Order save error:', error);
+      console.error('Order data:', JSON.stringify(order.toObject(), null, 2));
+      
       // Transform validation errors to user-friendly messages
       if (error.name === 'ValidationError') {
+        const validationErrors = Object.keys(error.errors).map(key => 
+          `${key}: ${error.errors[key].message}`
+        ).join(', ');
+        
+        console.error('Validation errors:', validationErrors);
+        
         if (error.message.includes('totalPrice') || error.message.includes('finalPrice')) {
           throw new AppError('Unable to process order due to pricing issues. Please refresh your cart and try again.', 400);
         }
@@ -137,8 +152,8 @@ export class OrderService extends BaseService {
         if (error.message.includes('price') && error.message.includes('required')) {
           throw new AppError('Product pricing information is missing. Please refresh your cart and try again.', 400);
         }
-        // Generic validation error
-        throw new AppError('Order information is incomplete. Please check your details and try again.', 400);
+        // Generic validation error with more details
+        throw new AppError(`Order validation failed: ${validationErrors}`, 400);
       }
       // Re-throw other errors as-is
       throw error;

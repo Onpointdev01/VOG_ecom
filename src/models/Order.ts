@@ -176,15 +176,7 @@ const orderSchema: Schema<IOrder> = new Schema({
   },
 }, { timestamps: true });
 
-// Generate order number before saving
-orderSchema.pre('save', async function (next) {
-  if (this.isNew) {
-    const timestamp = Date.now().toString();
-    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-    this.orderNumber = `ORD-${timestamp}-${random}`;
-  }
-  next();
-});
+// Order number is now generated in the OrderService before saving
 
 // Transform _id to id for API responses
 orderSchema.set('toJSON', {
