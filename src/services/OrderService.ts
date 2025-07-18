@@ -57,10 +57,19 @@ export class OrderService extends BaseService {
 
     // Validate and calculate totals based on selected items
     const totalPrice = itemsToOrder.reduce((sum, item) => {
-      if (typeof item.price !== 'number' || isNaN(item.price) || item.price < 0) {
-        throw new AppError('Invalid item price detected. Please refresh your cart and try again.', 400);
+      let itemPrice = item.price;
+      
+      // If cart item doesn't have price, get it from the populated product
+      if (typeof itemPrice !== 'number' || isNaN(itemPrice) || itemPrice < 0) {
+        const product = item.product as any;
+        if (product && typeof product.price === 'number') {
+          itemPrice = product.price;
+        } else {
+          throw new AppError(`Invalid price for item: ${product?.name || 'Unknown product'}. Please refresh your cart and try again.`, 400);
+        }
       }
-      return sum + (item.price * item.quantity);
+      
+      return sum + (itemPrice * item.quantity);
     }, 0);
     
     if (isNaN(totalPrice) || totalPrice < 0) {
@@ -73,15 +82,29 @@ export class OrderService extends BaseService {
     // Create order
     const order = new Order({
       user: userId,
-      items: itemsToOrder.map(item => ({
-        product: item.product,
-        quantity: item.quantity,
-        sku: item.sku,
-        size: item.size,
-        color: item.color,
-        price: item.price,
-        bidId: item.bidId,
-      })),
+      items: itemsToOrder.map(item => {
+        let itemPrice = item.price;
+        
+        // Ensure we have a valid price for the order item
+        if (typeof itemPrice !== 'number' || isNaN(itemPrice) || itemPrice < 0) {
+          const product = item.product as any;
+          if (product && typeof product.price === 'number') {
+            itemPrice = product.price;
+          } else {
+            throw new AppError(`Cannot create order: Invalid price for item ${product?.name || 'Unknown product'}`, 400);
+          }
+        }
+        
+        return {
+          product: item.product,
+          quantity: item.quantity,
+          sku: item.sku,
+          size: item.size,
+          color: item.color,
+          price: itemPrice,
+          bidId: item.bidId,
+        };
+      }),
       shippingAddress: {
         fullName: shippingAddress.fullName,
         phoneNumber: shippingAddress.phoneNumber,
