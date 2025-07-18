@@ -63,11 +63,19 @@ const upload = multer({
     },
     key: function (req: Request, file, cb) {
       try {
-        let key = `${Date.now()}-${file.originalname.toLowerCase()}`;
+        const timestamp = Date.now();
+        const fileName = file.originalname.toLowerCase().replace(/[^a-z0-9.-]/g, '-');
+        let key = `${timestamp}-${fileName}`;
 
-        //Create sub folders in S3 bucket
-        if (file.fieldname == 'profileImageUrl') {
-          key = `profile-image/${key}`;
+        //Create sub folders in S3 bucket based on field name and purpose
+        if (file.fieldname === 'profileImageUrl') {
+          key = `profile-images/${key}`;
+        } else if (file.fieldname === 'images' || file.fieldname === 'image') {
+          key = `product-images/${key}`;
+        } else if (file.fieldname === 'csv') {
+          key = `bulk-uploads/${key}`;
+        } else {
+          key = `general/${key}`;
         }
 
         logger.info(formatLog(req, `Saving file ${file.originalname} as ${key} in AWS bucket`));

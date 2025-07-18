@@ -55,10 +55,18 @@ export class OrderService extends BaseService {
       throw new AppError('Shipping address not found', 404);
     }
 
-    // Calculate totals based on selected items
+    // Validate and calculate totals based on selected items
     const totalPrice = itemsToOrder.reduce((sum, item) => {
+      if (typeof item.price !== 'number' || isNaN(item.price) || item.price < 0) {
+        throw new AppError('Invalid item price detected. Please refresh your cart and try again.', 400);
+      }
       return sum + (item.price * item.quantity);
     }, 0);
+    
+    if (isNaN(totalPrice) || totalPrice < 0) {
+      throw new AppError('Unable to calculate order total. Please check your cart items and try again.', 400);
+    }
+    
     const shippingFee = this.calculateShippingFee(paymentMethod, totalPrice);
     const finalPrice = totalPrice + shippingFee;
 
@@ -92,7 +100,26 @@ export class OrderService extends BaseService {
       orderStatus: 'PENDING',
     });
 
-    await order.save();
+    try {
+      await order.save();
+    } catch (error: any) {
+      // Transform validation errors to user-friendly messages
+      if (error.name === 'ValidationError') {
+        if (error.message.includes('totalPrice') || error.message.includes('finalPrice')) {
+          throw new AppError('Unable to process order due to pricing issues. Please refresh your cart and try again.', 400);
+        }
+        if (error.message.includes('orderNumber')) {
+          throw new AppError('Order processing failed. Please try again.', 500);
+        }
+        if (error.message.includes('price') && error.message.includes('required')) {
+          throw new AppError('Product pricing information is missing. Please refresh your cart and try again.', 400);
+        }
+        // Generic validation error
+        throw new AppError('Order information is incomplete. Please check your details and try again.', 400);
+      }
+      // Re-throw other errors as-is
+      throw error;
+    }
 
     // Remove ordered items from cart (partial or full clear)
     if (selectedItems && selectedItems.length > 0) {

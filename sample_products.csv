@@ -1,0 +1,6 @@
+name,description,productType,category,brand,condition,price,originalPrice,color,quantityAvailable,images
+"Classic Cotton T-Shirt","Comfortable 100% cotton t-shirt perfect for everyday wear",simple,CATEGORY_ID_HERE,BrandName,"Brand New",24.99,29.99,Red,50,"https://example.com/image1.jpg,https://example.com/image2.jpg"
+"Premium Denim Jeans","High-quality denim jeans with modern fit",simple,CATEGORY_ID_HERE,BrandName,"Brand New",79.99,99.99,Blue,30,"https://example.com/jeans1.jpg"
+"Sports Sneakers","Lightweight running shoes for active lifestyle",simple,CATEGORY_ID_HERE,BrandName,"Brand New",129.99,149.99,White,25,"https://example.com/shoes1.jpg,https://example.com/shoes2.jpg"
+"Leather Wallet","Genuine leather wallet with multiple card slots",simple,CATEGORY_ID_HERE,BrandName,"Brand New",45.99,,Brown,15,"https://example.com/wallet1.jpg"
+"Wireless Headphones","Bluetooth 5.0 wireless headphones with noise cancellation",simple,CATEGORY_ID_HERE,BrandName,"Brand New",199.99,249.99,Black,20,"https://example.com/headphones1.jpg"

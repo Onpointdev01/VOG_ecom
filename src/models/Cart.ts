@@ -47,6 +47,11 @@ const cartItemSchema: Schema<ICartItem> = new Schema({
     type: String,
     required: false,
   },
+  price: {
+    type: Number,
+    required: true,
+    min: 0,
+  },
   bidId: {
     type: Schema.Types.ObjectId,
     ref: 'Bid',
@@ -75,16 +80,16 @@ const cartSchema: Schema<ICart> = new Schema({
 cartSchema.pre('save', async function (next) {
   const cart = this as ICart;
   let total = 0;
-  console.log('in here');
 
   for (const item of cart.items) {
-    if (!mongoose.isValidObjectId(item.product)) {
-      console.error(`Invalid ObjectId: ${item.product}`);
+    // Use the price stored in the cart item instead of fetching from product
+    // This ensures we use the correct variant price for variable products
+    if (typeof item.price === 'number' && !isNaN(item.price)) {
+      total += item.price * item.quantity;
+    } else {
+      console.error(`Invalid price for cart item: ${item._id}, price: ${item.price}`);
+      // Skip items with invalid prices rather than breaking the entire calculation
       continue;
-    }
-    const product = await model(PRODUCT).findById(item.product);
-    if (product) {
-      total += product.price * item.quantity;
     }
   }
 

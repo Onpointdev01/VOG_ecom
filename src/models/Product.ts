@@ -83,11 +83,11 @@ productSchema.pre('validate', function (next) {
     }
   } else if (this.productType === 'variable') {
     // Variable products should not have top-level price/quantity
-    if (this.price || this.quantityAvailable) {
-      this.invalidate(
-        'price',
-        'Variable products should not have top-level price or quantity. Define them in variants.'
-      );
+    if (this.price !== undefined && this.price !== null) {
+      this.invalidate('price', 'Variable products should not have a top-level price. Define prices in variants.');
+    }
+    if (this.quantityAvailable !== undefined && this.quantityAvailable !== null) {
+      this.invalidate('quantityAvailable', 'Variable products should not have top-level quantity. Define quantities in variants.');
     }
     // Skip variant check on creation since variants are created separately
   }

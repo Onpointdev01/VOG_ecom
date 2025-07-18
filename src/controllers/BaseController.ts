@@ -57,4 +57,45 @@ export class BaseController {
       throw new AppError('file uploaded not successful', 500);
     }
   }
+
+  @httpPost('/api/v1/upload-multiple-files', upload.array('images', 10))
+  async uploadMultipleFiles(@request() req: Request, @response() res: Response) {
+    try {
+      if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+        throw new AppError('No files uploaded.', 400);
+      }
+      
+      const files = req.files as Express.MulterS3.File[];
+      const imageUrls = files.map(file => file.location);
+
+      return this.sendResponse(res, 200, 'Files uploaded successfully', imageUrls);
+    } catch (error) {
+      console.log(error);
+      throw new AppError('Files upload not successful', 500);
+    }
+  }
+
+  @httpPost('/api/v1/upload-product-images', upload.array('images', 20))
+  async uploadProductImages(@request() req: Request, @response() res: Response) {
+    try {
+      if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+        throw new AppError('No images uploaded.', 400);
+      }
+
+      const { productName } = req.body;
+      const files = req.files as Express.MulterS3.File[];
+      
+      // Group images by product if productName is provided
+      const imageUrls = files.map(file => file.location);
+      
+      return this.sendResponse(res, 200, 'Product images uploaded successfully', { 
+        productName: productName || 'bulk-upload',
+        imageCount: imageUrls.length,
+        imageUrls: imageUrls
+      });
+    } catch (error) {
+      console.log(error);
+      throw new AppError('Product images upload failed', 500);
+    }
+  }
 }
