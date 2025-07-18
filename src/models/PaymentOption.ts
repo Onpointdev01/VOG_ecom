@@ -1,7 +1,7 @@
 import { Schema, Document, model } from 'mongoose';
 import constants from '../utils/constants';
 
-export type PaymentMethodType = 'MPESA' | 'ORANGE_MONEY' | 'AIRTEL_MONEY';
+export type PaymentMethodType = 'MPESA' | 'ORANGE_MONEY' | 'AIRTEL_MONEY' | 'CASH_ON_DELIVERY';
 
 const { PAYMENT_OPTION } = constants.mongooseModels;
 
@@ -24,7 +24,7 @@ const paymentOptionSchema: Schema<IPaymentOption> = new Schema(
     code: {
       type: String,
       required: true,
-      enum: ['MPESA', 'ORANGE_MONEY', 'AIRTEL_MONEY'],
+      enum: ['MPESA', 'ORANGE_MONEY', 'AIRTEL_MONEY', 'CASH_ON_DELIVERY'],
       unique: true,
     },
     logoUrl: { type: String },

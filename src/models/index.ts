@@ -9,5 +9,6 @@ export * from './Cart';
 export * from './PaymentOption';
 export * from './ProductBid';
 export * from './BidMessages';
+export * from './Order';
 
 export * from './newCategory'; // This exports Category and ICategory

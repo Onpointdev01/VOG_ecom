@@ -32,6 +32,8 @@ import {
   Bid,
   IBidMessages,
   Message,
+  IOrder,
+  Order,
 } from './models';
 import TYPES from './di';
 
@@ -56,9 +58,9 @@ import {
   ProductBidService,
   IBidMessageService,
   BidMessageService,
+  OrderService,
 } from './services';
 import { OptionalAuth, RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
-import mongoErrorHandler from './middlewares/mongoErrorHandler';
 
 const { NODE_ENV } = env;
 const container = new Container();
@@ -75,6 +77,7 @@ container.bind<Model<ICart>>(TYPES.Cart).toConstantValue(Cart);
 container.bind<Model<IPaymentOption>>(TYPES.PaymentOption).toConstantValue(PaymentOption);
 container.bind<Model<IBid>>(TYPES.Bid).toConstantValue(Bid);
 container.bind<Model<IBidMessages>>(TYPES.BidMessages).toConstantValue(Message);
+container.bind<Model<IOrder>>(TYPES.Order).toConstantValue(Order);
 
 container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
 container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);
@@ -91,6 +94,7 @@ container.bind<ICartService>(TYPES.CartService).to(CartService);
 container.bind<IPaymentOptionService>(TYPES.PaymentOptionService).to(PaymentOptionService);
 container.bind<IProductBidService>(TYPES.ProductBidService).to(ProductBidService);
 container.bind<IBidMessageService>(TYPES.BidMessageService).to(BidMessageService);
+container.bind<OrderService>(TYPES.OrderService).to(OrderService);
 
 const server = new InversifyExpressServer(container);
 

@@ -11,6 +11,7 @@ const constants = {
     PAYMENT_OPTION: 'PaymentOption',
     BID: 'Bid',
     BIDMESSAGES: 'BidMessages',
+    ORDER: 'Order',
   },
 };
 export default constants;

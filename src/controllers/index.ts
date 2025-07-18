@@ -8,3 +8,4 @@ export * from './CartController';
 export * from './PaymentOptionController';
 export * from './BidController';
 export * from './NotificationController';
+export * from './OrderController';
