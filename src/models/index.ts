@@ -1,4 +1,5 @@
 export * from './User';
+export * from './Admin';
 // export * from './Category'; // Old category model
 export * from './Product';
 export * from './ProductVariant';

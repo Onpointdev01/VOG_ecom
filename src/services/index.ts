@@ -1,4 +1,5 @@
 export * from './AuthService';
+export * from './AdminService';
 export * from './BaseService';
 // export * from './CategoryService'; // Old category service
 export * from './ProductService';

@@ -43,6 +43,7 @@ export interface IOrder extends Document {
   orderNumber: string;
   paymentReference?: string;
   notes?: string;
+  cartItemIds?: string[]; // Store original cart item IDs for clearing
   createdAt: Date;
   updatedAt: Date;
 }
@@ -172,6 +173,10 @@ const orderSchema: Schema<IOrder> = new Schema({
   },
   notes: {
     type: String,
+    required: false,
+  },
+  cartItemIds: {
+    type: [String],
     required: false,
   },
 }, { timestamps: true });

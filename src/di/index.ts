@@ -5,6 +5,7 @@ export const TYPES = {
   ProductVariant: Symbol.for('ProductVariant'),
   Review: Symbol.for('Review'),
   Seller: Symbol.for('Seller'),
+  Admin: Symbol.for('Admin'),
   Address: Symbol.for('Address'),
   Cart: Symbol.for('Cart'),
   PaymentOption: Symbol.for('PaymentOption'),
@@ -13,6 +14,7 @@ export const TYPES = {
   Order: Symbol.for('Order'),
 
   AuthService: Symbol.for('AuthService'),
+  AdminService: Symbol.for('AdminService'),
   CategoryService: Symbol.for('CategoryService'),
   ProductService: Symbol.for('ProductService'),
   ReviewService: Symbol.for('ReviewServices'),
@@ -26,6 +28,7 @@ export const TYPES = {
 
   RequireSignIn: Symbol.for('RequireSignIn'),
   RequireSeller: Symbol.for('RequireSeller'),
+  RequireAdmin: Symbol.for('RequireAdmin'),
   OptionalAuth: Symbol.for('OptionalAuth'),
 };
 export default TYPES;

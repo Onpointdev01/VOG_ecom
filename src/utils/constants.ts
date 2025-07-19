@@ -2,6 +2,7 @@ const constants = {
   mongooseModels: {
     USER: 'User',
     SELLER: 'Seller',
+    ADMIN: 'Admin',
     PRODUCT: 'Product',
     PRODUCT_VARIANT: 'ProductVariant',
     CATEGORY: 'Category',

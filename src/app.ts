@@ -12,6 +12,8 @@ import errorMiddleWare from './utils/errors/errorHandler';
 import {
   Address,
   IAddress,
+  Admin,
+  IAdmin,
   Category,
   ICategory,
   Product,
@@ -40,6 +42,8 @@ import TYPES from './di';
 import {
   IAuthService,
   AuthService,
+  IAdminService,
+  AdminService,
   ICategoryService,
   CategoryService,
   IProductService,
@@ -60,13 +64,14 @@ import {
   BidMessageService,
   OrderService,
 } from './services';
-import { OptionalAuth, RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
+import { OptionalAuth, RequireAdmin, RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
 
 const { NODE_ENV } = env;
 const container = new Container();
 
 // Bind all models to the container
 container.bind<Model<IUser>>(TYPES.User).toConstantValue(User);
+container.bind<Model<IAdmin>>(TYPES.Admin).toConstantValue(Admin);
 container.bind<Model<ICategory>>(TYPES.Category).toConstantValue(Category);
 container.bind<Model<IProduct>>(TYPES.Product).toConstantValue(Product);
 container.bind<Model<IProductVariant>>(TYPES.ProductVariant).toConstantValue(ProductVariant);
@@ -81,10 +86,12 @@ container.bind<Model<IOrder>>(TYPES.Order).toConstantValue(Order);
 
 container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
 container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);
+container.bind<RequireAdmin>(TYPES.RequireAdmin).to(RequireAdmin);
 container.bind<OptionalAuth>(TYPES.OptionalAuth).to(OptionalAuth);
 
 // Bind all services to the container
 container.bind<IAuthService>(TYPES.AuthService).to(AuthService);
+container.bind<IAdminService>(TYPES.AdminService).to(AdminService);
 container.bind<ICategoryService>(TYPES.CategoryService).to(CategoryService);
 container.bind<IProductService>(TYPES.ProductService).to(ProductService);
 container.bind<IReviewService>(TYPES.ReviewService).to(ReviewService);

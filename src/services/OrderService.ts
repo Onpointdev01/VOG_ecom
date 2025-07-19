@@ -79,6 +79,11 @@ export class OrderService extends BaseService {
     const shippingFee = this.calculateShippingFee(paymentMethod, totalPrice);
     const finalPrice = totalPrice + shippingFee;
 
+    // Store cart item IDs for later clearing
+    const cartItemIdsToRemove = selectedItems && selectedItems.length > 0 
+      ? selectedItems 
+      : cart.items.map(item => item._id.toString());
+
     // Generate order number
     const timestamp = Date.now().toString();
     const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
@@ -125,6 +130,7 @@ export class OrderService extends BaseService {
       finalPrice,
       orderNumber,
       notes,
+      cartItemIds: cartItemIdsToRemove,
       paymentStatus: paymentMethod === 'CASH_ON_DELIVERY' ? 'PENDING' : 'PENDING',
       orderStatus: 'PENDING',
     });
@@ -159,27 +165,11 @@ export class OrderService extends BaseService {
       throw error;
     }
 
-    // Remove ordered items from cart (partial or full clear)
-    if (selectedItems && selectedItems.length > 0) {
-      // Partial checkout: Remove only selected items
-      await Cart.findOneAndUpdate(
-        { user: userId },
-        { $pull: { items: { _id: { $in: selectedItems } } } }
-      );
-      
-      // Recalculate cart total after removing items
-      const updatedCart = await Cart.findOne({ user: userId });
-      if (updatedCart) {
-        await updatedCart.save(); // Triggers pre-save middleware to recalculate totalPrice
-      }
-    } else {
-      // Full checkout: Clear entire cart
-      await Cart.findOneAndUpdate(
-        { user: userId },
-        { $set: { items: [], totalPrice: 0 } }
-      );
-    }
-
+    // DON'T clear cart yet - wait for confirmation or payment
+    // Cart will be cleared when:
+    // 1. COD orders are CONFIRMED by seller
+    // 2. Other payment orders are paid (COMPLETED payment status)
+    
     return order;
   }
 
@@ -223,10 +213,71 @@ export class OrderService extends BaseService {
       throw new AppError('Invalid order status', 400);
     }
 
+    // Validate status transitions
+    this.validateStatusTransition(order.orderStatus, orderStatus);
+
+    const previousStatus = order.orderStatus;
     order.orderStatus = orderStatus as any;
     await order.save();
 
+    // Clear cart when COD order is confirmed
+    if (orderStatus === 'CONFIRMED' && order.paymentMethod === 'CASH_ON_DELIVERY' && previousStatus === 'PENDING') {
+      await this.clearCartItems(order.user.toString(), order.cartItemIds || []);
+    }
+
     return order;
+  }
+
+  async shipOrder(orderId: string, trackingNumber?: string): Promise<IOrder> {
+    const order = await this.verifyDoc(orderId, Order);
+    
+    // Only allow shipping from PROCESSING status
+    if (order.orderStatus !== 'PROCESSING') {
+      throw new AppError('Order must be in PROCESSING status to ship', 400);
+    }
+
+    order.orderStatus = 'SHIPPED';
+    if (trackingNumber) {
+      order.paymentReference = trackingNumber; // Using this field for tracking
+    }
+    await order.save();
+
+    return order;
+  }
+
+  async deliverOrder(orderId: string): Promise<IOrder> {
+    const order = await this.verifyDoc(orderId, Order);
+    
+    // Only allow delivery from SHIPPED status
+    if (order.orderStatus !== 'SHIPPED') {
+      throw new AppError('Order must be in SHIPPED status to deliver', 400);
+    }
+
+    order.orderStatus = 'DELIVERED';
+    
+    // For COD orders, mark payment as completed upon delivery
+    if (order.paymentMethod === 'CASH_ON_DELIVERY') {
+      order.paymentStatus = 'COMPLETED';
+    }
+    
+    await order.save();
+
+    return order;
+  }
+
+  private validateStatusTransition(currentStatus: string, newStatus: string): void {
+    const validTransitions: { [key: string]: string[] } = {
+      'PENDING': ['CONFIRMED', 'CANCELLED'],
+      'CONFIRMED': ['PROCESSING', 'CANCELLED'],
+      'PROCESSING': ['SHIPPED', 'CANCELLED'],
+      'SHIPPED': ['DELIVERED', 'CANCELLED'],
+      'DELIVERED': [], // Final state
+      'CANCELLED': [] // Final state
+    };
+
+    if (!validTransitions[currentStatus]?.includes(newStatus)) {
+      throw new AppError(`Cannot transition from ${currentStatus} to ${newStatus}`, 400);
+    }
   }
 
   async updatePaymentStatus(orderId: string, paymentStatus: string, paymentReference?: string): Promise<IOrder> {
@@ -237,6 +288,7 @@ export class OrderService extends BaseService {
       throw new AppError('Invalid payment status', 400);
     }
 
+    const previousPaymentStatus = order.paymentStatus;
     order.paymentStatus = paymentStatus as any;
     if (paymentReference) {
       order.paymentReference = paymentReference;
@@ -248,6 +300,11 @@ export class OrderService extends BaseService {
     }
 
     await order.save();
+
+    // Clear cart when payment is completed for non-COD orders
+    if (paymentStatus === 'COMPLETED' && order.paymentMethod !== 'CASH_ON_DELIVERY' && previousPaymentStatus !== 'COMPLETED') {
+      await this.clearCartItems(order.user.toString(), order.cartItemIds || []);
+    }
 
     return order;
   }
@@ -279,5 +336,38 @@ export class OrderService extends BaseService {
     
     // Standard shipping fee
     return 10.00;
+  }
+
+  private async clearCartItems(userId: string, cartItemIds: string[]): Promise<void> {
+    try {
+      if (!cartItemIds || cartItemIds.length === 0) {
+        console.log('No cart items to clear');
+        return;
+      }
+
+      // Remove specific cart items by their IDs
+      const result = await Cart.findOneAndUpdate(
+        { user: userId },
+        { 
+          $pull: { 
+            items: { 
+              _id: { $in: cartItemIds } 
+            } 
+          } 
+        },
+        { new: true }
+      );
+
+      if (result) {
+        // Trigger pre-save middleware to recalculate total
+        await result.save();
+        console.log(`Cleared ${cartItemIds.length} items from cart for user ${userId}`);
+      } else {
+        console.log(`No cart found for user ${userId}`);
+      }
+    } catch (error) {
+      console.error('Failed to clear cart items:', error);
+      // Don't throw error - cart clearing shouldn't fail the main operation
+    }
   }
 }

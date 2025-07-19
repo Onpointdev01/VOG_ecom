@@ -64,11 +64,8 @@ export class OrderController extends BaseController {
     return this.sendResponse(res, 200, 'Order retrieved successfully', order);
   }
 
-  @httpPut('/:orderId/status', TYPES.RequireSignIn)
+  @httpPut('/:orderId/status', TYPES.RequireSignIn, TYPES.RequireAdmin)
   public async updateOrderStatus(@response() res: Response, @requestParam('orderId') orderId: string, @requestBody() payload: { orderStatus: string }) {
-    // For now, we'll implement basic admin check here
-    // In a real application, you'd want proper admin middleware
-    
     if (!payload.orderStatus) {
       throw new AppError('Order status is required', 400);
     }
@@ -77,7 +74,31 @@ export class OrderController extends BaseController {
     return this.sendResponse(res, 200, 'Order status updated successfully', order);
   }
 
-  @httpPut('/:orderId/payment-status', TYPES.RequireSignIn)
+  @httpPut('/:orderId/confirm', TYPES.RequireSignIn, TYPES.RequireAdmin)
+  public async confirmOrder(@response() res: Response, @requestParam('orderId') orderId: string) {
+    const order = await this.orderService.updateOrderStatus(orderId, 'CONFIRMED');
+    return this.sendResponse(res, 200, 'Order confirmed successfully', order);
+  }
+
+  @httpPut('/:orderId/process', TYPES.RequireSignIn, TYPES.RequireAdmin)
+  public async processOrder(@response() res: Response, @requestParam('orderId') orderId: string) {
+    const order = await this.orderService.updateOrderStatus(orderId, 'PROCESSING');
+    return this.sendResponse(res, 200, 'Order processing started', order);
+  }
+
+  @httpPut('/:orderId/ship', TYPES.RequireSignIn, TYPES.RequireAdmin)
+  public async shipOrder(@response() res: Response, @requestParam('orderId') orderId: string, @requestBody() payload: { trackingNumber?: string }) {
+    const order = await this.orderService.shipOrder(orderId, payload.trackingNumber);
+    return this.sendResponse(res, 200, 'Order shipped successfully', order);
+  }
+
+  @httpPut('/:orderId/deliver', TYPES.RequireSignIn, TYPES.RequireAdmin)
+  public async deliverOrder(@response() res: Response, @requestParam('orderId') orderId: string) {
+    const order = await this.orderService.deliverOrder(orderId);
+    return this.sendResponse(res, 200, 'Order delivered successfully', order);
+  }
+
+  @httpPut('/:orderId/payment-status', TYPES.RequireSignIn, TYPES.RequireAdmin)
   public async updatePaymentStatus(@response() res: Response, @requestParam('orderId') orderId: string, @requestBody() payload: { paymentStatus: string; paymentReference?: string }) {
     if (!payload.paymentStatus) {
       throw new AppError('Payment status is required', 400);

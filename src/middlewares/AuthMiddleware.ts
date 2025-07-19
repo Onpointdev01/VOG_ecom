@@ -7,8 +7,8 @@ import { ParsedQs } from 'qs';
 import jwt, { TokenExpiredError } from 'jsonwebtoken';
 import AppError from '../utils/errors/AppError';
 import TYPES from '../di';
-import { IAuthService } from '../services';
-import { IUser } from '../models';
+import { IAuthService, IAdminService } from '../services';
+import { IUser, IAdmin } from '../models';
 import { env } from '../config';
 
 @injectable()
@@ -75,6 +75,58 @@ export class RequireSeller extends BaseMiddleware {
       }
 
       next();
+    } catch (err) {
+      next(err);
+    }
+  }
+}
+
+@injectable()
+export class RequireAdmin extends BaseMiddleware {
+  constructor(@inject(TYPES.AdminService) private adminService: IAdminService) {
+    super();
+  }
+
+  handler(
+    req: Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>,
+    res: Response<any, Record<string, any>>,
+    next: NextFunction
+  ): void {
+    try {
+      const authHeader: string = req.headers['authorization'] || '';
+      if (!authHeader) {
+        return next(new AppError('No token provided', 401));
+      }
+
+      const token: string = authHeader.replace('Bearer ', '');
+      
+      // Verify JWT for admin
+      jwt.verify(token, env.JWT_SECRET, async (err: any, decoded: any) => {
+        if (err) {
+          if (err instanceof TokenExpiredError) {
+            return next(new AppError('Token has expired. Please log in again.', 401));
+          }
+          return next(new AppError('Invalid token provided', 403));
+        }
+
+        const adminId = decoded.id.toString();
+        const userType = decoded.userType; // Should be 'admin'
+
+        if (!adminId || userType !== 'admin') {
+          return next(new AppError('Admin access required', 403));
+        }
+
+        // Check if admin exists and is active
+        const admin = await this.adminService.checkAdminStatus(adminId);
+        if (!admin) {
+          return next(new AppError('Admin not found or inactive', 403));
+        }
+
+        req.admin = admin as IAdmin;
+        res.locals.admin = adminId;
+
+        next();
+      });
     } catch (err) {
       next(err);
     }
