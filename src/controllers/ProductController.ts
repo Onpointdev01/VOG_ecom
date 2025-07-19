@@ -17,7 +17,7 @@ import { FilterQuery } from 'mongoose';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
-import { IProductBidService, IProductService, IReviewService } from '../services';
+import { IProductBidService, IProductService, IReviewService, IViewTrackingService } from '../services';
 import { IProduct } from '../models';
 import { createProductDTO, createReviewDTO, getAllProductsQuery } from '../utils/dtos';
 import { getAllProductsSchema } from '../validators';
@@ -27,7 +27,8 @@ export class ProductController extends BaseController {
   constructor(
     @inject(TYPES.ProductService) private productService: IProductService,
     @inject(TYPES.ProductBidService) private productBidService: IProductBidService,
-    @inject(TYPES.ReviewService) private reviewService: IReviewService
+    @inject(TYPES.ReviewService) private reviewService: IReviewService,
+    @inject(TYPES.ViewTrackingService) private viewTrackingService: IViewTrackingService
   ) {
     super();
   }
@@ -60,9 +61,20 @@ export class ProductController extends BaseController {
     return this.sendResponse(res, 201, 'Product created successfully', newProduct);
   }
 
-  @httpGet('/:id')
+  @httpGet('/:id', TYPES.OptionalAuth)
   async getProductById(@response() res: Response, @requestParam('id') id: string) {
     const product = await this.productService.getProductById(id);
+    
+    // Track product view if user is authenticated
+    if (res.locals.user) {
+      try {
+        await this.viewTrackingService.trackProductView(res.locals.user, id);
+      } catch (error) {
+        // Don't fail the request if view tracking fails
+        console.warn('Failed to track product view:', error);
+      }
+    }
+    
     return this.sendResponse(res, 200, 'Product retrieved successfully', product);
   }
 

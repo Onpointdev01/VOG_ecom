@@ -13,6 +13,7 @@ const constants = {
     BID: 'Bid',
     BIDMESSAGES: 'BidMessages',
     ORDER: 'Order',
+    USER_VIEW: 'UserView',
   },
 };
 export default constants;

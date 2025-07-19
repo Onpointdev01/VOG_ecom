@@ -9,12 +9,13 @@ import {
   response,
   httpDelete,
   httpPatch,
+  queryParam,
 } from 'inversify-express-utils';
 import { Response } from 'express';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
-import { IAddressService, IUserService } from '../services';
+import { IAddressService, IUserService, IViewTrackingService } from '../services';
 import { IUser } from '../models/User';
 import { addressDTO } from '../utils/dtos';
 import { mapUserProfile } from '../utils/helpers';
@@ -23,7 +24,8 @@ import { mapUserProfile } from '../utils/helpers';
 export class UserController extends BaseController {
   constructor(
     @inject(TYPES.UserService) private userService: IUserService,
-    @inject(TYPES.AddressService) private addressService: IAddressService
+    @inject(TYPES.AddressService) private addressService: IAddressService,
+    @inject(TYPES.ViewTrackingService) private viewTrackingService: IViewTrackingService
   ) {
     super();
   }
@@ -134,6 +136,18 @@ export class UserController extends BaseController {
     } catch (error) {
       console.log(error);
       return this.sendResponse(res, 404, 'Unable to update address');
+    }
+  }
+
+  // Get user's last viewed products
+  @httpGet('/last-views', TYPES.RequireSignIn)
+  public async getUserLastViews(@response() res: Response, @queryParam('limit') limit?: string) {
+    try {
+      const limitNumber = limit ? parseInt(limit, 10) : 20;
+      const views = await this.viewTrackingService.getUserLastViews(res.locals.user, limitNumber);
+      return this.sendResponse(res, 200, 'Last viewed products retrieved successfully', views);
+    } catch (error) {
+      return this.sendResponse(res, 404, 'Unable to fetch last viewed products');
     }
   }
 }

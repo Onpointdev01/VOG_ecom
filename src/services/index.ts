@@ -11,5 +11,6 @@ export * from './PaymentOptionService';
 export * from './ProductBidService';
 export * from './BidMessageService';
 export * from './OrderService';
+export * from './ViewTrackingService';
 
 export * from './NewCategoryService';
