@@ -2,7 +2,7 @@ import { inject, injectable } from 'inversify';
 import { Model } from 'mongoose';
 import mongoose from 'mongoose';
 import TYPES from '../di';
-import { IBid, ICart, IProduct, IUser, IProductVariant } from '../models';
+import { IBid, ICart, IProduct, IUser, IProductVariant, IOrder } from '../models';
 import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
 import { AddToCartDTO, CartItemUpdateDTO, CartResponse, UpdateCartItemDTO } from '../utils/dtos';
@@ -36,7 +36,8 @@ export class CartService extends BaseService implements ICartService {
     @inject(TYPES.User) private User: Model<IUser>,
     @inject(TYPES.Product) private Product: Model<IProduct>,
     @inject(TYPES.ProductVariant) private ProductVariant: Model<IProductVariant>,
-    @inject(TYPES.Bid) private Bid: Model<IBid>
+    @inject(TYPES.Bid) private Bid: Model<IBid>,
+    @inject(TYPES.Order) private Order: Model<IOrder>
   ) {
     super();
   }
@@ -375,13 +376,28 @@ export class CartService extends BaseService implements ICartService {
 
     if (!cart) {
       return {
-        id: '', // Can be set to null or undefined
+        id: '',
         user: userId,
-        items: [], // Return empty array to indicate no items in the cart
-        totalPrice: 0, // Total price is 0 for an empty cart
-        updatedAt: new Date(), // Current date as a fallback
+        items: [],
+        totalPrice: 0,
+        updatedAt: new Date(),
       };
     }
+
+    // Get pending orders for this user (orders that aren't confirmed yet)
+    const pendingOrders = await this.Order.find({
+      user: userId,
+      orderStatus: 'PENDING'
+    }).select('cartItemIds items').lean();
+
+    // Extract all cart item IDs that are in pending orders
+    const pendingCartItemIds = new Set<string>();
+    pendingOrders.forEach(order => {
+      if (order.cartItemIds) {
+        order.cartItemIds.forEach(id => pendingCartItemIds.add(id));
+      }
+    });
+
     console.log('cart: ', cart);
     return {
       id: cart._id.toString(),
@@ -399,6 +415,7 @@ export class CartService extends BaseService implements ICartService {
         size: item.size || '',
         color: item.color || '',
         price: item.price,
+        isPending: pendingCartItemIds.has(item._id.toString()), // Always include pending status
       })),
       totalPrice: cart.totalPrice,
       updatedAt: cart.updatedAt,
@@ -576,6 +593,7 @@ export class CartService extends BaseService implements ICartService {
       throw new AppError('Cart not found', 404);
     }
   }
+
 
   // Private methods
   private async verifyUser(userId: string): Promise<IUser> {

@@ -133,6 +133,8 @@ export interface CartItemResponse {
   size: string;
   color: string;
   price: number;
+  bidId?: string;
+  isPending?: boolean; // Indicates if item is in a pending order
 }
 
 export interface CartResponse {
