@@ -17,7 +17,7 @@ import { FilterQuery } from 'mongoose';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
-import { IProductBidService, IProductService } from '../services';
+import { IProductBidService, IProductService, IReviewService } from '../services';
 import { IProduct } from '../models';
 import { createProductDTO, createReviewDTO, getAllProductsQuery } from '../utils/dtos';
 import { getAllProductsSchema } from '../validators';
@@ -26,7 +26,8 @@ import { getAllProductsSchema } from '../validators';
 export class ProductController extends BaseController {
   constructor(
     @inject(TYPES.ProductService) private productService: IProductService,
-    @inject(TYPES.ProductBidService) private productBidService: IProductBidService
+    @inject(TYPES.ProductBidService) private productBidService: IProductBidService,
+    @inject(TYPES.ReviewService) private reviewService: IReviewService
   ) {
     super();
   }
@@ -110,6 +111,12 @@ export class ProductController extends BaseController {
     console.log(payload);
     const newReview = await this.productService.reviewProduct(payload);
     return this.sendResponse(res, 201, 'Review created successfully', newReview);
+  }
+
+  @httpGet('/:id/reviews')
+  async getProductReviews(@response() res: Response, @requestParam('id') id: string) {
+    const reviews = await this.reviewService.getReviewsByProduct(id);
+    return this.sendResponse(res, 200, 'Product reviews retrieved successfully', reviews);
   }
 
   //bid for a product
