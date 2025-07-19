@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "build": "rimraf dist && tsc ",
+    "build": "rm -rf dist && tsc ",
     "dev": "cross-env NODE_ENV=development  nodemon",
     "start": "NODE_ENV=production node dist/server.js",
     "test": "yarn run unit-test && yarn run integration-test",
