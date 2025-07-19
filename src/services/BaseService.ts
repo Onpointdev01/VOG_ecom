@@ -13,7 +13,7 @@ export abstract class BaseService {
       query = query.populate(field);
     }
     const doc = await query;
-    if (!doc) throw new AppError(`${model.name} not found`, 404);
+    if (!doc) throw new AppError(`${model.modelName || model.name || 'Document'} not found`, 404);
     return doc;
   }
 }

@@ -56,7 +56,7 @@ export class OrderController extends BaseController {
     
     const order = await this.orderService.getOrderById(orderId);
     
-    // Check if user owns the order (admin check would require additional middleware)
+    // Check if user owns the order
     if (order.user.toString() !== userId) {
       throw new AppError('Access denied', 403);
     }

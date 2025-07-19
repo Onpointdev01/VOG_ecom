@@ -174,7 +174,8 @@ export class OrderService extends BaseService {
   }
 
   async getOrderById(orderId: string): Promise<IOrder> {
-    return this.verifyDoc(orderId, Order, 'items.product', 'user');
+    // Don't populate user for ownership checks - populate only items.product
+    return this.verifyDoc(orderId, Order, 'items.product');
   }
 
   async getUserOrders(userId: string): Promise<IOrder[]> {
