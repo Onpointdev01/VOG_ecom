@@ -1,5 +1,6 @@
 export * from './BaseController';
 export * from './AuthController';
+export * from './AdminController';
 export * from './UserController';
 export * from './NewCategoriesController';
 export * from './ProductController';
