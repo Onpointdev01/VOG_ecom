@@ -12,5 +12,6 @@ export * from './ProductBid';
 export * from './BidMessages';
 export * from './Order';
 export * from './UserView';
+export * from './Brand';
 
 export * from './newCategory'; // This exports Category and ICategory

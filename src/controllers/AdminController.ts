@@ -8,6 +8,7 @@ import {
   requestBody,
   requestParam,
   response,
+  queryParam,
 } from 'inversify-express-utils';
 import { Response } from 'express';
 import TYPES from '../di';
@@ -209,5 +210,326 @@ export class AdminController extends BaseController {
     await this.adminService.resetAdminPassword(adminId, newPassword);
     
     return this.sendResponse(res, 200, 'Admin password reset successfully', null);
+  }
+
+  // User Management Endpoints
+  @httpGet('/users', TYPES.RequireAdmin)
+  public async getAllUsers(
+    @response() res: Response,
+    @queryParam('page') page: string = '1',
+    @queryParam('limit') limit: string = '10',
+    @queryParam('search') search?: string,
+    @queryParam('banned') banned?: string,
+    @queryParam('verified') verified?: string,
+    @queryParam('role') role?: string
+  ) {
+    const pageNumber = Math.max(1, parseInt(page) || 1);
+    const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 10));
+    
+    const filters: any = {};
+    
+    if (search) {
+      filters.$or = [
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (banned !== undefined) {
+      filters.banned = banned === 'true';
+    }
+    
+    if (verified !== undefined) {
+      filters.verified = verified === 'true';
+    }
+    
+    if (role) {
+      filters.role = role;
+    }
+
+    const users = await this.adminService.getAllUsers(filters, pageNumber, limitNumber);
+    
+    return this.sendResponse(res, 200, 'Users retrieved successfully', users);
+  }
+
+  @httpPut('/users/:userId/ban', TYPES.RequireAdmin)
+  public async banUser(
+    @response() res: Response, 
+    @requestParam('userId') userId: string, 
+    @requestBody() payload: { banned: boolean; banReason?: string; banExpires?: Date }
+  ) {
+    const { banned, banReason, banExpires } = payload;
+
+    if (typeof banned !== 'boolean') {
+      throw new AppError('banned field is required and must be boolean', 400);
+    }
+
+    if (banned && !banReason?.trim()) {
+      throw new AppError('Ban reason is required when banning a user', 400);
+    }
+
+    const user = await this.adminService.updateUserBanStatus(userId, banned, banReason, banExpires);
+    
+    return this.sendResponse(res, 200, `User ${banned ? 'banned' : 'unbanned'} successfully`, {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      banned: user.banned,
+      banReason: user.banReason,
+      banExpires: user.banExpires,
+    });
+  }
+
+  // Category Management Endpoints
+  @httpGet('/categories', TYPES.RequireAdmin)
+  public async getAllCategories(@response() res: Response) {
+    const categories = await this.adminService.getAllCategories();
+    return this.sendResponse(res, 200, 'Categories retrieved successfully', categories);
+  }
+
+  @httpPost('/categories', TYPES.RequireAdmin)
+  public async createCategory(
+    @response() res: Response,
+    @requestBody() payload: { name: string; description?: string; isActive?: boolean }
+  ) {
+    const { name, description, isActive } = payload;
+
+    if (!name?.trim()) {
+      throw new AppError('Category name is required', 400);
+    }
+
+    const category = await this.adminService.createCategory({ name, description, isActive });
+    return this.sendResponse(res, 201, 'Category created successfully', category);
+  }
+
+  @httpPut('/categories/:categoryId', TYPES.RequireAdmin)
+  public async updateCategory(
+    @response() res: Response,
+    @requestParam('categoryId') categoryId: string,
+    @requestBody() payload: { name?: string; description?: string; isActive?: boolean }
+  ) {
+    const { name, description, isActive } = payload;
+
+    if (!name && description === undefined && isActive === undefined) {
+      throw new AppError('At least one field is required for update', 400);
+    }
+
+    const category = await this.adminService.updateCategory(categoryId, { name, description, isActive });
+    return this.sendResponse(res, 200, 'Category updated successfully', category);
+  }
+
+  @httpDelete('/categories/:categoryId', TYPES.RequireAdmin)
+  public async deleteCategory(@response() res: Response, @requestParam('categoryId') categoryId: string) {
+    await this.adminService.deleteCategory(categoryId);
+    return this.sendResponse(res, 200, 'Category deleted successfully', null);
+  }
+
+  // Brand Management Endpoints
+  @httpGet('/brands', TYPES.RequireAdmin)
+  public async getAllBrands(@response() res: Response) {
+    const brands = await this.adminService.getAllBrands();
+    return this.sendResponse(res, 200, 'Brands retrieved successfully', brands);
+  }
+
+  @httpPost('/brands', TYPES.RequireAdmin)
+  public async createBrand(
+    @response() res: Response,
+    @requestBody() payload: { name: string; description?: string; logoUrl?: string; website?: string; isActive?: boolean }
+  ) {
+    const { name, description, logoUrl, website, isActive } = payload;
+
+    if (!name?.trim()) {
+      throw new AppError('Brand name is required', 400);
+    }
+
+    const brand = await this.adminService.createBrand({ name, description, logoUrl, website, isActive });
+    return this.sendResponse(res, 201, 'Brand created successfully', brand);
+  }
+
+  @httpPut('/brands/:brandId', TYPES.RequireAdmin)
+  public async updateBrand(
+    @response() res: Response,
+    @requestParam('brandId') brandId: string,
+    @requestBody() payload: { name?: string; description?: string; logoUrl?: string; website?: string; isActive?: boolean }
+  ) {
+    const { name, description, logoUrl, website, isActive } = payload;
+
+    if (!name && description === undefined && logoUrl === undefined && website === undefined && isActive === undefined) {
+      throw new AppError('At least one field is required for update', 400);
+    }
+
+    const brand = await this.adminService.updateBrand(brandId, { name, description, logoUrl, website, isActive });
+    return this.sendResponse(res, 200, 'Brand updated successfully', brand);
+  }
+
+  @httpDelete('/brands/:brandId', TYPES.RequireAdmin)
+  public async deleteBrand(@response() res: Response, @requestParam('brandId') brandId: string) {
+    await this.adminService.deleteBrand(brandId);
+    return this.sendResponse(res, 200, 'Brand deleted successfully', null);
+  }
+
+  // Product Management Endpoints
+  @httpGet('/products', TYPES.RequireAdmin)
+  public async getAllProducts(
+    @response() res: Response,
+    @queryParam('page') page: string = '1',
+    @queryParam('limit') limit: string = '10',
+    @queryParam('search') search?: string,
+    @queryParam('isActive') isActive?: string,
+    @queryParam('category') category?: string,
+    @queryParam('owner') owner?: string
+  ) {
+    const pageNumber = Math.max(1, parseInt(page) || 1);
+    const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 10));
+    
+    const filters: any = {};
+    
+    if (search) {
+      filters.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { brand: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (isActive !== undefined) {
+      filters.isActive = isActive === 'true';
+    }
+    
+    if (category) {
+      filters.category = category;
+    }
+    
+    if (owner) {
+      filters.owner = owner;
+    }
+
+    const products = await this.adminService.getAllProducts(filters, pageNumber, limitNumber);
+    
+    return this.sendResponse(res, 200, 'Products retrieved successfully', products);
+  }
+
+  @httpPut('/products/:productId/status', TYPES.RequireAdmin)
+  public async updateProductStatus(
+    @response() res: Response,
+    @requestParam('productId') productId: string,
+    @requestBody() payload: { isActive: boolean }
+  ) {
+    const { isActive } = payload;
+
+    if (typeof isActive !== 'boolean') {
+      throw new AppError('isActive field is required and must be boolean', 400);
+    }
+
+    const product = await this.adminService.updateProductStatus(productId, isActive);
+    
+    return this.sendResponse(res, 200, 'Product status updated successfully', product);
+  }
+
+  @httpPut('/products/:productId/featured', TYPES.RequireAdmin)
+  public async updateProductFeatured(
+    @response() res: Response,
+    @requestParam('productId') productId: string,
+    @requestBody() payload: { isRecommended?: boolean; isFlash?: boolean }
+  ) {
+    const { isRecommended, isFlash } = payload;
+
+    const product = await this.adminService.updateProductFeatured(productId, { isRecommended, isFlash });
+    
+    return this.sendResponse(res, 200, 'Product featured status updated successfully', product);
+  }
+
+  @httpDelete('/products/:productId', TYPES.RequireAdmin)
+  public async deleteProduct(@response() res: Response, @requestParam('productId') productId: string) {
+    await this.adminService.deleteProduct(productId);
+    return this.sendResponse(res, 200, 'Product deleted successfully', null);
+  }
+
+  // Order Management Endpoints
+  @httpGet('/orders', TYPES.RequireAdmin)
+  public async getAllOrders(
+    @response() res: Response,
+    @queryParam('page') page: string = '1',
+    @queryParam('limit') limit: string = '10',
+    @queryParam('status') status?: string,
+    @queryParam('paymentStatus') paymentStatus?: string,
+    @queryParam('search') search?: string,
+    @queryParam('dateFrom') dateFrom?: string,
+    @queryParam('dateTo') dateTo?: string
+  ) {
+    const pageNumber = Math.max(1, parseInt(page) || 1);
+    const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 10));
+    
+    const filters: any = {};
+    
+    if (status) {
+      filters.orderStatus = status;
+    }
+    
+    if (paymentStatus) {
+      filters.paymentStatus = paymentStatus;
+    }
+    
+    if (search) {
+      filters.$or = [
+        { orderNumber: { $regex: search, $options: 'i' } },
+        { 'shippingAddress.fullName': { $regex: search, $options: 'i' } },
+        { 'shippingAddress.phoneNumber': { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (dateFrom || dateTo) {
+      filters.createdAt = {};
+      if (dateFrom) filters.createdAt.$gte = new Date(dateFrom);
+      if (dateTo) filters.createdAt.$lte = new Date(dateTo);
+    }
+
+    const orders = await this.adminService.getAllOrders(filters, pageNumber, limitNumber);
+    
+    return this.sendResponse(res, 200, 'Orders retrieved successfully', orders);
+  }
+
+  @httpPut('/orders/:orderId/status', TYPES.RequireAdmin)
+  public async updateOrderStatus(
+    @response() res: Response,
+    @requestParam('orderId') orderId: string,
+    @requestBody() payload: { orderStatus: string }
+  ) {
+    const { orderStatus } = payload;
+
+    const validStatuses = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+    if (!validStatuses.includes(orderStatus)) {
+      throw new AppError('Invalid order status', 400);
+    }
+
+    const order = await this.adminService.updateOrderStatus(orderId, orderStatus);
+    
+    return this.sendResponse(res, 200, 'Order status updated successfully', order);
+  }
+
+  @httpPut('/orders/:orderId/payment-status', TYPES.RequireAdmin)
+  public async updateOrderPaymentStatus(
+    @response() res: Response,
+    @requestParam('orderId') orderId: string,
+    @requestBody() payload: { paymentStatus: string }
+  ) {
+    const { paymentStatus } = payload;
+
+    const validStatuses = ['PENDING', 'COMPLETED', 'FAILED', 'REFUNDED'];
+    if (!validStatuses.includes(paymentStatus)) {
+      throw new AppError('Invalid payment status', 400);
+    }
+
+    const order = await this.adminService.updateOrderPaymentStatus(orderId, paymentStatus);
+    
+    return this.sendResponse(res, 200, 'Order payment status updated successfully', order);
+  }
+
+  @httpGet('/orders/:orderId', TYPES.RequireAdmin)
+  public async getOrderDetails(@response() res: Response, @requestParam('orderId') orderId: string) {
+    const order = await this.adminService.getOrderDetails(orderId);
+    return this.sendResponse(res, 200, 'Order details retrieved successfully', order);
   }
 }

@@ -6,6 +6,7 @@ const constants = {
     PRODUCT: 'Product',
     PRODUCT_VARIANT: 'ProductVariant',
     CATEGORY: 'Category',
+    BRAND: 'Brand',
     REVIEW: 'Review',
     ADDRESS: 'Address',
     CART: 'Cart',

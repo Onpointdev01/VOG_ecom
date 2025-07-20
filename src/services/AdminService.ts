@@ -2,6 +2,11 @@ import { injectable } from 'inversify';
 import jwt from 'jsonwebtoken';
 import { BaseService } from './BaseService';
 import { Admin, IAdmin } from '../models/Admin';
+import { User, IUser } from '../models/User';
+import { Category, ICategory } from '../models/newCategory';
+import { Brand, IBrand } from '../models/Brand';
+import { Product, IProduct } from '../models/Product';
+import { Order, IOrder } from '../models/Order';
 import AppError from '../utils/errors/AppError';
 import { env } from '../config';
 
@@ -13,6 +18,34 @@ export interface IAdminService {
   updateAdminStatus(adminId: string, isActive: boolean): Promise<IAdmin>;
   updateAdmin(adminId: string, data: Partial<IAdmin>): Promise<IAdmin>;
   deleteAdmin(adminId: string): Promise<void>;
+  
+  // User Management
+  getAllUsers(filters: any, page: number, limit: number): Promise<{ users: IUser[]; total: number; totalPages: number; currentPage: number }>;
+  updateUserBanStatus(userId: string, banned: boolean, banReason?: string, banExpires?: Date): Promise<IUser>;
+  
+  // Category Management
+  getAllCategories(): Promise<ICategory[]>;
+  createCategory(data: { name: string; description?: string; isActive?: boolean }): Promise<ICategory>;
+  updateCategory(categoryId: string, data: { name?: string; description?: string; isActive?: boolean }): Promise<ICategory>;
+  deleteCategory(categoryId: string): Promise<void>;
+  
+  // Brand Management
+  getAllBrands(): Promise<IBrand[]>;
+  createBrand(data: { name: string; description?: string; logoUrl?: string; website?: string; isActive?: boolean }): Promise<IBrand>;
+  updateBrand(brandId: string, data: { name?: string; description?: string; logoUrl?: string; website?: string; isActive?: boolean }): Promise<IBrand>;
+  deleteBrand(brandId: string): Promise<void>;
+  
+  // Product Management
+  getAllProducts(filters: any, page: number, limit: number): Promise<{ products: IProduct[]; total: number; totalPages: number; currentPage: number }>;
+  updateProductStatus(productId: string, isActive: boolean): Promise<IProduct>;
+  updateProductFeatured(productId: string, data: { isRecommended?: boolean; isFlash?: boolean }): Promise<IProduct>;
+  deleteProduct(productId: string): Promise<void>;
+  
+  // Order Management
+  getAllOrders(filters: any, page: number, limit: number): Promise<{ orders: IOrder[]; total: number; totalPages: number; currentPage: number }>;
+  updateOrderStatus(orderId: string, orderStatus: string): Promise<IOrder>;
+  updateOrderPaymentStatus(orderId: string, paymentStatus: string): Promise<IOrder>;
+  getOrderDetails(orderId: string): Promise<IOrder>;
 }
 
 export interface CreateAdminRequest {
@@ -158,5 +191,269 @@ export class AdminService extends BaseService implements IAdminService {
     
     admin.password = newPassword;
     await admin.save();
+  }
+
+  // User Management Methods
+  async getAllUsers(filters: any, page: number, limit: number): Promise<{ users: IUser[]; total: number; totalPages: number; currentPage: number }> {
+    const skip = (page - 1) * limit;
+    
+    const users = await User.find(filters)
+      .select('-password -refreshToken -verifyCode -passwordResetToken')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('seller', 'businessName businessType')
+      .lean();
+
+    const total = await User.countDocuments(filters);
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      users: users as IUser[],
+      total,
+      totalPages,
+      currentPage: page,
+    };
+  }
+
+  async updateUserBanStatus(userId: string, banned: boolean, banReason?: string, banExpires?: Date): Promise<IUser> {
+    const user = await this.verifyDoc(userId, User);
+    
+    user.banned = banned;
+    user.banReason = banned ? banReason || null : null;
+    user.banExpires = banned && banExpires ? banExpires : null;
+    
+    await user.save();
+    return user;
+  }
+
+  // Category Management Methods
+  async getAllCategories(): Promise<ICategory[]> {
+    return Category.find().sort({ createdAt: -1 });
+  }
+
+  async createCategory(data: { name: string; description?: string; isActive?: boolean }): Promise<ICategory> {
+    const existingCategory = await Category.findOne({ 
+      name: { $regex: new RegExp(`^${data.name}$`, 'i') } 
+    });
+    
+    if (existingCategory) {
+      throw new AppError('Category with this name already exists', 400);
+    }
+
+    const category = new Category({
+      name: data.name.trim(),
+      description: data.description?.trim(),
+      isActive: data.isActive !== undefined ? data.isActive : true,
+    });
+
+    await category.save();
+    return category;
+  }
+
+  async updateCategory(categoryId: string, data: { name?: string; description?: string; isActive?: boolean }): Promise<ICategory> {
+    const category = await this.verifyDoc(categoryId, Category);
+    
+    if (data.name) {
+      const existingCategory = await Category.findOne({ 
+        name: { $regex: new RegExp(`^${data.name}$`, 'i') },
+        _id: { $ne: categoryId }
+      });
+      
+      if (existingCategory) {
+        throw new AppError('Category with this name already exists', 400);
+      }
+      
+      category.name = data.name.trim();
+    }
+    
+    if (data.description !== undefined) {
+      category.description = data.description?.trim();
+    }
+    
+    if (data.isActive !== undefined) {
+      category.isActive = data.isActive;
+    }
+
+    await category.save();
+    return category;
+  }
+
+  async deleteCategory(categoryId: string): Promise<void> {
+    await this.verifyDoc(categoryId, Category);
+    await Category.findByIdAndDelete(categoryId);
+  }
+
+  // Brand Management Methods
+  async getAllBrands(): Promise<IBrand[]> {
+    return Brand.find().sort({ createdAt: -1 });
+  }
+
+  async createBrand(data: { name: string; description?: string; logoUrl?: string; website?: string; isActive?: boolean }): Promise<IBrand> {
+    const existingBrand = await Brand.findOne({ 
+      name: { $regex: new RegExp(`^${data.name}$`, 'i') } 
+    });
+    
+    if (existingBrand) {
+      throw new AppError('Brand with this name already exists', 400);
+    }
+
+    const brand = new Brand({
+      name: data.name.trim(),
+      description: data.description?.trim(),
+      logoUrl: data.logoUrl?.trim(),
+      website: data.website?.trim(),
+      isActive: data.isActive !== undefined ? data.isActive : true,
+    });
+
+    await brand.save();
+    return brand;
+  }
+
+  async updateBrand(brandId: string, data: { name?: string; description?: string; logoUrl?: string; website?: string; isActive?: boolean }): Promise<IBrand> {
+    const brand = await this.verifyDoc(brandId, Brand);
+    
+    if (data.name) {
+      const existingBrand = await Brand.findOne({ 
+        name: { $regex: new RegExp(`^${data.name}$`, 'i') },
+        _id: { $ne: brandId }
+      });
+      
+      if (existingBrand) {
+        throw new AppError('Brand with this name already exists', 400);
+      }
+      
+      brand.name = data.name.trim();
+    }
+    
+    if (data.description !== undefined) {
+      brand.description = data.description?.trim();
+    }
+    
+    if (data.logoUrl !== undefined) {
+      brand.logoUrl = data.logoUrl?.trim();
+    }
+    
+    if (data.website !== undefined) {
+      brand.website = data.website?.trim();
+    }
+    
+    if (data.isActive !== undefined) {
+      brand.isActive = data.isActive;
+    }
+
+    await brand.save();
+    return brand;
+  }
+
+  async deleteBrand(brandId: string): Promise<void> {
+    await this.verifyDoc(brandId, Brand);
+    await Brand.findByIdAndDelete(brandId);
+  }
+
+  // Product Management Methods
+  async getAllProducts(filters: any, page: number, limit: number): Promise<{ products: IProduct[]; total: number; totalPages: number; currentPage: number }> {
+    const skip = (page - 1) * limit;
+    
+    const products = await Product.find(filters)
+      .populate('category', 'name')
+      .populate('owner', 'businessName businessType')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Product.countDocuments(filters);
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      products: products as IProduct[],
+      total,
+      totalPages,
+      currentPage: page,
+    };
+  }
+
+  async updateProductStatus(productId: string, isActive: boolean): Promise<IProduct> {
+    const product = await this.verifyDoc(productId, Product);
+    
+    product.isActive = isActive;
+    await product.save();
+    
+    return product;
+  }
+
+  async updateProductFeatured(productId: string, data: { isRecommended?: boolean; isFlash?: boolean }): Promise<IProduct> {
+    const product = await this.verifyDoc(productId, Product);
+    
+    if (data.isRecommended !== undefined) {
+      product.isRecommended = data.isRecommended;
+    }
+    
+    if (data.isFlash !== undefined) {
+      product.isFlash = data.isFlash;
+    }
+    
+    await product.save();
+    return product;
+  }
+
+  async deleteProduct(productId: string): Promise<void> {
+    await this.verifyDoc(productId, Product);
+    await Product.findByIdAndDelete(productId);
+  }
+
+  // Order Management Methods
+  async getAllOrders(filters: any, page: number, limit: number): Promise<{ orders: IOrder[]; total: number; totalPages: number; currentPage: number }> {
+    const skip = (page - 1) * limit;
+    
+    const orders = await Order.find(filters)
+      .populate('user', 'firstName lastName email')
+      .populate('items.product', 'name price images')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Order.countDocuments(filters);
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      orders: orders as IOrder[],
+      total,
+      totalPages,
+      currentPage: page,
+    };
+  }
+
+  async updateOrderStatus(orderId: string, orderStatus: string): Promise<IOrder> {
+    const order = await this.verifyDoc(orderId, Order);
+    
+    order.orderStatus = orderStatus as any;
+    await order.save();
+    
+    return order;
+  }
+
+  async updateOrderPaymentStatus(orderId: string, paymentStatus: string): Promise<IOrder> {
+    const order = await this.verifyDoc(orderId, Order);
+    
+    order.paymentStatus = paymentStatus as any;
+    await order.save();
+    
+    return order;
+  }
+
+  async getOrderDetails(orderId: string): Promise<IOrder> {
+    const order = await Order.findById(orderId)
+      .populate('user', 'firstName lastName email phoneNumber')
+      .populate('items.product', 'name price images brand description')
+      .lean();
+
+    if (!order) {
+      throw new AppError('Order not found', 404);
+    }
+
+    return order as IOrder;
   }
 }
