@@ -21,6 +21,12 @@ export interface IProductService {
     search?: string,
     user?: IUser
   ): Promise<any[]>;
+  getProductsByCategoryId(
+    categoryId: string,
+    includeSubcategories: boolean,
+    page: number,
+    limit: number
+  ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}>;
   updateProduct(id: string, payload: Partial<IProduct>): Promise<IProduct>;
   deleteProduct(id: string): Promise<void>;
   reviewProduct(review: createReviewDTO): Promise<IReview>;
@@ -329,6 +335,102 @@ export class ProductService extends BaseService implements IProductService {
       
       return result;
     });
+  }
+
+  async getProductsByCategoryId(
+    categoryId: string,
+    includeSubcategories: boolean,
+    page: number,
+    limit: number
+  ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}> {
+    const skip = (page - 1) * limit;
+    
+    // Build category filter
+    let categoryFilter: any = { 'categoryData._id': categoryId };
+    
+    if (includeSubcategories) {
+      // Get all subcategories of the given category
+      const Category = this.Product.db.model('Category');
+      const subcategories = await Category.find({ parent: categoryId });
+      const subcategoryIds = subcategories.map(sub => sub._id);
+      
+      // Include main category and all its subcategories
+      categoryFilter = {
+        'categoryData._id': { $in: [categoryId, ...subcategoryIds] }
+      };
+    }
+
+    const aggregationPipeline: any[] = [
+      // Lookup category data
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category',
+          foreignField: '_id',
+          as: 'categoryData',
+        },
+      },
+      { $unwind: '$categoryData' },
+      
+      // Match active products and category filter
+      {
+        $match: {
+          $and: [
+            { isActive: true },
+            categoryFilter
+          ]
+        },
+      },
+      
+      // Lookup owner/seller data
+      {
+        $lookup: {
+          from: 'sellers',
+          localField: 'owner',
+          foreignField: '_id',
+          as: 'ownerData',
+        },
+      },
+      {
+        $addFields: {
+          owner: {
+            $cond: {
+              if: { $eq: [{ $size: '$ownerData' }, 0] },
+              then: null,
+              else: { $arrayElemAt: ['$ownerData', 0] },
+            },
+          },
+        },
+      },
+      
+      // Sort by creation date (newest first)
+      { $sort: { createdAt: -1 } },
+      
+      // Add total count
+      {
+        $facet: {
+          products: [
+            { $skip: skip },
+            { $limit: limit }
+          ],
+          totalCount: [
+            { $count: "count" }
+          ]
+        }
+      }
+    ];
+
+    const result = await this.Product.aggregate(aggregationPipeline);
+    const products = result[0].products || [];
+    const total = result[0].totalCount[0]?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      products,
+      total,
+      totalPages,
+      currentPage: page,
+    };
   }
 
   async updateProduct(id: string, payload: Partial<IProduct>): Promise<IProduct> {

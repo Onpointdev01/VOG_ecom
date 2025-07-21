@@ -85,12 +85,31 @@ export class ProductController extends BaseController {
     if (isFlash) {
       filter.isFlash = isFlash === '1';
     }
-    // if (category) {
-    //   filter.category = category;
-    // }
 
     const products = await this.productService.getAllProducts(filter, category, search, res.locals.user);
     return this.sendResponse(res, 200, 'Products retrieved successfully', products);
+  }
+
+  @httpGet('/category/:categoryId')
+  async getProductsByCategory(
+    @response() res: Response,
+    @requestParam('categoryId') categoryId: string,
+    @queryParam('includeSubcategories') includeSubcategories: string = 'false',
+    @queryParam('page') page: string = '1',
+    @queryParam('limit') limit: string = '20'
+  ) {
+    const includeSubcats = includeSubcategories.toLowerCase() === 'true';
+    const pageNumber = Math.max(1, parseInt(page) || 1);
+    const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 20));
+
+    const products = await this.productService.getProductsByCategoryId(
+      categoryId, 
+      includeSubcats, 
+      pageNumber, 
+      limitNumber
+    );
+    
+    return this.sendResponse(res, 200, 'Category products retrieved successfully', products);
   }
 
   @httpPut('/:id')

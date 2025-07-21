@@ -292,15 +292,15 @@ export class AdminController extends BaseController {
   @httpPost('/categories', TYPES.RequireAdmin)
   public async createCategory(
     @response() res: Response,
-    @requestBody() payload: { name: string; description?: string; isActive?: boolean }
+    @requestBody() payload: { name: string; description?: string; parent?: string | null; isActive?: boolean }
   ) {
-    const { name, description, isActive } = payload;
+    const { name, description, parent, isActive } = payload;
 
     if (!name?.trim()) {
       throw new AppError('Category name is required', 400);
     }
 
-    const category = await this.adminService.createCategory({ name, description, isActive });
+    const category = await this.adminService.createCategory({ name, description, parent, isActive });
     return this.sendResponse(res, 201, 'Category created successfully', category);
   }
 
@@ -308,15 +308,15 @@ export class AdminController extends BaseController {
   public async updateCategory(
     @response() res: Response,
     @requestParam('categoryId') categoryId: string,
-    @requestBody() payload: { name?: string; description?: string; isActive?: boolean }
+    @requestBody() payload: { name?: string; description?: string; parent?: string | null; isActive?: boolean }
   ) {
-    const { name, description, isActive } = payload;
+    const { name, description, parent, isActive } = payload;
 
-    if (!name && description === undefined && isActive === undefined) {
+    if (!name && description === undefined && parent === undefined && isActive === undefined) {
       throw new AppError('At least one field is required for update', 400);
     }
 
-    const category = await this.adminService.updateCategory(categoryId, { name, description, isActive });
+    const category = await this.adminService.updateCategory(categoryId, { name, description, parent, isActive });
     return this.sendResponse(res, 200, 'Category updated successfully', category);
   }
 
@@ -439,6 +439,53 @@ export class AdminController extends BaseController {
     const product = await this.adminService.updateProductFeatured(productId, { isRecommended, isFlash });
     
     return this.sendResponse(res, 200, 'Product featured status updated successfully', product);
+  }
+
+  @httpPost('/products', TYPES.RequireAdmin)
+  public async createProduct(@response() res: Response, @requestBody() payload: any) {
+    const {
+      name,
+      description,
+      brand,
+      category,
+      productType,
+      price,
+      originalPrice,
+      condition,
+      color,
+      quantityAvailable,
+      images,
+      isActive,
+      isRecommended,
+      isFlash
+    } = payload;
+
+    // Basic validation
+    if (!name?.trim() || !description?.trim() || !brand || !category) {
+      throw new AppError('Name, description, brand, and category are required', 400);
+    }
+
+    const adminId = res.locals.admin;
+    
+    const product = await this.adminService.createProduct({
+      name: name.trim(),
+      description: description.trim(),
+      brand,
+      category,
+      productType: productType || 'simple',
+      price,
+      originalPrice,
+      condition,
+      color,
+      quantityAvailable,
+      images: images || [],
+      isActive: isActive !== undefined ? isActive : true,
+      isRecommended: isRecommended || false,
+      isFlash: isFlash || false,
+      adminUserId: adminId,
+    });
+
+    return this.sendResponse(res, 201, 'Product created successfully', product);
   }
 
   @httpDelete('/products/:productId', TYPES.RequireAdmin)

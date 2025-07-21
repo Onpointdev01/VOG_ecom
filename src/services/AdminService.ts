@@ -7,6 +7,7 @@ import { Category, ICategory } from '../models/newCategory';
 import { Brand, IBrand } from '../models/Brand';
 import { Product, IProduct } from '../models/Product';
 import { Order, IOrder } from '../models/Order';
+import { Seller, ISeller } from '../models/Seller';
 import AppError from '../utils/errors/AppError';
 import { env } from '../config';
 
@@ -37,6 +38,7 @@ export interface IAdminService {
   
   // Product Management
   getAllProducts(filters: any, page: number, limit: number): Promise<{ products: IProduct[]; total: number; totalPages: number; currentPage: number }>;
+  createProduct(data: any): Promise<IProduct>;
   updateProductStatus(productId: string, isActive: boolean): Promise<IProduct>;
   updateProductFeatured(productId: string, data: { isRecommended?: boolean; isFlash?: boolean }): Promise<IProduct>;
   deleteProduct(productId: string): Promise<void>;
@@ -202,7 +204,7 @@ export class AdminService extends BaseService implements IAdminService {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('seller', 'businessName businessType')
+      .populate('seller', 'name type official')
       .lean();
 
     const total = await User.countDocuments(filters);
@@ -229,10 +231,12 @@ export class AdminService extends BaseService implements IAdminService {
 
   // Category Management Methods
   async getAllCategories(): Promise<ICategory[]> {
-    return Category.find().sort({ createdAt: -1 });
+    return Category.find()
+      .populate('parent', 'name')
+      .sort({ parent: 1, displayOrder: 1, createdAt: -1 });
   }
 
-  async createCategory(data: { name: string; description?: string; isActive?: boolean }): Promise<ICategory> {
+  async createCategory(data: { name: string; description?: string; parent?: string | null; isActive?: boolean }): Promise<ICategory> {
     const existingCategory = await Category.findOne({ 
       name: { $regex: new RegExp(`^${data.name}$`, 'i') } 
     });
@@ -241,9 +245,18 @@ export class AdminService extends BaseService implements IAdminService {
       throw new AppError('Category with this name already exists', 400);
     }
 
+    // If parent is provided, verify it exists
+    if (data.parent) {
+      const parentCategory = await Category.findById(data.parent);
+      if (!parentCategory) {
+        throw new AppError('Parent category not found', 400);
+      }
+    }
+
     const category = new Category({
       name: data.name.trim(),
       description: data.description?.trim(),
+      parent: data.parent ? data.parent as any : null,
       isActive: data.isActive !== undefined ? data.isActive : true,
     });
 
@@ -251,7 +264,7 @@ export class AdminService extends BaseService implements IAdminService {
     return category;
   }
 
-  async updateCategory(categoryId: string, data: { name?: string; description?: string; isActive?: boolean }): Promise<ICategory> {
+  async updateCategory(categoryId: string, data: { name?: string; description?: string; parent?: string | null; isActive?: boolean }): Promise<ICategory> {
     const category = await this.verifyDoc(categoryId, Category);
     
     if (data.name) {
@@ -270,6 +283,29 @@ export class AdminService extends BaseService implements IAdminService {
     if (data.description !== undefined) {
       category.description = data.description?.trim();
     }
+
+    if (data.parent !== undefined) {
+      // Prevent circular references
+      if (data.parent === categoryId) {
+        throw new AppError('Category cannot be its own parent', 400);
+      }
+
+      // If parent is provided, verify it exists
+      if (data.parent) {
+        const parentCategory = await Category.findById(data.parent);
+        if (!parentCategory) {
+          throw new AppError('Parent category not found', 400);
+        }
+
+        // Check if setting this parent would create a circular reference
+        const wouldCreateCircle = await this.checkCircularReference(categoryId, data.parent);
+        if (wouldCreateCircle) {
+          throw new AppError('Cannot set parent - would create circular reference', 400);
+        }
+      }
+
+      category.parent = data.parent ? data.parent as any : null;
+    }
     
     if (data.isActive !== undefined) {
       category.isActive = data.isActive;
@@ -277,6 +313,24 @@ export class AdminService extends BaseService implements IAdminService {
 
     await category.save();
     return category;
+  }
+
+  // Helper method to check for circular references in category hierarchy
+  private async checkCircularReference(categoryId: string, potentialParentId: string): Promise<boolean> {
+    let currentParentId = potentialParentId;
+    const visited = new Set<string>();
+
+    while (currentParentId && !visited.has(currentParentId)) {
+      if (currentParentId === categoryId) {
+        return true; // Circular reference found
+      }
+
+      visited.add(currentParentId);
+      const parentCategory = await Category.findById(currentParentId);
+      currentParentId = parentCategory?.parent?.toString() || '';
+    }
+
+    return false;
   }
 
   async deleteCategory(categoryId: string): Promise<void> {
@@ -357,7 +411,7 @@ export class AdminService extends BaseService implements IAdminService {
     
     const products = await Product.find(filters)
       .populate('category', 'name')
-      .populate('owner', 'businessName businessType')
+      .populate('owner', 'name type official')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -372,6 +426,56 @@ export class AdminService extends BaseService implements IAdminService {
       totalPages,
       currentPage: page,
     };
+  }
+
+  async createProduct(data: any): Promise<IProduct> {
+    // For admin-created products, we need to find or create a system seller
+    let systemSeller = await Seller.findOne({ name: 'System Admin Store', type: 'company' });
+    
+    if (!systemSeller) {
+      // Create a system seller if it doesn't exist
+      // Note: This requires a user account, so we'll create a minimal seller entry
+      // In a real implementation, you might want to create a dedicated admin user first
+      systemSeller = new Seller({
+        user: data.adminUserId || null, // You might need to pass admin user ID
+        type: 'company',
+        name: 'System Admin Store',
+        logo: '',
+        official: true,
+        status: 'active',
+        products: []
+      });
+      await systemSeller.save();
+    }
+    
+    const product = new Product({
+      name: data.name,
+      description: data.description,
+      productType: data.productType,
+      category: data.category,
+      brand: data.brand,
+      price: data.price,
+      originalPrice: data.originalPrice,
+      condition: data.condition,
+      color: data.color,
+      quantityAvailable: data.quantityAvailable,
+      images: data.images,
+      isActive: data.isActive,
+      isFlash: data.isFlash,
+      isRecommended: data.isRecommended,
+      rating: 0,
+      noOfReviews: 0,
+      reviews: [],
+      owner: systemSeller._id, // Use the system seller as owner
+    });
+
+    await product.save();
+    
+    // Add product to seller's products list
+    systemSeller.products.push(product._id as any);
+    await systemSeller.save();
+    
+    return product;
   }
 
   async updateProductStatus(productId: string, isActive: boolean): Promise<IProduct> {
