@@ -188,16 +188,16 @@ export class ProductController extends BaseController {
       }
       
       try {
-        // Create the bid proposal message from user
+        // Create the bid proposal message from user (actual bid amount)
         await this.bidMessageService.createBidProposalMessage(
           authenticatedUser._id.toString(),
           sellerId.toString(),
           id,
           bid._id.toString(),
-          `I would like to offer $${payload.bidAmount.toFixed(2)} for this item.`
+          `$${payload.bidAmount.toFixed(2)}`
         );
 
-        // Create automatic system response message (per bid_process.png)
+        // Create automatic system response message (from seller to user)
         await this.bidMessageService.createSystemMessage(
           sellerId.toString(),
           authenticatedUser._id.toString(),
@@ -211,6 +211,52 @@ export class ProductController extends BaseController {
     }
     
     return this.sendResponse(res, 200, 'Bid placed successfully', bid);
+  }
+
+  //initiate conversation for product inquiry
+  @httpPost('/:id/inquiry', TYPES.RequireSignIn)
+  async initiateProductInquiry(
+    @response() res: Response,
+    @request() req: any,
+    @requestParam('id') id: string
+  ) {
+    // Check if we have a valid user with ID
+    const authenticatedUser = req.user || res.locals.user;
+    if (!authenticatedUser || !authenticatedUser._id) {
+      return this.sendResponse(res, 401, 'User not authenticated');
+    }
+
+    // Get the product to find the seller/owner
+    const product = await this.productService.getProductById(id);
+    if (!product || !product.owner) {
+      return this.sendResponse(res, 404, 'Product not found or has no owner');
+    }
+
+    const sellerId = product.owner._id || product.owner;
+
+    try {
+      // Create initial product inquiry message (user shows interest)
+      await this.bidMessageService.createProductInquiryMessage(
+        authenticatedUser._id.toString(),
+        sellerId.toString(),
+        id,
+        `Hi! My name is Grace Opata. I would love to make an offer for this item:`,
+        product
+      );
+
+      // Create automatic system response (seller responds)
+      await this.bidMessageService.createSystemMessage(
+        sellerId.toString(),
+        authenticatedUser._id.toString(),
+        id,
+        null, // No bid ID yet
+        'Hey there; please enter your bid amount'
+      );
+
+      return this.sendResponse(res, 200, 'Conversation initiated successfully');
+    } catch (error) {
+      return this.sendResponse(res, 500, 'Failed to initiate conversation');
+    }
   }
 
   //get all bids for a product (sellers only)

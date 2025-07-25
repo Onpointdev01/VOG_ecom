@@ -9,7 +9,8 @@ export interface IBidMessageService {
   createBidProposalMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
   createBidAcceptedMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
   createBidRejectedMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
-  createSystemMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
+  createSystemMessage(senderId: string, recipientId: string, productId: string, bidId: string | null, message: string): Promise<IBidMessages>;
+  createProductInquiryMessage(senderId: string, recipientId: string, productId: string, message: string, product: any): Promise<IBidMessages>;
   getBidMessages(userId: string, productId?: string): Promise<IBidMessages[]>;
   markMessageAsRead(messageId: string, userId: string): Promise<IBidMessages>;
 }
@@ -60,7 +61,7 @@ export class BidMessageService extends BaseService implements IBidMessageService
     senderId: string, 
     recipientId: string, 
     productId: string, 
-    bidId: string, 
+    bidId: string | null, 
     message: string
   ): Promise<IBidMessages> {
     // Validate ObjectId formats
@@ -73,17 +74,52 @@ export class BidMessageService extends BaseService implements IBidMessageService
     if (!this.isValidObjectId(productId)) {
       throw new Error(`Invalid productId format: ${productId}`);
     }
-    if (!this.isValidObjectId(bidId)) {
+    if (bidId && !this.isValidObjectId(bidId)) {
       throw new Error(`Invalid bidId format: ${bidId}`);
+    }
+
+    const messageData: any = {
+      sender: senderId,
+      recipient: recipientId,
+      product: productId,
+      type: 'SYSTEM',
+      message: message
+    };
+
+    // Only add bid if provided
+    if (bidId) {
+      messageData.bid = bidId;
+    }
+
+    const newBidMessage = await this.BidMessage.create(messageData);
+    return newBidMessage;
+  }
+
+  async createProductInquiryMessage(
+    senderId: string, 
+    recipientId: string, 
+    productId: string, 
+    message: string,
+    product: any
+  ): Promise<IBidMessages> {
+    // Validate ObjectId formats
+    if (!this.isValidObjectId(senderId)) {
+      throw new Error(`Invalid senderId format: ${senderId}`);
+    }
+    if (!this.isValidObjectId(recipientId)) {
+      throw new Error(`Invalid recipientId format: ${recipientId}`);
+    }
+    if (!this.isValidObjectId(productId)) {
+      throw new Error(`Invalid productId format: ${productId}`);
     }
 
     const newBidMessage = await this.BidMessage.create({
       sender: senderId,
       recipient: recipientId,
       product: productId,
-      bid: bidId,
-      type: 'SYSTEM',
+      type: 'PRODUCT_INQUIRY',
       message: message
+      // No bid field for initial inquiry
     });
 
     return newBidMessage;

@@ -8,7 +8,7 @@ export interface IBidMessages extends Document {
   recipient: Schema.Types.ObjectId;
   product: Schema.Types.ObjectId;
   bid?: Schema.Types.ObjectId;
-  type: 'BID_PROPOSAL' | 'BID_ACCEPTED' | 'BID_REJECTED' | 'SYSTEM';
+  type: 'BID_PROPOSAL' | 'BID_ACCEPTED' | 'BID_REJECTED' | 'SYSTEM' | 'PRODUCT_INQUIRY';
   message: string;
   createdAt: Date;
 }
@@ -36,7 +36,7 @@ const BidMessagesSchema: Schema<IBidMessages> = new Schema<IBidMessages>(
     },
     type: {
       type: String,
-      enum: ['BID_PROPOSAL', 'BID_ACCEPTED', 'BID_REJECTED', 'SYSTEM'],
+      enum: ['BID_PROPOSAL', 'BID_ACCEPTED', 'BID_REJECTED', 'SYSTEM', 'PRODUCT_INQUIRY'],
       required: true,
     },
     message: {
