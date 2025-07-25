@@ -17,7 +17,7 @@ import { FilterQuery } from 'mongoose';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
-import { IProductBidService, IProductService, IReviewService, IViewTrackingService } from '../services';
+import { IProductBidService, IProductService, IReviewService, IViewTrackingService, IBidMessageService } from '../services';
 import { IProduct } from '../models';
 import { createProductDTO, createReviewDTO, getAllProductsQuery } from '../utils/dtos';
 import { getAllProductsSchema } from '../validators';
@@ -28,7 +28,8 @@ export class ProductController extends BaseController {
     @inject(TYPES.ProductService) private productService: IProductService,
     @inject(TYPES.ProductBidService) private productBidService: IProductBidService,
     @inject(TYPES.ReviewService) private reviewService: IReviewService,
-    @inject(TYPES.ViewTrackingService) private viewTrackingService: IViewTrackingService
+    @inject(TYPES.ViewTrackingService) private viewTrackingService: IViewTrackingService,
+    @inject(TYPES.BidMessageService) private bidMessageService: IBidMessageService
   ) {
     super();
   }
@@ -157,7 +158,20 @@ export class ProductController extends BaseController {
     @requestParam('id') id: string,
     @requestBody() payload: { bidAmount: number }
   ) {
-    const bid = await this.productBidService.createBid(id, res.locals.user, payload.bidAmount);
+    const user = res.locals.user;
+    const bid = await this.productBidService.createBid(id, user._id.toString(), payload.bidAmount);
+    
+    // Create bid proposal message - this will appear in the chat
+    if (bid.seller) {
+      await this.bidMessageService.createBidProposalMessage(
+        user._id.toString(),
+        bid.seller.toString(),
+        id,
+        bid._id.toString(),
+        `I would like to offer $${payload.bidAmount.toFixed(2)} for this item.`
+      );
+    }
+    
     return this.sendResponse(res, 200, 'Bid placed successfully', bid);
   }
 
