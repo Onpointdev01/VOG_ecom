@@ -185,7 +185,7 @@ export class BidMessageService extends BaseService implements IBidMessageService
         .populate('recipient', 'firstName lastName email')
         .populate('product', 'name images price')
         .populate('bid')
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: 1 }); // 1 = ascending (oldest first, newest last)
 
       return messages || [];
     } catch (error) {
