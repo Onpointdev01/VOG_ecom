@@ -198,25 +198,11 @@ export class BidMessageService extends BaseService implements IBidMessageService
 
   async getConversations(userId: string): Promise<any[]> {
     try {
-      console.log('=== CONVERSATIONS DEBUG ===');
+      console.log('=== CONVERSATIONS AGGREGATION DEBUG ===');
       console.log('User ID:', userId);
       
-      // First check if user has any messages at all
-      const totalMessages = await this.BidMessage.countDocuments({
-        $or: [
-          { sender: this.toObjectId(userId) },
-          { recipient: this.toObjectId(userId) }
-        ]
-      });
-      console.log('Total messages for user:', totalMessages);
-      
-      if (totalMessages === 0) {
-        console.log('No messages found for user, returning empty array');
-        return [];
-      }
-      
       const conversations = await this.BidMessage.aggregate([
-        // Match messages where user is sender or recipient
+        // Stage 1: Match messages where user is sender or recipient
         {
           $match: {
             $or: [
@@ -225,11 +211,13 @@ export class BidMessageService extends BaseService implements IBidMessageService
             ]
           }
         },
-        // Sort by creation date (newest first for getting latest message per product)
+        
+        // Stage 2: Sort by creation date (newest first for grouping)
         {
           $sort: { createdAt: -1 }
         },
-        // Group by product to get conversations
+        
+        // Stage 3: Group by product to get conversations
         {
           $group: {
             _id: '$product',
@@ -238,67 +226,181 @@ export class BidMessageService extends BaseService implements IBidMessageService
             lastMessageDate: { $first: '$createdAt' }
           }
         },
-        // Sort conversations by most recent message (newest first)
+        
+        // Stage 4: Sort conversations by most recent message
         {
           $sort: { lastMessageDate: -1 }
         },
-        // Populate product details
+        
+        // Stage 5: Lookup product details
         {
           $lookup: {
             from: 'products',
             localField: '_id',
             foreignField: '_id',
-            as: 'product'
+            as: 'productData'
           }
         },
-        // Populate sender details for last message
+        
+        // Stage 6: Lookup sender details for last message
         {
           $lookup: {
             from: 'users',
             localField: 'lastMessage.sender',
             foreignField: '_id',
-            as: 'lastMessage.sender'
+            as: 'senderData'
           }
         },
-        // Populate recipient details for last message
+        
+        // Stage 7: Lookup recipient details for last message
         {
           $lookup: {
             from: 'users',
             localField: 'lastMessage.recipient',
             foreignField: '_id',
-            as: 'lastMessage.recipient'
+            as: 'recipientData'
           }
         },
-        // Transform the result
+        
+        // Stage 8: Transform the result to match expected API format
         {
           $project: {
-            product: { 
-              $mergeObjects: [
-                { $arrayElemAt: ['$product', 0] },
-                { id: { $toString: { $arrayElemAt: ['$product._id', 0] } } }
-              ]
+            product: {
+              $let: {
+                vars: { productData: { $arrayElemAt: ['$productData', 0] } },
+                in: {
+                  id: { $toString: '$_id' },
+                  _id: '$_id',
+                  name: '$$productData.name',
+                  images: '$$productData.images',
+                  price: '$$productData.price',
+                  owner: '$$productData.owner'
+                }
+              }
             },
             lastMessage: {
               id: { $toString: '$lastMessage._id' },
+              _id: '$lastMessage._id',
               message: '$lastMessage.message',
               type: '$lastMessage.type',
               createdAt: '$lastMessage.createdAt',
-              sender: { $arrayElemAt: ['$lastMessage.sender', 0] },
-              recipient: { $arrayElemAt: ['$lastMessage.recipient', 0] }
+              sender: {
+                $let: {
+                  vars: { senderData: { $arrayElemAt: ['$senderData', 0] } },
+                  in: {
+                    _id: '$$senderData._id',
+                    firstName: '$$senderData.firstName',
+                    lastName: '$$senderData.lastName',
+                    email: '$$senderData.email'
+                  }
+                }
+              },
+              recipient: {
+                $let: {
+                  vars: { recipientData: { $arrayElemAt: ['$recipientData', 0] } },
+                  in: {
+                    _id: '$$recipientData._id',
+                    firstName: '$$recipientData.firstName',
+                    lastName: '$$recipientData.lastName',
+                    email: '$$recipientData.email'
+                  }
+                }
+              }
             },
-            messageCount: 1,
-            unreadCount: 0 // TODO: Implement unread logic
+            messageCount: '$messageCount',
+            unreadCount: 0 // TODO: Implement unread logic later
           }
         }
       ]);
-
-      console.log('Aggregation result count:', conversations.length);
-      console.log('First conversation:', JSON.stringify(conversations[0], null, 2));
+      
+      console.log('Aggregation pipeline completed');
+      console.log('Conversations found:', conversations.length);
+      
+      if (conversations.length > 0) {
+        console.log('First conversation structure:', {
+          productId: conversations[0].product?.id,
+          productName: conversations[0].product?.name,
+          lastMessageType: conversations[0].lastMessage?.type,
+          lastMessageDate: conversations[0].lastMessage?.createdAt
+        });
+      }
+      
       console.log('=== END CONVERSATIONS DEBUG ===');
-
-      return conversations || [];
+      
+      return conversations;
     } catch (error) {
-      console.error('Error in getConversations:', error);
+      console.error('Error in MongoDB aggregation:', error);
+      console.error('Error details:', error instanceof Error ? error.message : 'Unknown error');
+      
+      // Fallback to application-level grouping if aggregation fails
+      console.log('Falling back to application-level grouping...');
+      return this.getConversationsFallback(userId);
+    }
+  }
+  
+  // Fallback method using application-level grouping
+  private async getConversationsFallback(userId: string): Promise<any[]> {
+    try {
+      const allMessages = await this.getBidMessages(userId);
+      
+      if (allMessages.length === 0) {
+        return [];
+      }
+      
+      // Convert Mongoose documents to plain objects first
+      const plainMessages = allMessages.map(msg => {
+        const msgObj = (msg as any).toJSON ? (msg as any).toJSON() : msg;
+        return msgObj;
+      });
+      
+      // Group messages by product
+      const conversationsMap = new Map();
+      
+      for (const message of plainMessages) {
+        const productId = message.product?.id || message.product?._id?.toString() || message.product?.toString();
+        if (!productId) continue;
+        
+        if (!conversationsMap.has(productId)) {
+          conversationsMap.set(productId, {
+            product: {
+              id: productId,
+              _id: message.product._id || message.product.id,
+              name: message.product.name,
+              images: message.product.images,
+              price: message.product.price,
+              owner: message.product.owner
+            },
+            lastMessage: null,
+            messageCount: 0,
+            unreadCount: 0
+          });
+        }
+        
+        const conversation = conversationsMap.get(productId);
+        conversation.messageCount++;
+        
+        if (!conversation.lastMessage || 
+            new Date(message.createdAt) > new Date(conversation.lastMessage.createdAt)) {
+          conversation.lastMessage = {
+            id: message.id || message._id?.toString(),
+            _id: message._id,
+            message: message.message,
+            type: message.type,
+            createdAt: message.createdAt,
+            sender: message.sender,
+            recipient: message.recipient,
+            bid: message.bid
+          };
+        }
+      }
+      
+      return Array.from(conversationsMap.values()).sort((a, b) => {
+        const dateA = new Date(a.lastMessage?.createdAt || 0);
+        const dateB = new Date(b.lastMessage?.createdAt || 0);
+        return dateB.getTime() - dateA.getTime();
+      });
+    } catch (error) {
+      console.error('Fallback method also failed:', error);
       return [];
     }
   }
@@ -307,6 +409,7 @@ export class BidMessageService extends BaseService implements IBidMessageService
     const mongoose = require('mongoose');
     return new mongoose.Types.ObjectId(id);
   }
+
 
   async markMessageAsRead(messageId: string, userId: string): Promise<IBidMessages> {
     const message = await this.BidMessage.findOne({
