@@ -161,15 +161,41 @@ export class ProductController extends BaseController {
     const user = res.locals.user;
     const bid = await this.productBidService.createBid(id, user._id.toString(), payload.bidAmount);
     
+    // Get the product to find the seller/owner for message creation
+    const product = await this.productService.getProductById(id);
+    console.log('🔍 Product for message creation:', {
+      id: product?.id,
+      owner: product?.owner,
+      ownerType: typeof product?.owner
+    });
+    
     // Create bid proposal message - this will appear in the chat
-    if (bid.seller) {
-      await this.bidMessageService.createBidProposalMessage(
-        user._id.toString(),
-        bid.seller.toString(),
-        id,
-        bid._id.toString(),
-        `I would like to offer $${payload.bidAmount.toFixed(2)} for this item.`
-      );
+    if (product && product.owner) {
+      const sellerId = product.owner._id || product.owner;
+      console.log('💬 Creating bid proposal message with:', {
+        senderId: user._id.toString(),
+        sellerId: sellerId.toString(),
+        productId: id,
+        bidId: bid._id.toString()
+      });
+      
+      try {
+        await this.bidMessageService.createBidProposalMessage(
+          user._id.toString(),
+          sellerId.toString(),
+          id,
+          bid._id.toString(),
+          `I would like to offer $${payload.bidAmount.toFixed(2)} for this item.`
+        );
+        console.log('✅ Bid proposal message created successfully');
+      } catch (messageError) {
+        console.error('❌ Failed to create bid proposal message:', messageError);
+        console.error('❌ Message error details:', messageError.message);
+        // Don't fail the bid creation, just log the error
+      }
+    } else {
+      console.warn('⚠️ Product has no owner set - cannot create bid message');
+      console.warn('⚠️ Product data:', product);
     }
     
     return this.sendResponse(res, 200, 'Bid placed successfully', bid);
