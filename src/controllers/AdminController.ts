@@ -785,4 +785,37 @@ export class AdminController extends BaseController {
     
     return this.sendResponse(res, 200, 'Bid analytics retrieved successfully', analytics);
   }
+
+  // =====================================
+  // PRODUCT-CENTRIC BID MANAGEMENT ENDPOINTS
+  // =====================================
+
+  @httpGet('/products/with-bids', TYPES.RequireAdmin)
+  public async getProductsWithBids(
+    @response() res: Response,
+    @queryParam('page') page?: string,
+    @queryParam('limit') limit?: string,
+    @queryParam('search') search?: string
+  ) {
+    const pageNumber = parseInt(page || '1');
+    const limitNumber = parseInt(limit || '10');
+
+    const products = await this.productBidService.getProductsWithBids(
+      { search },
+      pageNumber,
+      limitNumber
+    );
+    
+    return this.sendResponse(res, 200, 'Products with bids retrieved successfully', products);
+  }
+
+  @httpGet('/products/:productId/bids', TYPES.RequireAdmin)
+  public async getProductBids(
+    @response() res: Response,
+    @requestParam('productId') productId: string
+  ) {
+    const productBids = await this.productBidService.getProductBidsForAdmin(productId);
+    
+    return this.sendResponse(res, 200, 'Product bids retrieved successfully', productBids);
+  }
 }

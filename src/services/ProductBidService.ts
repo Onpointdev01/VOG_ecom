@@ -27,6 +27,10 @@ export interface IProductBidService {
   forceRejectBid(bidId: string, reason?: string): Promise<IBid>;
   cancelBid(bidId: string, reason: string): Promise<IBid>;
   getBidAnalytics(period: string, dateFrom?: string, dateTo?: string): Promise<any>;
+  
+  // Product-centric admin methods
+  getProductsWithBids(filters: any, page: number, limit: number): Promise<{ products: any[]; total: number; page: number; totalPages: number }>;
+  getProductBidsForAdmin(productId: string): Promise<any>;
 }
 @injectable()
 export class ProductBidService implements IProductBidService {
@@ -359,7 +363,8 @@ export class ProductBidService implements IProductBidService {
       weekBids,
       monthBids,
       avgBidPrice,
-      topProducts
+      topProducts,
+      totalProducts
     ] = await Promise.all([
       this.Bid.countDocuments(),
       this.Bid.countDocuments({ status: 'PENDING' }),
@@ -390,10 +395,16 @@ export class ProductBidService implements IProductBidService {
             bidCount: '$count'
           }
         }
+      ]),
+      // Count distinct products that have bids
+      this.Bid.aggregate([
+        { $group: { _id: '$product' } },
+        { $count: 'totalProducts' }
       ])
     ]);
 
     return {
+      totalProducts: totalProducts[0]?.totalProducts || 0,
       totalBids,
       pendingBids,
       acceptedBids,
@@ -541,5 +552,191 @@ export class ProductBidService implements IProductBidService {
     ]);
 
     return analytics;
+  }
+
+  // =====================================
+  // PRODUCT-CENTRIC ADMIN METHODS
+  // =====================================
+
+  /**
+   * Get products with bid statistics for admin dashboard
+   */
+  async getProductsWithBids(
+    filters: any, 
+    page: number, 
+    limit: number
+  ): Promise<{ products: any[]; total: number; page: number; totalPages: number }> {
+    const { search } = filters;
+    
+    // Build aggregation pipeline
+    const pipeline: any[] = [
+      // Match products that have bids
+      {
+        $lookup: {
+          from: 'productbids',
+          localField: '_id',
+          foreignField: 'product',
+          as: 'bids'
+        }
+      },
+      {
+        $match: {
+          'bids.0': { $exists: true } // Only products with at least one bid
+        }
+      },
+      // Populate seller information
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'owner',
+          foreignField: '_id',
+          as: 'seller'
+        }
+      },
+      {
+        $unwind: '$seller'
+      },
+      // Add search functionality
+      ...(search ? [{
+        $match: {
+          $or: [
+            { name: { $regex: search, $options: 'i' } },
+            { 'seller.firstName': { $regex: search, $options: 'i' } },
+            { 'seller.lastName': { $regex: search, $options: 'i' } },
+            { 'seller.email': { $regex: search, $options: 'i' } }
+          ]
+        }
+      }] : []),
+      // Calculate bid statistics
+      {
+        $addFields: {
+          bidCount: { $size: '$bids' },
+          pendingBids: {
+            $size: {
+              $filter: {
+                input: '$bids',
+                cond: { $eq: ['$$this.status', 'PENDING'] }
+              }
+            }
+          },
+          acceptedBids: {
+            $size: {
+              $filter: {
+                input: '$bids',
+                cond: { $eq: ['$$this.status', 'ACCEPTED'] }
+              }
+            }
+          },
+          highestBid: { $max: '$bids.bidPrice' },
+          lowestBid: { $min: '$bids.bidPrice' },
+          avgBidPrice: { $avg: '$bids.bidPrice' },
+          latestBidDate: { $max: '$bids.createdAt' }
+        }
+      },
+      // Project final fields
+      {
+        $project: {
+          id: '$_id',
+          name: 1,
+          price: 1,
+          images: 1,
+          seller: {
+            _id: '$seller._id',
+            firstName: '$seller.firstName',
+            lastName: '$seller.lastName',
+            email: '$seller.email'
+          },
+          bidCount: 1,
+          pendingBids: 1,
+          acceptedBids: 1,
+          highestBid: 1,
+          lowestBid: 1,
+          avgBidPrice: 1,
+          latestBidDate: 1
+        }
+      },
+      // Sort by latest bid activity
+      {
+        $sort: { latestBidDate: -1 }
+      }
+    ];
+
+    // Get total count for pagination
+    const countPipeline = [...pipeline, { $count: 'total' }];
+    const countResult = await this.Product.aggregate(countPipeline);
+    const total = countResult[0]?.total || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    // Add pagination
+    const skip = (page - 1) * limit;
+    pipeline.push({ $skip: skip }, { $limit: limit });
+
+    const products = await this.Product.aggregate(pipeline);
+
+    return { products, total, page, totalPages };
+  }
+
+  /**
+   * Get all bids for a specific product with product details and statistics
+   */
+  async getProductBidsForAdmin(productId: string): Promise<any> {
+    // Get product details
+    const product = await this.Product.findById(productId)
+      .populate('owner', 'firstName lastName email');
+
+    if (!product) {
+      throw new AppError('Product not found', 404);
+    }
+
+    // Get all bids for this product
+    const bids = await this.Bid.find({ product: productId })
+      .populate('buyer', 'firstName lastName email')
+      .sort({ createdAt: -1 });
+
+    // Calculate statistics
+    const totalBids = bids.length;
+    const pendingBids = bids.filter(bid => bid.status === 'PENDING').length;
+    const acceptedBids = bids.filter(bid => bid.status === 'ACCEPTED').length;
+    const rejectedBids = bids.filter(bid => bid.status === 'REJECTED').length;
+    const bidPrices = bids.map(bid => bid.bidPrice);
+    const highestBid = bidPrices.length > 0 ? Math.max(...bidPrices) : 0;
+    const lowestBid = bidPrices.length > 0 ? Math.min(...bidPrices) : 0;
+    const avgBidPrice = bidPrices.length > 0 ? bidPrices.reduce((a, b) => a + b, 0) / bidPrices.length : 0;
+
+    return {
+      product: {
+        id: product._id,
+        name: product.name,
+        price: product.price,
+        images: product.images,
+        description: product.description,
+        seller: {
+          _id: (product.owner as any)._id,
+          firstName: (product.owner as any).firstName,
+          lastName: (product.owner as any).lastName,
+          email: (product.owner as any).email
+        }
+      },
+      bids: bids.map(bid => ({
+        id: bid._id,
+        buyer: bid.buyer,
+        bidPrice: bid.bidPrice,
+        status: bid.status,
+        createdAt: bid.createdAt,
+        updatedAt: bid.updatedAt,
+        expiresAt: bid.expiresAt,
+        adminOverride: (bid as any).adminOverride,
+        adminReason: (bid as any).adminReason
+      })),
+      statistics: {
+        totalBids,
+        pendingBids,
+        acceptedBids,
+        rejectedBids,
+        highestBid,
+        lowestBid,
+        avgBidPrice
+      }
+    };
   }
 }
