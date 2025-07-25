@@ -172,11 +172,31 @@ export class ProductController extends BaseController {
     // Create bid proposal message - this will appear in the chat
     if (product && product.owner) {
       const sellerId = product.owner._id || product.owner;
+      
+      // Validate all required IDs before proceeding
+      if (!user || !user._id) {
+        console.error('❌ User or user._id is undefined');
+        return this.sendResponse(res, 200, 'Bid placed successfully', bid);
+      }
+      
+      if (!sellerId) {
+        console.error('❌ sellerId is undefined - product.owner:', product.owner);
+        return this.sendResponse(res, 200, 'Bid placed successfully', bid);
+      }
+      
+      if (!bid || !bid._id) {
+        console.error('❌ bid or bid._id is undefined - bid:', bid);
+        return this.sendResponse(res, 200, 'Bid placed successfully', bid);
+      }
+      
       console.log('💬 Creating bid proposal message with:', {
-        senderId: user._id.toString(),
-        sellerId: sellerId.toString(),
+        senderId: user._id?.toString() || 'undefined',
+        sellerId: sellerId?.toString() || 'undefined',
         productId: id,
-        bidId: bid._id.toString()
+        bidId: bid._id?.toString() || 'undefined',
+        userType: typeof user._id,
+        sellerType: typeof sellerId,
+        bidType: typeof bid._id
       });
       
       try {
