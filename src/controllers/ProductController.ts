@@ -155,67 +155,49 @@ export class ProductController extends BaseController {
   @httpPost('/:id/bid', TYPES.RequireSignIn)
   async bidForProduct(
     @response() res: Response,
+    @request() req: any,
     @requestParam('id') id: string,
     @requestBody() payload: { bidAmount: number }
   ) {
-    const user = res.locals.user;
-    const bid = await this.productBidService.createBid(id, user._id.toString(), payload.bidAmount);
+    // Check if we have a valid user with ID
+    const authenticatedUser = req.user || res.locals.user;
+    if (!authenticatedUser || !authenticatedUser._id) {
+      return this.sendResponse(res, 401, 'User not authenticated');
+    }
+    
+    const bid = await this.productBidService.createBid(id, authenticatedUser._id.toString(), payload.bidAmount);
     
     // Get the product to find the seller/owner for message creation
     const product = await this.productService.getProductById(id);
-    console.log('🔍 Product for message creation:', {
-      id: product?.id,
-      owner: product?.owner,
-      ownerType: typeof product?.owner
-    });
     
     // Create bid proposal message - this will appear in the chat
     if (product && product.owner) {
       const sellerId = product.owner._id || product.owner;
       
       // Validate all required IDs before proceeding
-      if (!user || !user._id) {
-        console.error('❌ User or user._id is undefined');
+      if (!authenticatedUser || !authenticatedUser._id) {
         return this.sendResponse(res, 200, 'Bid placed successfully', bid);
       }
       
       if (!sellerId) {
-        console.error('❌ sellerId is undefined - product.owner:', product.owner);
         return this.sendResponse(res, 200, 'Bid placed successfully', bid);
       }
       
       if (!bid || !bid._id) {
-        console.error('❌ bid or bid._id is undefined - bid:', bid);
         return this.sendResponse(res, 200, 'Bid placed successfully', bid);
       }
       
-      console.log('💬 Creating bid proposal message with:', {
-        senderId: user._id?.toString() || 'undefined',
-        sellerId: sellerId?.toString() || 'undefined',
-        productId: id,
-        bidId: bid._id?.toString() || 'undefined',
-        userType: typeof user._id,
-        sellerType: typeof sellerId,
-        bidType: typeof bid._id
-      });
-      
       try {
         await this.bidMessageService.createBidProposalMessage(
-          user._id.toString(),
+          authenticatedUser._id.toString(),
           sellerId.toString(),
           id,
           bid._id.toString(),
           `I would like to offer $${payload.bidAmount.toFixed(2)} for this item.`
         );
-        console.log('✅ Bid proposal message created successfully');
       } catch (messageError) {
-        console.error('❌ Failed to create bid proposal message:', messageError);
-        console.error('❌ Message error details:', messageError instanceof Error ? messageError.message : String(messageError));
-        // Don't fail the bid creation, just log the error
+        // Don't fail the bid creation, just silently handle the error
       }
-    } else {
-      console.warn('⚠️ Product has no owner set - cannot create bid message');
-      console.warn('⚠️ Product data:', product);
     }
     
     return this.sendResponse(res, 200, 'Bid placed successfully', bid);

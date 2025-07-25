@@ -101,7 +101,25 @@ export class ProductBidService implements IProductBidService {
       isWithinPriceRange: true,
     });
 
-    return await newBid.save();
+    try {
+      const savedBid = await newBid.save();
+
+      if (!savedBid || !savedBid._id) {
+        throw new AppError('Failed to create bid - document not saved properly', 500);
+      }
+      return savedBid;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Only one bid per product within 24 hours')) {
+        throw new AppError('You can only place one bid per product in 24 hours', 400);
+      }
+      
+      // Re-throw the original error if it's already an AppError
+      if (error instanceof AppError) {
+        throw error;
+      }
+      
+      throw new AppError('Failed to create bid', 500);
+    }
   }
 
   /**
