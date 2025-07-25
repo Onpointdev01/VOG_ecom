@@ -176,7 +176,7 @@ export class OrderService extends BaseService {
     // Create Payment record for the order
     try {
       const payment = await this.paymentService.createPayment({
-        orderId: order._id.toString(),
+        orderId: (order._id as string).toString(),
         userId: userId,
         paymentMethod: paymentMethod as PaymentMethod,
         amount: finalPrice,
@@ -186,15 +186,15 @@ export class OrderService extends BaseService {
       });
 
       // Link payment to order
-      order.activePayment = payment._id;
-      order.payments = [payment._id];
+      order.activePayment = payment._id as any;
+      order.payments = [payment._id as any];
       await order.save();
 
     } catch (error: any) {
       console.error('Payment creation error:', error);
       // If payment creation fails, we should still return the order
       // but log the error for investigation
-      console.error(`Failed to create payment for order ${order._id}: ${error.message}`);
+      console.error(`Failed to create payment for order ${(order._id as string).toString()}: ${error.message}`);
     }
 
     // DON'T clear cart yet - wait for confirmation or payment
@@ -264,12 +264,12 @@ export class OrderService extends BaseService {
   async shipOrder(orderId: string, trackingNumber?: string): Promise<IOrder> {
     const order = await this.verifyDoc(orderId, Order);
     
-    // Only allow shipping from PROCESSING status
-    if (order.orderStatus !== 'PROCESSING') {
-      throw new AppError('Order must be in PROCESSING status to ship', 400);
+    // Only allow shipping from CONFIRMED status
+    if (order.orderStatus !== 'CONFIRMED') {
+      throw new AppError('Order must be in CONFIRMED status to ship', 400);
     }
 
-    order.orderStatus = 'SHIPPED';
+    order.orderStatus = 'OUT_FOR_DELIVERY';
     if (trackingNumber) {
       order.paymentReference = trackingNumber; // Using this field for tracking
     }
@@ -281,12 +281,12 @@ export class OrderService extends BaseService {
   async deliverOrder(orderId: string): Promise<IOrder> {
     const order = await this.verifyDoc(orderId, Order);
     
-    // Only allow delivery from SHIPPED status
-    if (order.orderStatus !== 'SHIPPED') {
-      throw new AppError('Order must be in SHIPPED status to deliver', 400);
+    // Only allow delivery from OUT_FOR_DELIVERY status
+    if (order.orderStatus !== 'OUT_FOR_DELIVERY') {
+      throw new AppError('Order must be in OUT_FOR_DELIVERY status to deliver', 400);
     }
 
-    order.orderStatus = 'DELIVERED';
+    order.orderStatus = 'COMPLETE';
     
     // For COD orders, mark payment as completed upon delivery
     if (order.paymentMethod === 'CASH_ON_DELIVERY') {

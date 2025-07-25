@@ -7,7 +7,7 @@ import constants from '../utils/constants';
 const { ORDER, PRODUCT, USER, PAYMENT_OPTION, PAYMENT } = constants.mongooseModels;
 
 export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'OUT_FOR_DELIVERY' | 'COMPLETE' | 'CANCELLED';
-export type PaymentStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
+export type OrderPaymentStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
 
 export interface IOrderItem {
   _id: string;
@@ -35,7 +35,7 @@ export interface IOrder extends Document {
   items: IOrderItem[];
   shippingAddress: IShippingAddress;
   paymentMethod: PaymentMethodType;
-  paymentStatus: PaymentStatus;
+  paymentStatus: OrderPaymentStatus;
   orderStatus: OrderStatus;
   totalPrice: number;
   shippingFee: number;
