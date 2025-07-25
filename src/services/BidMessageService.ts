@@ -9,6 +9,7 @@ export interface IBidMessageService {
   createBidProposalMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
   createBidAcceptedMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
   createBidRejectedMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
+  createSystemMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
   getBidMessages(userId: string, productId?: string): Promise<IBidMessages[]>;
   markMessageAsRead(messageId: string, userId: string): Promise<IBidMessages>;
 }
