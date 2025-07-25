@@ -188,12 +188,22 @@ export class ProductController extends BaseController {
       }
       
       try {
+        // Create the bid proposal message from user
         await this.bidMessageService.createBidProposalMessage(
           authenticatedUser._id.toString(),
           sellerId.toString(),
           id,
           bid._id.toString(),
           `I would like to offer $${payload.bidAmount.toFixed(2)} for this item.`
+        );
+
+        // Create automatic system response message (per bid_process.png)
+        await this.bidMessageService.createSystemMessage(
+          sellerId.toString(),
+          authenticatedUser._id.toString(),
+          id,
+          bid._id.toString(),
+          'Please wait for us to confirm or decline your offer'
         );
       } catch (messageError) {
         // Don't fail the bid creation, just silently handle the error

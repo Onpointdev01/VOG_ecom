@@ -55,6 +55,39 @@ export class BidMessageService extends BaseService implements IBidMessageService
     return newBidMessage;
   }
 
+  async createSystemMessage(
+    senderId: string, 
+    recipientId: string, 
+    productId: string, 
+    bidId: string, 
+    message: string
+  ): Promise<IBidMessages> {
+    // Validate ObjectId formats
+    if (!this.isValidObjectId(senderId)) {
+      throw new Error(`Invalid senderId format: ${senderId}`);
+    }
+    if (!this.isValidObjectId(recipientId)) {
+      throw new Error(`Invalid recipientId format: ${recipientId}`);
+    }
+    if (!this.isValidObjectId(productId)) {
+      throw new Error(`Invalid productId format: ${productId}`);
+    }
+    if (!this.isValidObjectId(bidId)) {
+      throw new Error(`Invalid bidId format: ${bidId}`);
+    }
+
+    const newBidMessage = await this.BidMessage.create({
+      sender: senderId,
+      recipient: recipientId,
+      product: productId,
+      bid: bidId,
+      type: 'SYSTEM',
+      message: message
+    });
+
+    return newBidMessage;
+  }
+
   private isValidObjectId(id: string): boolean {
     return /^[0-9a-fA-F]{24}$/.test(id);
   }
