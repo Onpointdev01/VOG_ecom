@@ -48,6 +48,10 @@ export interface IAdminService {
   updateOrderStatus(orderId: string, orderStatus: string): Promise<IOrder>;
   updateOrderPaymentStatus(orderId: string, paymentStatus: string): Promise<IOrder>;
   getOrderDetails(orderId: string): Promise<IOrder>;
+  
+  // Bid-related User Management
+  banUserFromBidding(userId: string, reason: string, expiresAt?: Date): Promise<IUser>;
+  unbanUserFromBidding(userId: string): Promise<IUser>;
 }
 
 export interface CreateAdminRequest {
@@ -563,5 +567,54 @@ export class AdminService extends BaseService implements IAdminService {
     }
 
     return order as IOrder;
+  }
+
+  // =====================================
+  // BID-RELATED USER MANAGEMENT
+  // =====================================
+
+  /**
+   * Ban a user from bidding
+   */
+  async banUserFromBidding(userId: string, reason: string, expiresAt?: Date): Promise<IUser> {
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    // Add bidBan fields to user (using any type for flexibility)
+    (user as any).bidBan = {
+      isBanned: true,
+      reason: reason,
+      bannedAt: new Date(),
+      expiresAt: expiresAt || null
+    };
+
+    await user.save();
+    return user;
+  }
+
+  /**
+   * Unban a user from bidding
+   */
+  async unbanUserFromBidding(userId: string): Promise<IUser> {
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    // Remove bidBan or set it to inactive
+    (user as any).bidBan = {
+      isBanned: false,
+      reason: null,
+      bannedAt: null,
+      expiresAt: null,
+      unbannedAt: new Date()
+    };
+
+    await user.save();
+    return user;
   }
 }

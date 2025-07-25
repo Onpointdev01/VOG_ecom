@@ -14,6 +14,9 @@ export interface IBidMessageService {
   getBidMessages(userId: string, productId?: string): Promise<IBidMessages[]>;
   getConversations(userId: string): Promise<any[]>;
   markMessageAsRead(messageId: string, userId: string): Promise<IBidMessages>;
+  
+  // Admin methods
+  getAllMessagesForAdmin(filters: any, page: number, limit: number): Promise<{ messages: IBidMessages[]; total: number; page: number; totalPages: number }>;
 }
 
 @injectable()
@@ -422,5 +425,43 @@ export class BidMessageService extends BaseService implements IBidMessageService
     }
 
     return message;
+  }
+
+  // =====================================
+  // ADMIN METHODS
+  // =====================================
+
+  /**
+   * Get all bid messages for admin with filtering and pagination
+   */
+  async getAllMessagesForAdmin(
+    filters: any,
+    page: number,
+    limit: number
+  ): Promise<{ messages: IBidMessages[]; total: number; page: number; totalPages: number }> {
+    const query: any = {};
+
+    if (filters.productId) {
+      query.product = this.toObjectId(filters.productId);
+    }
+
+    if (filters.type) {
+      query.type = filters.type;
+    }
+
+    const total = await this.BidMessage.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+    const skip = (page - 1) * limit;
+
+    const messages = await this.BidMessage.find(query)
+      .populate('sender', 'firstName lastName email')
+      .populate('recipient', 'firstName lastName email')
+      .populate('product', 'name images price')
+      .populate('bid')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return { messages, total, page, totalPages };
   }
 }

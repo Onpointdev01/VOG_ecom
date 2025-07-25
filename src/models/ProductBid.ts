@@ -10,7 +10,7 @@ export interface IBid extends Document {
   buyer: PopulatedDoc<IUser>;
   seller: PopulatedDoc<ISeller>;
   bidPrice: number;
-  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
   expiresAt?: Date;
   cooldownUntil?: Date;
   isWithinPriceRange: boolean;
@@ -43,7 +43,7 @@ const bidSchema: Schema<IBid> = new Schema<IBid>(
     },
     status: {
       type: String,
-      enum: ['PENDING', 'ACCEPTED', 'REJECTED', 'EXPIRED'],
+      enum: ['PENDING', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CANCELLED'],
       default: 'PENDING',
     },
     expiresAt: {

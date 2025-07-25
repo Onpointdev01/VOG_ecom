@@ -13,6 +13,7 @@ import {
 import { Response } from 'express';
 import TYPES from '../di';
 import { AdminService, CreateAdminRequest } from '../services/AdminService';
+import { IProductBidService, IBidMessageService } from '../services';
 import { BaseController } from './BaseController';
 import AppError from '../utils/errors/AppError';
 
@@ -34,7 +35,11 @@ export interface ChangePasswordDTO {
 
 @controller('/api/v1/admin')
 export class AdminController extends BaseController {
-  constructor(@inject(TYPES.AdminService) private adminService: AdminService) {
+  constructor(
+    @inject(TYPES.AdminService) private adminService: AdminService,
+    @inject(TYPES.ProductBidService) private productBidService: IProductBidService,
+    @inject(TYPES.BidMessageService) private bidMessageService: IBidMessageService
+  ) {
     super();
   }
 
@@ -578,5 +583,206 @@ export class AdminController extends BaseController {
   public async getOrderDetails(@response() res: Response, @requestParam('orderId') orderId: string) {
     const order = await this.adminService.getOrderDetails(orderId);
     return this.sendResponse(res, 200, 'Order details retrieved successfully', order);
+  }
+
+  // =====================================
+  // BID MANAGEMENT ENDPOINTS
+  // =====================================
+
+  @httpGet('/bids', TYPES.RequireAdmin)
+  public async getAllBids(
+    @response() res: Response,
+    @queryParam('page') page?: string,
+    @queryParam('limit') limit?: string,
+    @queryParam('status') status?: string,
+    @queryParam('search') search?: string,
+    @queryParam('dateFrom') dateFrom?: string,
+    @queryParam('dateTo') dateTo?: string,
+    @queryParam('productId') productId?: string,
+    @queryParam('buyerId') buyerId?: string,
+    @queryParam('sellerId') sellerId?: string
+  ) {
+    const pageNumber = parseInt(page || '1');
+    const limitNumber = parseInt(limit || '20');
+
+    const filters: any = {};
+
+    if (status) {
+      filters.status = status;
+    }
+
+    if (productId) {
+      filters.product = productId;
+    }
+
+    if (buyerId) {
+      filters.buyer = buyerId;
+    }
+
+    if (sellerId) {
+      filters.seller = sellerId;
+    }
+
+    if (dateFrom || dateTo) {
+      filters.createdAt = {};
+      if (dateFrom) filters.createdAt.$gte = new Date(dateFrom);
+      if (dateTo) filters.createdAt.$lte = new Date(dateTo);
+    }
+
+    const bids = await this.productBidService.getAllBidsForAdmin(filters, pageNumber, limitNumber, search);
+    
+    return this.sendResponse(res, 200, 'Bids retrieved successfully', bids);
+  }
+
+  @httpGet('/bids/statistics', TYPES.RequireAdmin)
+  public async getBidStatistics(@response() res: Response) {
+    const stats = await this.productBidService.getBidStatistics();
+    return this.sendResponse(res, 200, 'Bid statistics retrieved successfully', stats);
+  }
+
+  @httpGet('/bids/:bidId', TYPES.RequireAdmin)
+  public async getBidDetails(@response() res: Response, @requestParam('bidId') bidId: string) {
+    const bid = await this.productBidService.getBidById(bidId);
+    
+    if (!bid) {
+      throw new AppError('Bid not found', 404);
+    }
+    
+    return this.sendResponse(res, 200, 'Bid details retrieved successfully', bid);
+  }
+
+  @httpPut('/bids/:bidId/force-accept', TYPES.RequireAdmin)
+  public async forceAcceptBid(
+    @response() res: Response,
+    @requestParam('bidId') bidId: string,
+    @requestBody() payload: { reason?: string }
+  ) {
+    const { reason } = payload;
+    
+    const bid = await this.productBidService.forceAcceptBid(bidId, reason);
+    
+    // Send notification to both buyer and seller
+    if (bid.seller && bid.buyer) {
+      await this.bidMessageService.createSystemMessage(
+        bid.seller.toString(),
+        bid.buyer.toString(),
+        bid.product.toString(),
+        bidId,
+        `Your bid has been accepted by admin. ${reason ? `Reason: ${reason}` : ''}`
+      );
+    }
+    
+    return this.sendResponse(res, 200, 'Bid force accepted successfully', bid);
+  }
+
+  @httpPut('/bids/:bidId/force-reject', TYPES.RequireAdmin)
+  public async forceRejectBid(
+    @response() res: Response,
+    @requestParam('bidId') bidId: string,
+    @requestBody() payload: { reason?: string }
+  ) {
+    const { reason } = payload;
+    
+    const bid = await this.productBidService.forceRejectBid(bidId, reason);
+    
+    // Send notification to both buyer and seller
+    if (bid.seller && bid.buyer) {
+      await this.bidMessageService.createSystemMessage(
+        bid.seller.toString(),
+        bid.buyer.toString(),
+        bid.product.toString(),
+        bidId,
+        `Your bid has been rejected by admin. ${reason ? `Reason: ${reason}` : ''}`
+      );
+    }
+    
+    return this.sendResponse(res, 200, 'Bid force rejected successfully', bid);
+  }
+
+  @httpPut('/bids/:bidId/cancel', TYPES.RequireAdmin)
+  public async cancelBid(
+    @response() res: Response,
+    @requestParam('bidId') bidId: string,
+    @requestBody() payload: { reason: string }
+  ) {
+    const { reason } = payload;
+    
+    if (!reason?.trim()) {
+      throw new AppError('Reason is required for bid cancellation', 400);
+    }
+    
+    const bid = await this.productBidService.cancelBid(bidId, reason);
+    
+    // Send notification to both buyer and seller
+    if (bid.seller && bid.buyer) {
+      await this.bidMessageService.createSystemMessage(
+        bid.seller.toString(),
+        bid.buyer.toString(),
+        bid.product.toString(),
+        bidId,
+        `This bid has been cancelled by admin. Reason: ${reason}`
+      );
+    }
+    
+    return this.sendResponse(res, 200, 'Bid cancelled successfully', bid);
+  }
+
+  @httpGet('/bid-messages', TYPES.RequireAdmin)
+  public async getAllBidMessages(
+    @response() res: Response,
+    @queryParam('page') page?: string,
+    @queryParam('limit') limit?: string,
+    @queryParam('productId') productId?: string,
+    @queryParam('type') type?: string
+  ) {
+    const pageNumber = parseInt(page || '1');
+    const limitNumber = parseInt(limit || '50');
+
+    const messages = await this.bidMessageService.getAllMessagesForAdmin(
+      { productId, type },
+      pageNumber,
+      limitNumber
+    );
+    
+    return this.sendResponse(res, 200, 'Bid messages retrieved successfully', messages);
+  }
+
+  @httpPut('/users/:userId/bid-ban', TYPES.RequireAdmin)
+  public async banUserFromBidding(
+    @response() res: Response,
+    @requestParam('userId') userId: string,
+    @requestBody() payload: { reason: string; expiresAt?: string }
+  ) {
+    const { reason, expiresAt } = payload;
+    
+    if (!reason?.trim()) {
+      throw new AppError('Reason is required for bid ban', 400);
+    }
+    
+    const user = await this.adminService.banUserFromBidding(userId, reason, expiresAt ? new Date(expiresAt) : undefined);
+    
+    return this.sendResponse(res, 200, 'User banned from bidding successfully', user);
+  }
+
+  @httpPut('/users/:userId/bid-unban', TYPES.RequireAdmin)
+  public async unbanUserFromBidding(
+    @response() res: Response,
+    @requestParam('userId') userId: string
+  ) {
+    const user = await this.adminService.unbanUserFromBidding(userId);
+    
+    return this.sendResponse(res, 200, 'User unbanned from bidding successfully', user);
+  }
+
+  @httpGet('/bid-analytics', TYPES.RequireAdmin)
+  public async getBidAnalytics(
+    @response() res: Response,
+    @queryParam('period') period?: string, // 'daily', 'weekly', 'monthly'
+    @queryParam('dateFrom') dateFrom?: string,
+    @queryParam('dateTo') dateTo?: string
+  ) {
+    const analytics = await this.productBidService.getBidAnalytics(period || 'weekly', dateFrom, dateTo);
+    
+    return this.sendResponse(res, 200, 'Bid analytics retrieved successfully', analytics);
   }
 }

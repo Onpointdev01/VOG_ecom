@@ -19,6 +19,14 @@ export interface IProductBidService {
   getUserBids(userId: string, status?: string, page?: number, limit?: number): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }>;
   getSellerBids(sellerId: string, status?: string, page?: number, limit?: number): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }>;
   markBidAsConverted(bidId: string): Promise<IBid>;
+  
+  // Admin methods
+  getAllBidsForAdmin(filters: any, page: number, limit: number, search?: string): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }>;
+  getBidStatistics(): Promise<any>;
+  forceAcceptBid(bidId: string, reason?: string): Promise<IBid>;
+  forceRejectBid(bidId: string, reason?: string): Promise<IBid>;
+  cancelBid(bidId: string, reason: string): Promise<IBid>;
+  getBidAnalytics(period: string, dateFrom?: string, dateTo?: string): Promise<any>;
 }
 @injectable()
 export class ProductBidService implements IProductBidService {
@@ -280,5 +288,258 @@ export class ProductBidService implements IProductBidService {
     (bid as any).convertedAt = new Date();
     
     return await bid.save();
+  }
+
+  // =====================================
+  // ADMIN METHODS
+  // =====================================
+
+  /**
+   * Get all bids for admin with filtering and pagination
+   */
+  async getAllBidsForAdmin(
+    filters: any, 
+    page: number, 
+    limit: number, 
+    search?: string
+  ): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
+    const query: any = { ...filters };
+
+    // Add search functionality (search by product name or user email)
+    if (search) {
+      const searchProducts = await this.Product.find({
+        name: { $regex: search, $options: 'i' }
+      }).select('_id');
+      
+      const searchUsers = await this.User.find({
+        $or: [
+          { email: { $regex: search, $options: 'i' } },
+          { firstName: { $regex: search, $options: 'i' } },
+          { lastName: { $regex: search, $options: 'i' } }
+        ]
+      }).select('_id');
+
+      query.$or = [
+        { product: { $in: searchProducts.map(p => p._id) } },
+        { buyer: { $in: searchUsers.map(u => u._id) } },
+        { seller: { $in: searchUsers.map(u => u._id) } }
+      ];
+    }
+
+    const total = await this.Bid.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+    const skip = (page - 1) * limit;
+
+    const bids = await this.Bid.find(query)
+      .populate('buyer', 'firstName lastName email')
+      .populate('seller', 'firstName lastName email')
+      .populate('product', 'name images price')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return { bids, total, page, totalPages };
+  }
+
+  /**
+   * Get bid statistics for admin dashboard
+   */
+  async getBidStatistics(): Promise<any> {
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const startOfWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    const [
+      totalBids,
+      pendingBids,
+      acceptedBids,
+      rejectedBids,
+      todayBids,
+      weekBids,
+      monthBids,
+      avgBidPrice,
+      topProducts
+    ] = await Promise.all([
+      this.Bid.countDocuments(),
+      this.Bid.countDocuments({ status: 'PENDING' }),
+      this.Bid.countDocuments({ status: 'ACCEPTED' }),
+      this.Bid.countDocuments({ status: 'REJECTED' }),
+      this.Bid.countDocuments({ createdAt: { $gte: startOfDay } }),
+      this.Bid.countDocuments({ createdAt: { $gte: startOfWeek } }),
+      this.Bid.countDocuments({ createdAt: { $gte: startOfMonth } }),
+      this.Bid.aggregate([
+        { $group: { _id: null, avg: { $avg: '$bidPrice' } } }
+      ]),
+      this.Bid.aggregate([
+        { $group: { _id: '$product', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 5 },
+        {
+          $lookup: {
+            from: 'products',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'product'
+          }
+        },
+        { $unwind: '$product' },
+        {
+          $project: {
+            productName: '$product.name',
+            bidCount: '$count'
+          }
+        }
+      ])
+    ]);
+
+    return {
+      totalBids,
+      pendingBids,
+      acceptedBids,
+      rejectedBids,
+      todayBids,
+      weekBids,
+      monthBids,
+      avgBidPrice: avgBidPrice[0]?.avg || 0,
+      topProducts,
+      acceptanceRate: totalBids > 0 ? ((acceptedBids / totalBids) * 100).toFixed(2) : 0
+    };
+  }
+
+  /**
+   * Force accept a bid (admin override)
+   */
+  async forceAcceptBid(bidId: string, reason?: string): Promise<IBid> {
+    const bid = await this.Bid.findById(bidId);
+    
+    if (!bid) {
+      throw new AppError('Bid not found', 404);
+    }
+
+    if (bid.status === 'ACCEPTED') {
+      throw new AppError('Bid is already accepted', 400);
+    }
+
+    // Set expiration to 24 hours from now
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 24);
+
+    bid.status = 'ACCEPTED';
+    bid.expiresAt = expiresAt;
+    (bid as any).adminOverride = true;
+    (bid as any).adminReason = reason;
+
+    return await bid.save();
+  }
+
+  /**
+   * Force reject a bid (admin override)
+   */
+  async forceRejectBid(bidId: string, reason?: string): Promise<IBid> {
+    const bid = await this.Bid.findById(bidId);
+    
+    if (!bid) {
+      throw new AppError('Bid not found', 404);
+    }
+
+    if (bid.status === 'REJECTED') {
+      throw new AppError('Bid is already rejected', 400);
+    }
+
+    bid.status = 'REJECTED';
+    (bid as any).adminOverride = true;
+    (bid as any).adminReason = reason;
+
+    return await bid.save();
+  }
+
+  /**
+   * Cancel a bid (admin action)
+   */
+  async cancelBid(bidId: string, reason: string): Promise<IBid> {
+    const bid = await this.Bid.findById(bidId);
+    
+    if (!bid) {
+      throw new AppError('Bid not found', 404);
+    }
+
+    bid.status = 'CANCELLED';
+    (bid as any).cancelledBy = 'ADMIN';
+    (bid as any).cancellationReason = reason;
+    (bid as any).cancelledAt = new Date();
+
+    return await bid.save();
+  }
+
+  /**
+   * Get bid analytics for admin reporting
+   */
+  async getBidAnalytics(period: string, dateFrom?: string, dateTo?: string): Promise<any> {
+    const matchStage: any = {};
+    
+    if (dateFrom || dateTo) {
+      matchStage.createdAt = {};
+      if (dateFrom) matchStage.createdAt.$gte = new Date(dateFrom);
+      if (dateTo) matchStage.createdAt.$lte = new Date(dateTo);
+    }
+
+    let groupStage: any;
+    
+    switch (period) {
+      case 'daily':
+        groupStage = {
+          $group: {
+            _id: {
+              year: { $year: '$createdAt' },
+              month: { $month: '$createdAt' },
+              day: { $dayOfMonth: '$createdAt' }
+            },
+            totalBids: { $sum: 1 },
+            acceptedBids: { $sum: { $cond: [{ $eq: ['$status', 'ACCEPTED'] }, 1, 0] } },
+            rejectedBids: { $sum: { $cond: [{ $eq: ['$status', 'REJECTED'] }, 1, 0] } },
+            avgBidPrice: { $avg: '$bidPrice' }
+          }
+        };
+        break;
+      case 'weekly':
+        groupStage = {
+          $group: {
+            _id: {
+              year: { $year: '$createdAt' },
+              week: { $week: '$createdAt' }
+            },
+            totalBids: { $sum: 1 },
+            acceptedBids: { $sum: { $cond: [{ $eq: ['$status', 'ACCEPTED'] }, 1, 0] } },
+            rejectedBids: { $sum: { $cond: [{ $eq: ['$status', 'REJECTED'] }, 1, 0] } },
+            avgBidPrice: { $avg: '$bidPrice' }
+          }
+        };
+        break;
+      case 'monthly':
+        groupStage = {
+          $group: {
+            _id: {
+              year: { $year: '$createdAt' },
+              month: { $month: '$createdAt' }
+            },
+            totalBids: { $sum: 1 },
+            acceptedBids: { $sum: { $cond: [{ $eq: ['$status', 'ACCEPTED'] }, 1, 0] } },
+            rejectedBids: { $sum: { $cond: [{ $eq: ['$status', 'REJECTED'] }, 1, 0] } },
+            avgBidPrice: { $avg: '$bidPrice' }
+          }
+        };
+        break;
+      default:
+        throw new AppError('Invalid period. Use daily, weekly, or monthly', 400);
+    }
+
+    const analytics = await this.Bid.aggregate([
+      { $match: matchStage },
+      groupStage,
+      { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1, '_id.week': 1 } }
+    ]);
+
+    return analytics;
   }
 }
