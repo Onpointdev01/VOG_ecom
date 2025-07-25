@@ -31,6 +31,7 @@ export interface IProductBidService {
   // Product-centric admin methods
   getProductsWithBids(filters: any, page: number, limit: number): Promise<{ products: any[]; total: number; page: number; totalPages: number }>;
   getProductBidsForAdmin(productId: string): Promise<any>;
+  getDebugBidCounts(): Promise<any>;
 }
 @injectable()
 export class ProductBidService implements IProductBidService {
@@ -573,7 +574,7 @@ export class ProductBidService implements IProductBidService {
       // Match products that have bids
       {
         $lookup: {
-          from: 'productbids',
+          from: 'bids',
           localField: '_id',
           foreignField: 'product',
           as: 'bids'
@@ -587,7 +588,7 @@ export class ProductBidService implements IProductBidService {
       // Populate seller information
       {
         $lookup: {
-          from: 'users',
+          from: 'sellers',
           localField: 'owner',
           foreignField: '_id',
           as: 'seller'
@@ -596,14 +597,27 @@ export class ProductBidService implements IProductBidService {
       {
         $unwind: '$seller'
       },
+      // Populate the user info from seller
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'seller.user',
+          foreignField: '_id',
+          as: 'sellerUser'
+        }
+      },
+      {
+        $unwind: '$sellerUser'
+      },
       // Add search functionality
       ...(search ? [{
         $match: {
           $or: [
             { name: { $regex: search, $options: 'i' } },
-            { 'seller.firstName': { $regex: search, $options: 'i' } },
-            { 'seller.lastName': { $regex: search, $options: 'i' } },
-            { 'seller.email': { $regex: search, $options: 'i' } }
+            { 'sellerUser.firstName': { $regex: search, $options: 'i' } },
+            { 'sellerUser.lastName': { $regex: search, $options: 'i' } },
+            { 'sellerUser.email': { $regex: search, $options: 'i' } },
+            { 'seller.name': { $regex: search, $options: 'i' } }
           ]
         }
       }] : []),
@@ -641,10 +655,10 @@ export class ProductBidService implements IProductBidService {
           price: 1,
           images: 1,
           seller: {
-            _id: '$seller._id',
-            firstName: '$seller.firstName',
-            lastName: '$seller.lastName',
-            email: '$seller.email'
+            _id: '$sellerUser._id',
+            firstName: '$sellerUser.firstName',
+            lastName: '$sellerUser.lastName',
+            email: '$sellerUser.email'
           },
           bidCount: 1,
           pendingBids: 1,
@@ -737,6 +751,78 @@ export class ProductBidService implements IProductBidService {
         lowestBid,
         avgBidPrice
       }
+    };
+  }
+
+  /**
+   * Debug method to check database contents and aggregation
+   */
+  async getDebugBidCounts(): Promise<any> {
+    const totalBids = await this.Bid.countDocuments();
+    const totalProducts = await this.Product.countDocuments();
+    const totalUsers = await this.User.countDocuments();
+    
+    // Get sample bids with populated data
+    const sampleBids = await this.Bid.find().limit(5).populate('product', 'name').populate('buyer', 'firstName lastName');
+    
+    // Get products with at least one bid using direct query
+    const productsWithBids = await this.Bid.distinct('product');
+    
+    // Test the aggregation step by step
+    const step1 = await this.Product.aggregate([
+      {
+        $lookup: {
+          from: 'bids',
+          localField: '_id',
+          foreignField: 'product',
+          as: 'bids'
+        }
+      },
+      { $limit: 5 }
+    ]);
+    
+    const step2 = await this.Product.aggregate([
+      {
+        $lookup: {
+          from: 'bids',
+          localField: '_id',
+          foreignField: 'product',
+          as: 'bids'
+        }
+      },
+      {
+        $match: {
+          'bids.0': { $exists: true }
+        }
+      },
+      { $limit: 5 }
+    ]);
+    
+    return {
+      totalBids,
+      totalProducts,
+      totalUsers,
+      productsWithBidsCount: productsWithBids.length,
+      sampleBids: sampleBids.map(bid => ({
+        id: bid._id,
+        product: bid.product,
+        buyer: bid.buyer,
+        bidPrice: bid.bidPrice,
+        status: bid.status,
+        createdAt: bid.createdAt
+      })),
+      productsWithBids,
+      aggregationStep1: step1.map(p => ({
+        id: p._id,
+        name: p.name,
+        bidsCount: p.bids?.length || 0,
+        hasBids: p.bids && p.bids.length > 0
+      })),
+      aggregationStep2: step2.map(p => ({
+        id: p._id,
+        name: p.name,
+        bidsCount: p.bids?.length || 0
+      }))
     };
   }
 }

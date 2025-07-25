@@ -818,4 +818,11 @@ export class AdminController extends BaseController {
     
     return this.sendResponse(res, 200, 'Product bids retrieved successfully', productBids);
   }
+
+  @httpGet('/debug/bid-counts', TYPES.RequireAdmin)
+  public async getDebugBidCounts(@response() res: Response) {
+    const bidCounts = await this.productBidService.getDebugBidCounts();
+    
+    return this.sendResponse(res, 200, 'Debug bid counts retrieved successfully', bidCounts);
+  }
 }
