@@ -65,7 +65,7 @@ export class BidMessageService extends BaseService implements IBidMessageService
       return newBidMessage;
     } catch (error) {
       console.error('❌ BidMessageService: Error creating bid proposal message:', error);
-      console.error('❌ BidMessageService: Error details:', error.message);
+      console.error('❌ BidMessageService: Error details:', error instanceof Error ? error.message : String(error));
       throw error; // Re-throw to let caller handle
     }
   }

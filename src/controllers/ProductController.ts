@@ -190,7 +190,7 @@ export class ProductController extends BaseController {
         console.log('✅ Bid proposal message created successfully');
       } catch (messageError) {
         console.error('❌ Failed to create bid proposal message:', messageError);
-        console.error('❌ Message error details:', messageError.message);
+        console.error('❌ Message error details:', messageError instanceof Error ? messageError.message : String(messageError));
         // Don't fail the bid creation, just log the error
       }
     } else {
