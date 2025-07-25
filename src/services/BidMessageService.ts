@@ -12,6 +12,7 @@ export interface IBidMessageService {
   createSystemMessage(senderId: string, recipientId: string, productId: string, bidId: string | null, message: string): Promise<IBidMessages>;
   createProductInquiryMessage(senderId: string, recipientId: string, productId: string, message: string, product: any): Promise<IBidMessages>;
   getBidMessages(userId: string, productId?: string): Promise<IBidMessages[]>;
+  getConversations(userId: string): Promise<any[]>;
   markMessageAsRead(messageId: string, userId: string): Promise<IBidMessages>;
 }
 
@@ -193,6 +194,97 @@ export class BidMessageService extends BaseService implements IBidMessageService
       // Return empty array instead of throwing to prevent 500 errors
       return [];
     }
+  }
+
+  async getConversations(userId: string): Promise<any[]> {
+    try {
+      const conversations = await this.BidMessage.aggregate([
+        // Match messages where user is sender or recipient
+        {
+          $match: {
+            $or: [
+              { sender: this.toObjectId(userId) },
+              { recipient: this.toObjectId(userId) }
+            ]
+          }
+        },
+        // Sort by creation date (newest first for getting latest message per product)
+        {
+          $sort: { createdAt: -1 }
+        },
+        // Group by product to get conversations
+        {
+          $group: {
+            _id: '$product',
+            lastMessage: { $first: '$$ROOT' },
+            messageCount: { $sum: 1 },
+            lastMessageDate: { $first: '$createdAt' }
+          }
+        },
+        // Sort conversations by most recent message (newest first)
+        {
+          $sort: { lastMessageDate: -1 }
+        },
+        // Populate product details
+        {
+          $lookup: {
+            from: 'products',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'product'
+          }
+        },
+        // Populate sender details for last message
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'lastMessage.sender',
+            foreignField: '_id',
+            as: 'lastMessage.sender'
+          }
+        },
+        // Populate recipient details for last message
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'lastMessage.recipient',
+            foreignField: '_id',
+            as: 'lastMessage.recipient'
+          }
+        },
+        // Transform the result
+        {
+          $project: {
+            product: { 
+              $mergeObjects: [
+                { $arrayElemAt: ['$product', 0] },
+                { id: { $toString: { $arrayElemAt: ['$product._id', 0] } } }
+              ]
+            },
+            lastMessage: {
+              id: { $toString: '$lastMessage._id' },
+              message: '$lastMessage.message',
+              type: '$lastMessage.type',
+              createdAt: '$lastMessage.createdAt',
+              sender: { $arrayElemAt: ['$lastMessage.sender', 0] },
+              recipient: { $arrayElemAt: ['$lastMessage.recipient', 0] }
+            },
+            messageCount: 1,
+            unreadCount: 0 // TODO: Implement unread logic
+          }
+        }
+      ]);
+
+      return conversations || [];
+    } catch (error) {
+      console.error('Error in getConversations:', error);
+      return [];
+    }
+  }
+
+  private toObjectId(id: string) {
+    const mongoose = require('mongoose');
+    return new mongoose.Types.ObjectId(id);
   }
 
   async markMessageAsRead(messageId: string, userId: string): Promise<IBidMessages> {
