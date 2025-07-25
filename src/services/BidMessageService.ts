@@ -198,6 +198,23 @@ export class BidMessageService extends BaseService implements IBidMessageService
 
   async getConversations(userId: string): Promise<any[]> {
     try {
+      console.log('=== CONVERSATIONS DEBUG ===');
+      console.log('User ID:', userId);
+      
+      // First check if user has any messages at all
+      const totalMessages = await this.BidMessage.countDocuments({
+        $or: [
+          { sender: this.toObjectId(userId) },
+          { recipient: this.toObjectId(userId) }
+        ]
+      });
+      console.log('Total messages for user:', totalMessages);
+      
+      if (totalMessages === 0) {
+        console.log('No messages found for user, returning empty array');
+        return [];
+      }
+      
       const conversations = await this.BidMessage.aggregate([
         // Match messages where user is sender or recipient
         {
@@ -274,6 +291,10 @@ export class BidMessageService extends BaseService implements IBidMessageService
           }
         }
       ]);
+
+      console.log('Aggregation result count:', conversations.length);
+      console.log('First conversation:', JSON.stringify(conversations[0], null, 2));
+      console.log('=== END CONVERSATIONS DEBUG ===');
 
       return conversations || [];
     } catch (error) {
