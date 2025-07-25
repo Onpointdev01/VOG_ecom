@@ -80,23 +80,31 @@ export class BidMessageService extends BaseService implements IBidMessageService
   }
 
   async getBidMessages(userId: string, productId?: string): Promise<IBidMessages[]> {
-    const filter: any = {
-      $or: [
-        { sender: userId },
-        { recipient: userId }
-      ]
-    };
+    try {
+      const filter: any = {
+        $or: [
+          { sender: userId },
+          { recipient: userId }
+        ]
+      };
 
-    if (productId) {
-      filter.product = productId;
+      if (productId) {
+        filter.product = productId;
+      }
+
+      const messages = await this.BidMessage.find(filter)
+        .populate('sender', 'firstName lastName email')
+        .populate('recipient', 'firstName lastName email')
+        .populate('product', 'name images price')
+        .populate('bid')
+        .sort({ createdAt: -1 });
+
+      return messages || [];
+    } catch (error) {
+      console.error('Error in getBidMessages:', error);
+      // Return empty array instead of throwing to prevent 500 errors
+      return [];
     }
-
-    return await this.BidMessage.find(filter)
-      .populate('sender', 'firstName lastName email')
-      .populate('recipient', 'firstName lastName email')
-      .populate('product', 'name images price')
-      .populate('bid')
-      .sort({ createdAt: -1 });
   }
 
   async markMessageAsRead(messageId: string, userId: string): Promise<IBidMessages> {

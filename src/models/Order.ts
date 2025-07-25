@@ -4,10 +4,10 @@ import { IUser } from './User';
 import { IPaymentOption, PaymentMethodType } from './PaymentOption';
 import constants from '../utils/constants';
 
-const { ORDER, PRODUCT, USER, PAYMENT_OPTION } = constants.mongooseModels;
+const { ORDER, PRODUCT, USER, PAYMENT_OPTION, PAYMENT } = constants.mongooseModels;
 
-export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
-export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
+export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'OUT_FOR_DELIVERY' | 'COMPLETE' | 'CANCELLED';
+export type PaymentStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
 
 export interface IOrderItem {
   _id: string;
@@ -44,6 +44,11 @@ export interface IOrder extends Document {
   paymentReference?: string;
   notes?: string;
   cartItemIds?: string[]; // Store original cart item IDs for clearing
+  
+  // Payment tracking
+  payments: Schema.Types.ObjectId[]; // Reference to Payment documents
+  activePayment?: Schema.Types.ObjectId; // Current active payment attempt
+  
   createdAt: Date;
   updatedAt: Date;
 }
@@ -140,13 +145,13 @@ const orderSchema: Schema<IOrder> = new Schema({
   paymentStatus: {
     type: String,
     required: true,
-    enum: ['PENDING', 'COMPLETED', 'FAILED', 'REFUNDED'],
+    enum: ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'REFUNDED'],
     default: 'PENDING',
   },
   orderStatus: {
     type: String,
     required: true,
-    enum: ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'],
+    enum: ['PENDING', 'CONFIRMED', 'OUT_FOR_DELIVERY', 'COMPLETE', 'CANCELLED'],
     default: 'PENDING',
   },
   totalPrice: {
@@ -177,6 +182,15 @@ const orderSchema: Schema<IOrder> = new Schema({
   },
   cartItemIds: {
     type: [String],
+    required: false,
+  },
+  payments: [{
+    type: Schema.Types.ObjectId,
+    ref: PAYMENT,
+  }],
+  activePayment: {
+    type: Schema.Types.ObjectId,
+    ref: PAYMENT,
     required: false,
   },
 }, { timestamps: true });

@@ -8,6 +8,7 @@ export * from './Seller';
 export * from './Address';
 export * from './Cart';
 export * from './PaymentOption';
+export * from './Payment';
 export * from './ProductBid';
 export * from './BidMessages';
 export * from './Order';

@@ -205,6 +205,31 @@ export class BidController extends BaseController {
     return this.sendResponse(res, 200, 'Seller bids retrieved successfully', bids);
   }
 
+  @httpGet('/messages', TYPES.RequireSignIn)
+  async getBidMessages(
+    @response() res: Response,
+    @request() req: Request,
+    @queryParam('productId') productId?: string
+  ) {
+    try {
+      const user = req.user as IUser;
+      
+      if (!user || !user._id) {
+        return this.sendResponse(res, 401, 'User not authenticated');
+      }
+      
+      const messages = await this.bidMessageService.getBidMessages(
+        (user._id as string).toString(),
+        productId
+      );
+
+      return this.sendResponse(res, 200, 'Bid messages retrieved successfully', messages);
+    } catch (error) {
+      console.error('Error fetching bid messages:', error);
+      return this.sendResponse(res, 500, 'Failed to fetch bid messages');
+    }
+  }
+
   @httpGet('/:bidId', TYPES.RequireSignIn)
   async getBidDetails(@response() res: Response, @requestParam('bidId') bidId: string) {
     const bid = await this.productBidService.getBidById(bidId);

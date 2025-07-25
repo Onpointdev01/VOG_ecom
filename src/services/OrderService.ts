@@ -1,10 +1,13 @@
-import { injectable } from 'inversify';
+import { injectable, inject } from 'inversify';
 import { BaseService } from './BaseService';
 import { Order, IOrder } from '../models/Order';
 import { Cart, ICart } from '../models/Cart';
 import { Address, IAddress } from '../models/Address';
 import { PaymentOption, PaymentMethodType } from '../models/PaymentOption';
+import { PaymentService } from './PaymentService';
+import { PaymentMethod } from '../models/Payment';
 import AppError from '../utils/errors/AppError';
+import { TYPES } from '../di';
 
 export interface CreateOrderRequest {
   userId: string;
@@ -16,6 +19,11 @@ export interface CreateOrderRequest {
 
 @injectable()
 export class OrderService extends BaseService {
+  constructor(
+    @inject(TYPES.PaymentService) private paymentService: PaymentService
+  ) {
+    super();
+  }
   async createOrder(data: CreateOrderRequest): Promise<IOrder> {
     const { userId, paymentMethod, shippingAddressId, selectedItems, notes } = data;
 
@@ -163,6 +171,30 @@ export class OrderService extends BaseService {
       }
       // Re-throw other errors as-is
       throw error;
+    }
+
+    // Create Payment record for the order
+    try {
+      const payment = await this.paymentService.createPayment({
+        orderId: order._id.toString(),
+        userId: userId,
+        paymentMethod: paymentMethod as PaymentMethod,
+        amount: finalPrice,
+        phoneNumber: undefined, // Will be handled by payment processing
+        description: `Payment for order ${orderNumber}`,
+        currency: 'XAF'
+      });
+
+      // Link payment to order
+      order.activePayment = payment._id;
+      order.payments = [payment._id];
+      await order.save();
+
+    } catch (error: any) {
+      console.error('Payment creation error:', error);
+      // If payment creation fails, we should still return the order
+      // but log the error for investigation
+      console.error(`Failed to create payment for order ${order._id}: ${error.message}`);
     }
 
     // DON'T clear cart yet - wait for confirmation or payment

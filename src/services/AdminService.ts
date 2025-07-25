@@ -514,6 +514,8 @@ export class AdminService extends BaseService implements IAdminService {
     const orders = await Order.find(filters)
       .populate('user', 'firstName lastName email')
       .populate('items.product', 'name price images')
+      .populate('payments', 'transactionId paymentMethod status amount providerTransactionId createdAt')
+      .populate('activePayment', 'transactionId paymentMethod status amount providerTransactionId createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -552,6 +554,8 @@ export class AdminService extends BaseService implements IAdminService {
     const order = await Order.findById(orderId)
       .populate('user', 'firstName lastName email phoneNumber')
       .populate('items.product', 'name price images brand description')
+      .populate('payments', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt')
+      .populate('activePayment', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt')
       .lean();
 
     if (!order) {

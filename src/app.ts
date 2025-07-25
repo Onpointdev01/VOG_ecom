@@ -30,6 +30,8 @@ import {
   ICart,
   PaymentOption,
   IPaymentOption,
+  Payment,
+  IPayment,
   IBid,
   Bid,
   IBidMessages,
@@ -60,6 +62,7 @@ import {
   CartService,
   IPaymentOptionService,
   PaymentOptionService,
+  PaymentService,
   IProductBidService,
   ProductBidService,
   IBidMessageService,
@@ -84,6 +87,7 @@ container.bind<Model<ISeller>>(TYPES.Seller).toConstantValue(Seller);
 container.bind<Model<IAddress>>(TYPES.Address).toConstantValue(Address);
 container.bind<Model<ICart>>(TYPES.Cart).toConstantValue(Cart);
 container.bind<Model<IPaymentOption>>(TYPES.PaymentOption).toConstantValue(PaymentOption);
+container.bind<Model<IPayment>>(TYPES.Payment).toConstantValue(Payment);
 container.bind<Model<IBid>>(TYPES.Bid).toConstantValue(Bid);
 container.bind<Model<IBidMessages>>(TYPES.BidMessages).toConstantValue(Message);
 container.bind<Model<IOrder>>(TYPES.Order).toConstantValue(Order);
@@ -104,6 +108,7 @@ container.bind<IUserService>(TYPES.UserService).to(UserService);
 container.bind<IAddressService>(TYPES.AddressService).to(AddressService);
 container.bind<ICartService>(TYPES.CartService).to(CartService);
 container.bind<IPaymentOptionService>(TYPES.PaymentOptionService).to(PaymentOptionService);
+container.bind<PaymentService>(TYPES.PaymentService).to(PaymentService);
 container.bind<IProductBidService>(TYPES.ProductBidService).to(ProductBidService);
 container.bind<IBidMessageService>(TYPES.BidMessageService).to(BidMessageService);
 container.bind<OrderService>(TYPES.OrderService).to(OrderService);

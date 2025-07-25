@@ -14,6 +14,7 @@ const constants = {
     BID: 'Bid',
     BIDMESSAGES: 'BidMessages',
     ORDER: 'Order',
+    PAYMENT: 'Payment',
     USER_VIEW: 'UserView',
   },
 };

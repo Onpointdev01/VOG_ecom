@@ -7,6 +7,7 @@ export * from './ProductController';
 export * from './ReviewController';
 export * from './CartController';
 export * from './PaymentOptionController';
+export * from './PaymentController';
 export * from './BidController';
 export * from './NotificationController';
 export * from './OrderController';

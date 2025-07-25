@@ -8,6 +8,7 @@ export * from './UserService';
 export * from './AddressService';
 export * from './CartService';
 export * from './PaymentOptionService';
+export * from './PaymentService';
 export * from './ProductBidService';
 export * from './BidMessageService';
 export * from './OrderService';
