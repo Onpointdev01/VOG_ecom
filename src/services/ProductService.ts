@@ -21,6 +21,7 @@ export interface IProductService {
     search?: string,
     user?: IUser
   ): Promise<any[]>;
+  getSearchSuggestions(query: string): Promise<string[]>;
   getProductsByCategoryId(
     categoryId: string,
     includeSubcategories: boolean,
@@ -124,9 +125,8 @@ export class ProductService extends BaseService implements IProductService {
       categoryMatch = { 'categoryData.name': category };
     }
     if (search) {
-      const regexp = new RegExp(`.*${search}.*`, 'i');
-      filter.$or = [{ name: { $regex: regexp } }, { description: { $regex: regexp } }];
-      // { 'categoryData.name': { $regex: regexp } } to add category to the search
+      // Use MongoDB text search for better performance
+      filter.$text = { $search: search };
     }
     const aggregationPipeline: any[] = [
       {
@@ -143,6 +143,12 @@ export class ProductService extends BaseService implements IProductService {
           $and: [filter, categoryMatch],
         },
       },
+      // Add text score for search relevance
+      ...(search ? [{
+        $addFields: {
+          score: { $meta: 'textScore' }
+        }
+      }] : []),
       {
         $lookup: {
           from: 'sellers',
@@ -335,6 +341,224 @@ export class ProductService extends BaseService implements IProductService {
       
       return result;
     });
+  }
+
+  async getSearchSuggestions(query: string): Promise<string[]> {
+    // Use MongoDB text search for better performance and relevance
+    const productSuggestions = await this.Product.aggregate([
+      {
+        $match: {
+          isActive: true,
+          $text: { $search: query }  // MongoDB text search
+        }
+      },
+      {
+        $addFields: {
+          score: { $meta: 'textScore' }  // Add relevance score
+        }
+      },
+      {
+        $project: {
+          name: 1,
+          brand: 1,
+          nameLower: { $toLower: '$name' },
+          score: 1
+        }
+      },
+      {
+        $group: {
+          _id: '$nameLower',
+          name: { $first: '$name' },
+          brand: { $first: '$brand' },
+          score: { $max: '$score' }  // Keep highest relevance score
+        }
+      },
+      {
+        $sort: { score: -1, name: 1 }  // Sort by relevance, then alphabetically
+      },
+      {
+        $limit: 8  // Reduced limit since text search is more accurate
+      }
+    ]);
+
+    // Extract smart, concise suggestions
+    const suggestions: string[] = [];
+    const queryLower = query.toLowerCase();
+    const addedSuggestions = new Set<string>();
+    
+    // Helper function to extract meaningful product name parts
+    const extractSmartSuggestion = (productName: string): string[] => {
+      const smartSuggestions: string[] = [];
+      
+      // Clean and split the product name
+      const cleanName = productName
+        .replace(/,.*$/, '') // Remove everything after first comma
+        .replace(/\s*-\s*.*$/, '') // Remove everything after dash
+        .replace(/\s*\(.*?\)/g, '') // Remove content in parentheses
+        .trim();
+      
+      const words = cleanName.split(' ');
+      
+      // Extract progressive suggestions (brand + model + series)
+      if (words.length >= 2) {
+        // Brand + first word: "Apple Watch"
+        smartSuggestions.push(`${words[0]} ${words[1]}`);
+        
+        if (words.length >= 3) {
+          // Brand + model + series: "Apple Watch Series"
+          smartSuggestions.push(`${words[0]} ${words[1]} ${words[2]}`);
+          
+          if (words.length >= 4 && words[3].match(/^\d+$/)) {
+            // Include numbers: "Apple Watch Series 10"
+            smartSuggestions.push(`${words[0]} ${words[1]} ${words[2]} ${words[3]}`);
+          }
+        }
+      }
+      
+      return smartSuggestions;
+    };
+    
+    // Add smart product suggestions
+    for (const product of productSuggestions) {
+      const productName = product.name;
+      const smartSuggestions = extractSmartSuggestion(productName);
+      
+      for (const suggestion of smartSuggestions) {
+        const suggestionLower = suggestion.toLowerCase();
+        if (!addedSuggestions.has(suggestionLower) && 
+            suggestionLower.includes(queryLower)) {
+          suggestions.push(suggestion);
+          addedSuggestions.add(suggestionLower);
+        }
+      }
+      
+      // Add brand-based suggestions
+      if (product.brand && product.brand.toLowerCase().includes(queryLower)) {
+        const brandSuggestions = [
+          `${product.brand} accessories`,
+          `${product.brand} case`,
+          `${product.brand} cover`
+        ];
+        
+        for (const brandSuggestion of brandSuggestions) {
+          const brandLower = brandSuggestion.toLowerCase();
+          if (!addedSuggestions.has(brandLower)) {
+            suggestions.push(brandSuggestion);
+            addedSuggestions.add(brandLower);
+          }
+        }
+      }
+    }
+    
+    // Add intelligent category-based suggestions only if we have real product context
+    if (suggestions.length < 6 && suggestions.length > 0) {
+      const getSmartVariations = (searchTerm: string): string[] => {
+        const term = searchTerm.toLowerCase();
+        
+        // Analyze actual product results to determine context
+        const productContext = {
+          hasApple: productSuggestions.some(p => 
+            p.brand?.toLowerCase().includes('apple') || 
+            p.name.toLowerCase().includes('apple')
+          ),
+          hasTech: productSuggestions.some(p => 
+            ['samsung', 'sony', 'lg', 'microsoft', 'google'].some(brand => 
+              p.brand?.toLowerCase().includes(brand)
+            ) ||
+            ['laptop', 'phone', 'tablet', 'computer', 'headphone'].some(tech => 
+              p.name.toLowerCase().includes(tech)
+            )
+          ),
+          hasClothing: productSuggestions.some(p => 
+            ['jacket', 'shirt', 'dress', 'pants', 'jeans', 'hoodie', 'sweater'].some(clothing => 
+              p.name.toLowerCase().includes(clothing)
+            )
+          )
+        };
+        
+        // Electronics/Tech products get tech variations (only if actual tech products found)
+        if (productContext.hasApple || productContext.hasTech || 
+            ['iphone', 'samsung', 'apple', 'laptop', 'phone', 'tablet', 'airpods', 'macbook'].some(tech => term.includes(tech))) {
+          return [
+            `${searchTerm} pro`,
+            `${searchTerm} plus`,
+            `${searchTerm} mini`,
+            `${searchTerm} max`,
+            `${searchTerm} air`,
+            `${searchTerm} ultra`
+          ];
+        }
+        
+        // Traditional watches and jewelry (only if no Apple context)
+        if (term === 'watch' && !productContext.hasApple) {
+          return [
+            `${searchTerm} for men`,
+            `${searchTerm} for women`,
+            `digital ${searchTerm}`,
+            `analog ${searchTerm}`,
+            `luxury ${searchTerm}`,
+            `sports ${searchTerm}`
+          ];
+        }
+        
+        // Clothing items get clothing variations
+        if (['jacket', 'shirt', 'dress', 'pants', 'jeans', 'hoodie', 'sweater', 'coat', 'blazer', 'top'].some(clothing => term.includes(clothing))) {
+          return [
+            `${searchTerm} for men`,
+            `${searchTerm} for women`,
+            `${searchTerm} black`,
+            `${searchTerm} white`,
+            `${searchTerm} blue`,
+            `leather ${searchTerm}`,
+            `winter ${searchTerm}`,
+            `casual ${searchTerm}`
+          ];
+        }
+        
+        // Shoes get shoe variations
+        if (['shoe', 'sneaker', 'boot', 'sandal', 'heel', 'loafer'].some(shoe => term.includes(shoe))) {
+          return [
+            `${searchTerm} for men`,
+            `${searchTerm} for women`,
+            `running ${searchTerm}`,
+            `casual ${searchTerm}`,
+            `${searchTerm} black`,
+            `${searchTerm} white`
+          ];
+        }
+        
+        // Home/furniture items
+        if (['table', 'chair', 'sofa', 'bed', 'lamp', 'desk', 'shelf'].some(furniture => term.includes(furniture))) {
+          return [
+            `${searchTerm} wooden`,
+            `${searchTerm} modern`,
+            `${searchTerm} white`,
+            `${searchTerm} black`,
+            `office ${searchTerm}`,
+            `dining ${searchTerm}`
+          ];
+        }
+        
+        // Generic accessories for other items
+        return [
+          `${searchTerm} accessories`,
+          `${searchTerm} case`,
+          `${searchTerm} cover`
+        ];
+      };
+      
+      const smartVariations = getSmartVariations(query);
+      
+      for (const variation of smartVariations) {
+        const variationLower = variation.toLowerCase();
+        if (!addedSuggestions.has(variationLower) && suggestions.length < 8) {
+          suggestions.push(variation.charAt(0).toUpperCase() + variation.slice(1));
+          addedSuggestions.add(variationLower);
+        }
+      }
+    }
+
+    return suggestions.slice(0, 8);
   }
 
   async getProductsByCategoryId(

@@ -112,4 +112,18 @@ productSchema.set('toJSON', {
   },
 });
 
+// Create text index for search functionality
+productSchema.index({ 
+  name: 'text', 
+  description: 'text', 
+  brand: 'text' 
+}, {
+  weights: {
+    name: 10,        // Name is most important
+    brand: 5,        // Brand is moderately important  
+    description: 1   // Description is least important
+  },
+  name: 'product_text_index'
+});
+
 export const Product: Model<IProduct> = model<IProduct>(PRODUCT, productSchema);

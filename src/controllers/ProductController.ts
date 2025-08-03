@@ -62,6 +62,16 @@ export class ProductController extends BaseController {
     return this.sendResponse(res, 201, 'Product created successfully', newProduct);
   }
 
+  @httpGet('/suggestions')
+  async getSearchSuggestions(@response() res: Response, @queryParam('q') query: string) {
+    if (!query || query.trim().length < 2) {
+      return this.sendResponse(res, 200, 'Search suggestions retrieved successfully', []);
+    }
+
+    const suggestions = await this.productService.getSearchSuggestions(query.trim());
+    return this.sendResponse(res, 200, 'Search suggestions retrieved successfully', suggestions);
+  }
+
   @httpGet('/:id', TYPES.OptionalAuth)
   async getProductById(@response() res: Response, @requestParam('id') id: string) {
     const product = await this.productService.getProductById(id);
