@@ -124,11 +124,34 @@ export class ProductService extends BaseService implements IProductService {
     if (category) {
       categoryMatch = { 'categoryData.name': category };
     }
+    const aggregationPipeline: any[] = [];
+    
+    // Text search must be the first stage in aggregation pipeline
     if (search) {
-      // Use MongoDB text search for better performance
-      filter.$text = { $search: search };
+      aggregationPipeline.push({
+        $match: {
+          $and: [
+            { $text: { $search: search } },
+            filter
+          ]
+        }
+      });
+      
+      // Add text score for search relevance
+      aggregationPipeline.push({
+        $addFields: {
+          score: { $meta: 'textScore' }
+        }
+      });
+    } else {
+      // Non-search queries can start with regular match
+      aggregationPipeline.push({
+        $match: filter
+      });
     }
-    const aggregationPipeline: any[] = [
+    
+    // Add category lookup and filtering
+    aggregationPipeline.push(
       {
         $lookup: {
           from: 'categories',
@@ -137,18 +160,17 @@ export class ProductService extends BaseService implements IProductService {
           as: 'categoryData',
         },
       },
-      { $unwind: '$categoryData' },
-      {
-        $match: {
-          $and: [filter, categoryMatch],
-        },
-      },
-      // Add text score for search relevance
-      ...(search ? [{
-        $addFields: {
-          score: { $meta: 'textScore' }
-        }
-      }] : []),
+      { $unwind: '$categoryData' }
+    );
+    
+    // Add category match if specified
+    if (category) {
+      aggregationPipeline.push({
+        $match: categoryMatch
+      });
+    }
+    
+    aggregationPipeline.push(
       {
         $lookup: {
           from: 'sellers',
@@ -204,8 +226,9 @@ export class ProductService extends BaseService implements IProductService {
             quantityAvailable: '$quantityAvailable',
           },
         },
-      },
-    ];
+      }
+    );
+    
     // If the user is authenticated, check their wishlist
     if (user) {
       aggregationPipeline.push({
@@ -290,6 +313,17 @@ export class ProductService extends BaseService implements IProductService {
         }
       }
     });
+
+    // Add sorting based on search relevance or default
+    if (search) {
+      aggregationPipeline.push({
+        $sort: { score: { $meta: 'textScore' }, _id: 1 }
+      });
+    } else {
+      aggregationPipeline.push({
+        $sort: { createdAt: -1 }
+      });
+    }
 
     const products = await this.Product.aggregate(aggregationPipeline).exec();
     
