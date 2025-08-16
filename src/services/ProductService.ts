@@ -19,7 +19,13 @@ export interface IProductService {
     filter: FilterQuery<IProduct>,
     category?: string,
     search?: string,
-    user?: IUser
+    user?: IUser,
+    options?: {
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+      page?: number;
+      limit?: number;
+    }
   ): Promise<any[]>;
   getSearchSuggestions(query: string): Promise<string[]>;
   getProductsByCategoryId(
@@ -118,7 +124,13 @@ export class ProductService extends BaseService implements IProductService {
     filter: FilterQuery<IProduct>,
     category?: string,
     search?: string,
-    user?: IUser
+    user?: IUser,
+    options?: {
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+      page?: number;
+      limit?: number;
+    }
   ): Promise<any[]> {
     let categoryMatch = {};
     if (category) {
@@ -314,15 +326,50 @@ export class ProductService extends BaseService implements IProductService {
       }
     });
 
-    // Add sorting based on search relevance or default
-    if (search) {
+    // Add sorting based on options or search relevance or default
+    if (search && (!options?.sortBy || options.sortBy === 'relevance')) {
+      // For search results, use text score unless different sort is specified
       aggregationPipeline.push({
         $sort: { score: { $meta: 'textScore' }, _id: 1 }
       });
     } else {
+      // Custom sorting
+      const sortBy = options?.sortBy || 'createdAt';
+      const sortOrder = options?.sortOrder === 'asc' ? 1 : -1;
+      
+      const sortObj: any = {};
+      
+      switch (sortBy) {
+        case 'name':
+          sortObj.name = sortOrder;
+          break;
+        case 'price':
+          sortObj.computedPrice = sortOrder;
+          break;
+        case 'rating':
+          sortObj.rating = sortOrder;
+          break;
+        case 'popularity':
+          sortObj.noOfReviews = sortOrder;
+          break;
+        case 'createdAt':
+        default:
+          sortObj.createdAt = sortOrder;
+          break;
+      }
+      
       aggregationPipeline.push({
-        $sort: { createdAt: -1 }
+        $sort: sortObj
       });
+    }
+
+    // Add pagination if specified
+    if (options?.page && options?.limit) {
+      const skip = (options.page - 1) * options.limit;
+      aggregationPipeline.push(
+        { $skip: skip },
+        { $limit: options.limit }
+      );
     }
 
     const products = await this.Product.aggregate(aggregationPipeline).exec();

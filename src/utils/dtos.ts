@@ -89,6 +89,14 @@ export interface getAllProductsQuery {
   isFlash?: string | boolean;
   category?: string;
   search?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  minPrice?: string;
+  maxPrice?: string;
+  condition?: string;
+  brand?: string;
+  page?: string;
+  limit?: string;
 }
 
 export interface addressDTO {

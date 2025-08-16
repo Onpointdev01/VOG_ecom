@@ -211,7 +211,7 @@ export class OrderService extends BaseService {
   }
 
   async getUserOrders(userId: string, options?: { limit?: number; status?: string; page?: number }): Promise<IOrder[]> {
-    let query = Order.find({ user: userId });
+    const filter: any = { user: userId };
 
     // Handle status filtering
     if (options?.status) {
@@ -219,14 +219,14 @@ export class OrderService extends BaseService {
         // For recent orders, get orders from last 30 days
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        query = query.where('createdAt').gte(thirtyDaysAgo);
+        filter.createdAt = { $gte: thirtyDaysAgo };
       } else {
         // Filter by specific order status
-        query = query.where('orderStatus').equals(options.status);
+        filter.orderStatus = options.status;
       }
     }
 
-    query = query
+    let query = Order.find(filter)
       .populate('items.product')
       .sort({ createdAt: -1 });
 

@@ -12,7 +12,7 @@ import {
   request,
   queryParam,
 } from 'inversify-express-utils';
-import { Response } from 'express';
+import { Response, Request } from 'express';
 import { FilterQuery } from 'mongoose';
 
 import { BaseController } from './BaseController';
@@ -91,13 +91,44 @@ export class ProductController extends BaseController {
 
   @httpGet('/', joiMiddleware(getAllProductsSchema, 'query'), TYPES.OptionalAuth)
   async getAllProducts(@request() req: Request, @response() res: Response, @queryParam() query: getAllProductsQuery) {
-    const { isFlash, category, search } = query;
+    const { 
+      isFlash, 
+      category, 
+      search,
+      sortBy,
+      sortOrder,
+      minPrice,
+      maxPrice,
+      condition,
+      brand,
+      page,
+      limit
+    } = query;
+    
     const filter: FilterQuery<IProduct> = {};
     if (isFlash) {
       filter.isFlash = isFlash === '1';
     }
+    if (condition) {
+      filter.condition = condition;
+    }
+    if (brand) {
+      filter.brand = new RegExp(brand, 'i'); // Case-insensitive brand search
+    }
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = parseFloat(minPrice);
+      if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
+    }
+    
+    const options = {
+      sortBy: sortBy || 'createdAt',
+      sortOrder: sortOrder || 'desc',
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 20
+    };
 
-    const products = await this.productService.getAllProducts(filter, category, search, res.locals.user);
+    const products = await this.productService.getAllProducts(filter, category, search, res.locals.user, options);
     return this.sendResponse(res, 200, 'Products retrieved successfully', products);
   }
 
