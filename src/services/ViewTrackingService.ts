@@ -78,8 +78,7 @@ export class ViewTrackingService extends BaseService implements IViewTrackingSer
         select: 'name images price originalPrice productType condition variants brand description'
       })
       .sort({ viewedAt: -1 })
-      .limit(limit)
-      .lean();
+      .limit(limit);
 
     return views;
   }
