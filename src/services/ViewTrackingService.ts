@@ -73,7 +73,10 @@ export class ViewTrackingService extends BaseService implements IViewTrackingSer
     await this.verifyUser(userId);
 
     const views = await this.UserView.find({ user: userId })
-      .populate('product', 'name images price productType')
+      .populate({
+        path: 'product',
+        select: 'name images price originalPrice productType condition variants brand description'
+      })
       .sort({ viewedAt: -1 })
       .limit(limit)
       .lean();
