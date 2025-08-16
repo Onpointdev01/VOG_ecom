@@ -143,10 +143,22 @@ export class UserController extends BaseController {
   @httpGet('/last-views', TYPES.RequireSignIn)
   public async getUserLastViews(@response() res: Response, @queryParam('limit') limit?: string) {
     try {
+      const userId = res.locals.user;
       const limitNumber = limit ? parseInt(limit, 10) : 20;
-      const views = await this.viewTrackingService.getUserLastViews(res.locals.user, limitNumber);
+      
+      console.log('=== LAST VIEWS CONTROLLER DEBUG ===');
+      console.log('User ID:', userId);
+      console.log('Limit:', limitNumber);
+      
+      const views = await this.viewTrackingService.getUserLastViews(userId, limitNumber);
+      
+      console.log('Views found:', views.length);
+      console.log('Sample view:', views[0]);
+      console.log('===================================');
+      
       return this.sendResponse(res, 200, 'Last viewed products retrieved successfully', views);
     } catch (error) {
+      console.error('Error fetching last viewed products:', error);
       return this.sendResponse(res, 404, 'Unable to fetch last viewed products');
     }
   }

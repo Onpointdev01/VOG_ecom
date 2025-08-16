@@ -210,10 +210,38 @@ export class OrderService extends BaseService {
     return this.verifyDoc(orderId, Order, 'items.product');
   }
 
-  async getUserOrders(userId: string): Promise<IOrder[]> {
-    return Order.find({ user: userId })
+  async getUserOrders(userId: string, options?: { limit?: number; status?: string; page?: number }): Promise<IOrder[]> {
+    let query = Order.find({ user: userId });
+
+    // Handle status filtering
+    if (options?.status) {
+      if (options.status === 'recent') {
+        // For recent orders, get orders from last 30 days
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        query = query.where('createdAt').gte(thirtyDaysAgo);
+      } else {
+        // Filter by specific order status
+        query = query.where('orderStatus').equals(options.status);
+      }
+    }
+
+    query = query
       .populate('items.product')
       .sort({ createdAt: -1 });
+
+    // Handle pagination
+    if (options?.page && options?.limit) {
+      const skip = (options.page - 1) * options.limit;
+      query = query.skip(skip);
+    }
+
+    // Handle limit
+    if (options?.limit) {
+      query = query.limit(options.limit);
+    }
+
+    return query.exec();
   }
 
   async getAllOrders(filter: any = {}, options: { page: number; limit: number }): Promise<{ orders: IOrder[]; total: number; page: number; totalPages: number }> {

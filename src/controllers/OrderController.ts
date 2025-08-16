@@ -7,6 +7,7 @@ import {
   httpDelete,
   requestBody,
   requestParam,
+  queryParam,
   response,
 } from 'inversify-express-utils';
 import { Response } from 'express';
@@ -44,9 +45,21 @@ export class OrderController extends BaseController {
   }
 
   @httpGet('/', TYPES.RequireSignIn)
-  public async getUserOrders(@response() res: Response) {
+  public async getUserOrders(
+    @response() res: Response,
+    @queryParam('limit') limit?: string,
+    @queryParam('status') status?: string,
+    @queryParam('page') page?: string
+  ) {
     const userId = res.locals.user;
-    const orders = await this.orderService.getUserOrders(userId);
+    
+    const options = {
+      limit: limit ? parseInt(limit, 10) : undefined,
+      status: status,
+      page: page ? parseInt(page, 10) : 1
+    };
+    
+    const orders = await this.orderService.getUserOrders(userId, options);
     return this.sendResponse(res, 200, 'Orders retrieved successfully', orders);
   }
 
