@@ -277,11 +277,15 @@ export class ProductController extends BaseController {
 
     try {
       // Create initial product inquiry message (user shows interest)
+      const userName = authenticatedUser.firstName && authenticatedUser.lastName 
+        ? `${authenticatedUser.firstName} ${authenticatedUser.lastName}`
+        : authenticatedUser.name || 'User';
+      
       await this.bidMessageService.createProductInquiryMessage(
         authenticatedUser._id.toString(),
         sellerId.toString(),
         id,
-        `Hi! My name is Grace Opata. I would love to make an offer for this item:`,
+        `Hi! My name is ${userName}. I would love to make an offer for this item:`,
         product
       );
 
