@@ -47,18 +47,21 @@ const bidSchema: Schema<IBid> = new Schema<IBid>(
       default: 'PENDING',
     },
     expiresAt: {
-      type: Date,
-      validate: {
-        validator: function (this: IBid, value: Date) {
-          // Ensure expiration is 24 hours from acceptance
-          return (
-            !this.expiresAt ||
-            (this.status === 'ACCEPTED' && value.getTime() - this.updatedAt.getTime() <= 24 * 60 * 60 * 1000)
-          );
-        },
-        message: 'Bid expiration must be within 24 hours of acceptance',
-      },
+  type: Date,
+  validate: {
+    validator: function (this: IBid, value: Date) {
+      if (!value) return true;
+      
+      if (this.status === 'ACCEPTED') {
+        const now = Date.now();
+        return value.getTime() - now <= 24 * 60 * 60 * 1000;
+      }
+
+      return true;
     },
+    message: 'Bid expiration must be within 24 hours of acceptance',
+  },
+},
     cooldownUntil: {
       type: Date,
       default: null,
