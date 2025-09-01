@@ -46,22 +46,6 @@ const bidSchema: Schema<IBid> = new Schema<IBid>(
       enum: ['PENDING', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CANCELLED'],
       default: 'PENDING',
     },
-    expiresAt: {
-  type: Date,
-  validate: {
-    validator: function (this: IBid, value: Date) {
-      if (!value) return true;
-      
-      if (this.status === 'ACCEPTED') {
-        const now = Date.now();
-        return value.getTime() - now <= 24 * 60 * 60 * 1000;
-      }
-
-      return true;
-    },
-    message: 'Bid expiration must be within 24 hours of acceptance',
-  },
-},
     cooldownUntil: {
       type: Date,
       default: null,
