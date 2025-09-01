@@ -50,11 +50,15 @@ const bidSchema: Schema<IBid> = new Schema<IBid>(
       type: Date,
       validate: {
         validator: function (this: IBid, value: Date) {
-          // Ensure expiration is 24 hours from acceptance
-          return (
-            !this.expiresAt ||
-            (this.status === 'ACCEPTED' && value.getTime() - this.updatedAt.getTime() <= 24 * 60 * 60 * 1000)
-          );
+          if (!value) return true;
+
+          // Only validate if bid is accepted
+          if (this.status === 'ACCEPTED') {
+            const maxExpiry = new Date(this.createdAt.getTime() + 24 * 60 * 60 * 1000);
+            return value.getTime() <= maxExpiry.getTime();
+          }
+
+          return true;
         },
         message: 'Bid expiration must be within 24 hours of acceptance',
       },
@@ -95,17 +99,6 @@ bidSchema.pre('save', async function (next) {
   if (existingBid) {
     return next(new Error('Only one bid per product within 24 hours is allowed'));
   }
-
-  //   // Validate price range
-  //   const product = await this.model(PRODUCT).findById(this.product);
-  //   if (!product) {
-  //     return next(new Error('Product not found'));
-  //   }
-
-  //   const lowerBound = product.price * 0.75;
-  //   const upperBound = product.price * 1.25;
-
-  //   this.isWithinPriceRange = this.bidPrice >= lowerBound && this.bidPrice <= upperBound;
 
   // Handle cooldown after rejection
   if (this.status === 'REJECTED') {
