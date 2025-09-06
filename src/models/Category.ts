@@ -6,13 +6,14 @@ const { CATEGORY } = constants.mongooseModels;
 export interface ICategory extends Document {
   name: string;
   description: string;
-  imageUrl?: string; // optionnel
+  imageUrl?: string;
   isActive: boolean;
   subcategories: string[];
-  parent?: string; // pour les sous-catégories
+  parent?: string | null;
+  displayOrder?: number;
 }
 
-const categorySchema: Schema<ICategory> = new Schema(
+const categorySchema: Schema = new Schema<ICategory>(
   {
     name: {
       type: String,
@@ -26,7 +27,8 @@ const categorySchema: Schema<ICategory> = new Schema(
     },
     imageUrl: {
       type: String,
-      default: undefined, // NE PAS mettre d'URL par défaut ici
+      required: false,
+      default: 'https://example.com/default-category-image.jpg',
     },
     isActive: {
       type: Boolean,
@@ -41,17 +43,23 @@ const categorySchema: Schema<ICategory> = new Schema(
       ref: CATEGORY,
       default: null,
     },
+    displayOrder: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );
 
-// Transform _id to id and set default image if none exists
+// Transform _id to id and prevent default override
 categorySchema.set('toJSON', {
   transform: (doc, ret) => {
     ret.id = ret._id.toString();
-    ret.imageUrl = ret.imageUrl || 'https://example.com/default-category-image.jpg';
     delete ret._id;
     delete ret.__v;
+
+    // Si imageUrl est vide ou null, utiliser le default
+    if (!ret.imageUrl) ret.imageUrl = 'https://example.com/default-category-image.jpg';
     return ret;
   },
 });
