@@ -58,7 +58,7 @@ export class CategoryController extends BaseController {
     return this.sendResponse(res, 204, 'Category deleted successfully');
   }
 
-  //  Subcategory Management Methods
+  // Subcategory Methods
 
   @httpPost('/:id/subcategories')
   async createSubcategory(
