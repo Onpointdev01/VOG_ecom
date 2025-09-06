@@ -26,7 +26,7 @@ export class CategoryService extends BaseService implements ICategoryService {
 
   async createCategory(payload: Partial<ICategory>): Promise<ICategory> {
     const { name } = payload;
-    const existingCategory = await this.Category.findOne({ name });
+    const existingCategory = await this.Category.findOne({ name, parent: null });
     if (existingCategory) throw new AppError('Category already exists', 400);
 
     const newCategory = await this.Category.create(payload);
@@ -40,7 +40,7 @@ export class CategoryService extends BaseService implements ICategoryService {
   }
 
   async getAllCategories(): Promise<ICategory[]> {
-    return this.Category.find();
+    return this.Category.find({ parent: null }); // Only top-level categories
   }
 
   async updateCategory(id: string, payload: Partial<ICategory>): Promise<ICategory> {
@@ -52,6 +52,8 @@ export class CategoryService extends BaseService implements ICategoryService {
   async deleteCategory(id: string): Promise<void> {
     const result = await this.Category.findByIdAndDelete(id);
     if (!result) throw new AppError('Category not found', 404);
+    // Optional: delete subcategories
+    await this.Category.deleteMany({ parent: id });
   }
 
   async createSubcategory(parentId: string, payload: Partial<ICategory>): Promise<ICategory> {
@@ -78,8 +80,7 @@ export class CategoryService extends BaseService implements ICategoryService {
   }
 
   async getAllSubcategories(categoryId: string): Promise<ICategory[]> {
-    const subcategories = await this.Category.find({ parent: categoryId });
-    return subcategories;
+    return this.Category.find({ parent: categoryId });
   }
 
   async getSubcategoryByName(categoryId: string, subcategoryName: string): Promise<ICategory> {
