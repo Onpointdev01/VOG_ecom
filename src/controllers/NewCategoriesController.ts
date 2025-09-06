@@ -10,6 +10,7 @@ import {
   response,
 } from 'inversify-express-utils';
 import { Response } from 'express';
+
 import { BaseController } from './BaseController';
 import TYPES from '../di';
 import { ICategoryService } from '../services';
@@ -55,6 +56,7 @@ export class CategoryController extends BaseController {
     return this.sendResponse(res, 204, 'Category deleted successfully');
   }
 
+  // Subcategory routes
   @httpPost('/:id/subcategories')
   async createSubcategory(
     @response() res: Response,
@@ -68,16 +70,18 @@ export class CategoryController extends BaseController {
   @httpPut('/:id/subcategories/:subId')
   async updateSubcategory(
     @response() res: Response,
+    @requestParam('id') categoryId: string,
     @requestParam('subId') subcategoryId: string,
     @requestBody() payload: Partial<ICategory>
   ) {
-    const updatedSubcategory = await this.categoryService.updateSubcategory(subcategoryId, payload);
-    return this.sendResponse(res, 200, 'Subcategory updated successfully', updatedSubcategory);
+    const updatedSub = await this.categoryService.updateSubcategory(subcategoryId, payload);
+    return this.sendResponse(res, 200, 'Subcategory updated successfully', updatedSub);
   }
 
   @httpDelete('/:id/subcategories/:subId')
   async deleteSubcategory(
     @response() res: Response,
+    @requestParam('id') categoryId: string,
     @requestParam('subId') subcategoryId: string
   ) {
     await this.categoryService.deleteSubcategory(subcategoryId);
@@ -96,7 +100,7 @@ export class CategoryController extends BaseController {
     @requestParam('id') categoryId: string,
     @requestParam('name') subcategoryName: string
   ) {
-    const subcategory = await this.categoryService.getSubcategoryByName(categoryId, subcategoryName);
-    return this.sendResponse(res, 200, 'Subcategory retrieved successfully', subcategory);
+    const sub = await this.categoryService.getSubcategoryByName(categoryId, subcategoryName);
+    return this.sendResponse(res, 200, 'Subcategory retrieved successfully', sub);
   }
 }
