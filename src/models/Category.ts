@@ -6,11 +6,9 @@ const { CATEGORY } = constants.mongooseModels;
 export interface ICategory extends Document {
   name: string;
   description: string;
-  imageUrl?: string;
+  imageUrl: string;
   isActive: boolean;
-  subcategories: string[];
-  parent?: string | null;
-  displayOrder?: number;
+  subcategories: string[]; // New field for subcategories
 }
 
 const categorySchema: Schema = new Schema<ICategory>(
@@ -27,7 +25,6 @@ const categorySchema: Schema = new Schema<ICategory>(
     },
     imageUrl: {
       type: String,
-      required: false,
       default: 'https://example.com/default-category-image.jpg',
     },
     isActive: {
@@ -38,30 +35,18 @@ const categorySchema: Schema = new Schema<ICategory>(
       type: [String],
       default: [],
     },
-    parent: {
-      type: Schema.Types.ObjectId,
-      ref: CATEGORY,
-      default: null,
-    },
-    displayOrder: {
-      type: Number,
-      default: 0,
-    },
   },
   { timestamps: true }
 );
 
-// Transform _id to id and prevent default override
+// Transform _id to id for API responses
 categorySchema.set('toJSON', {
   transform: (doc, ret) => {
     ret.id = ret._id.toString();
     delete ret._id;
     delete ret.__v;
-
-    // Si imageUrl est vide ou null, utiliser le default
-    if (!ret.imageUrl) ret.imageUrl = 'https://example.com/default-category-image.jpg';
     return ret;
-  },
+  }
 });
 
 export const Category: Model<ICategory> = model<ICategory>(CATEGORY, categorySchema);
