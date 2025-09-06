@@ -1,15 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
 import { inject } from 'inversify';
 import {
   controller,
