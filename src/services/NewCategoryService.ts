@@ -25,9 +25,12 @@ export class CategoryService extends BaseService implements ICategoryService {
   }
 
   async createCategory(payload: Partial<ICategory>): Promise<ICategory> {
-    const existingCategory = await this.Category.findOne({ name: payload.name });
+    const { name } = payload;
+    const existingCategory = await this.Category.findOne({ name });
     if (existingCategory) throw new AppError('Category already exists', 400);
-    return this.Category.create(payload);
+
+    const newCategory = await this.Category.create(payload);
+    return newCategory;
   }
 
   async getCategoryById(id: string): Promise<ICategory> {
@@ -41,9 +44,6 @@ export class CategoryService extends BaseService implements ICategoryService {
   }
 
   async updateCategory(id: string, payload: Partial<ICategory>): Promise<ICategory> {
-    // Supprimer les champs undefined pour ne pas réinitialiser par défaut
-    Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
-
     const updatedCategory = await this.Category.findByIdAndUpdate(id, payload, { new: true });
     if (!updatedCategory) throw new AppError('Category not found', 404);
     return updatedCategory;
@@ -58,18 +58,18 @@ export class CategoryService extends BaseService implements ICategoryService {
     const parentCategory = await this.Category.findById(parentId);
     if (!parentCategory) throw new AppError('Parent category not found', 404);
 
-    const existingSub = await this.Category.findOne({ name: payload.name, parent: parentId });
-    if (existingSub) throw new AppError('Subcategory already exists under this parent', 400);
+    const { name } = payload;
+    const existingSubcategory = await this.Category.findOne({ name, parent: parentId });
+    if (existingSubcategory) throw new AppError('Subcategory already exists under this parent', 400);
 
-    return this.Category.create({ ...payload, parent: parentId });
+    const newSubcategory = await this.Category.create({ ...payload, parent: parentId });
+    return newSubcategory;
   }
 
   async updateSubcategory(subcategoryId: string, payload: Partial<ICategory>): Promise<ICategory> {
-    Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
-
-    const updatedSub = await this.Category.findByIdAndUpdate(subcategoryId, payload, { new: true });
-    if (!updatedSub) throw new AppError('Subcategory not found', 404);
-    return updatedSub;
+    const updatedSubcategory = await this.Category.findByIdAndUpdate(subcategoryId, payload, { new: true });
+    if (!updatedSubcategory) throw new AppError('Subcategory not found', 404);
+    return updatedSubcategory;
   }
 
   async deleteSubcategory(subcategoryId: string): Promise<void> {
@@ -78,12 +78,13 @@ export class CategoryService extends BaseService implements ICategoryService {
   }
 
   async getAllSubcategories(categoryId: string): Promise<ICategory[]> {
-    return this.Category.find({ parent: categoryId });
+    const subcategories = await this.Category.find({ parent: categoryId });
+    return subcategories;
   }
 
   async getSubcategoryByName(categoryId: string, subcategoryName: string): Promise<ICategory> {
-    const sub = await this.Category.findOne({ name: subcategoryName, parent: categoryId });
-    if (!sub) throw new AppError('Subcategory not found', 404);
-    return sub;
+    const subcategory = await this.Category.findOne({ name: subcategoryName, parent: categoryId });
+    if (!subcategory) throw new AppError('Subcategory not found', 404);
+    return subcategory;
   }
 }
