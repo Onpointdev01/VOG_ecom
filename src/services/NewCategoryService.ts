@@ -26,11 +26,9 @@ export class CategoryService extends BaseService implements ICategoryService {
 
   async createCategory(payload: Partial<ICategory>): Promise<ICategory> {
     const { name } = payload;
-    const existingCategory = await this.Category.findOne({ name, parent: null });
+    const existingCategory = await this.Category.findOne({ name });
     if (existingCategory) throw new AppError('Category already exists', 400);
-
-    const newCategory = await this.Category.create(payload);
-    return newCategory;
+    return this.Category.create(payload);
   }
 
   async getCategoryById(id: string): Promise<ICategory> {
@@ -40,7 +38,7 @@ export class CategoryService extends BaseService implements ICategoryService {
   }
 
   async getAllCategories(): Promise<ICategory[]> {
-    return this.Category.find({ parent: null }); // Only top-level categories
+    return this.Category.find();
   }
 
   async updateCategory(id: string, payload: Partial<ICategory>): Promise<ICategory> {
@@ -52,8 +50,6 @@ export class CategoryService extends BaseService implements ICategoryService {
   async deleteCategory(id: string): Promise<void> {
     const result = await this.Category.findByIdAndDelete(id);
     if (!result) throw new AppError('Category not found', 404);
-    // Optional: delete subcategories
-    await this.Category.deleteMany({ parent: id });
   }
 
   async createSubcategory(parentId: string, payload: Partial<ICategory>): Promise<ICategory> {
@@ -64,8 +60,7 @@ export class CategoryService extends BaseService implements ICategoryService {
     const existingSubcategory = await this.Category.findOne({ name, parent: parentId });
     if (existingSubcategory) throw new AppError('Subcategory already exists under this parent', 400);
 
-    const newSubcategory = await this.Category.create({ ...payload, parent: parentId });
-    return newSubcategory;
+    return this.Category.create({ ...payload, parent: parentId });
   }
 
   async updateSubcategory(subcategoryId: string, payload: Partial<ICategory>): Promise<ICategory> {
