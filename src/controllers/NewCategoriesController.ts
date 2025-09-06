@@ -10,7 +10,6 @@ import {
   response,
 } from 'inversify-express-utils';
 import { Response } from 'express';
-
 import { BaseController } from './BaseController';
 import TYPES from '../di';
 import { ICategoryService } from '../services';
@@ -21,8 +20,6 @@ export class CategoryController extends BaseController {
   constructor(@inject(TYPES.CategoryService) private categoryService: ICategoryService) {
     super();
   }
-
-  // Basic CRUD Methods
 
   @httpPost('/')
   async createCategory(@response() res: Response, @requestBody() payload: Partial<ICategory>) {
@@ -58,8 +55,6 @@ export class CategoryController extends BaseController {
     return this.sendResponse(res, 204, 'Category deleted successfully');
   }
 
-  // Subcategory Methods
-
   @httpPost('/:id/subcategories')
   async createSubcategory(
     @response() res: Response,
@@ -73,7 +68,6 @@ export class CategoryController extends BaseController {
   @httpPut('/:id/subcategories/:subId')
   async updateSubcategory(
     @response() res: Response,
-    @requestParam('id') categoryId: string,
     @requestParam('subId') subcategoryId: string,
     @requestBody() payload: Partial<ICategory>
   ) {
@@ -84,7 +78,6 @@ export class CategoryController extends BaseController {
   @httpDelete('/:id/subcategories/:subId')
   async deleteSubcategory(
     @response() res: Response,
-    @requestParam('id') categoryId: string,
     @requestParam('subId') subcategoryId: string
   ) {
     await this.categoryService.deleteSubcategory(subcategoryId);
