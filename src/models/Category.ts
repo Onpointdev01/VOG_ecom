@@ -8,7 +8,7 @@ export interface ICategory extends Document {
   description: string;
   imageUrl: string;
   isActive: boolean;
-  subcategories: string[]; // New field for subcategories
+  parent?: string; // Parent category reference (optional)
 }
 
 const categorySchema: Schema = new Schema<ICategory>(
@@ -31,9 +31,10 @@ const categorySchema: Schema = new Schema<ICategory>(
       type: Boolean,
       default: true,
     },
-    subcategories: {
-      type: [String],
-      default: [],
+    parent: {
+      type: Schema.Types.ObjectId,
+      ref: CATEGORY,
+      default: null,
     },
   },
   { timestamps: true }
