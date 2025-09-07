@@ -42,6 +42,40 @@ export class UserController extends BaseController {
     }
   }
 
+  @httpPatch('/profile/type', TYPES.RequireSignIn)
+public async setAccountType(
+  @requestBody() body: { type: 'buyer' | 'seller' },
+  @response() res: Response
+) {
+  try {
+    const type = (body?.type || '').toLowerCase();
+    if (type !== 'buyer' && type !== 'seller') {
+      return this.sendResponse(res, 400, 'Invalid type (must be "buyer" or "seller")');
+    }
+
+    // Service can whitelist updates + optionally create a Seller doc if needed
+    const payload: Partial<IUser> =
+      type === 'seller'
+        ? { role: 'seller', isSeller: true, userType: 'seller' }
+        : { role: 'buyer', isSeller: false, userType: 'buyer' };
+
+    const updated = await this.userService.updateUserProfile(res.locals.user, payload);
+
+    const filtered = mapUserProfile(updated);
+    const withAccountType = {
+      ...filtered,
+      role: (updated as any)?.role,
+      isSeller: (updated as any)?.isSeller,
+      userType: (updated as any)?.userType,
+      seller: (updated as any)?.seller,
+    };
+
+    return this.sendResponse(res, 200, 'Account type updated', withAccountType);
+  } catch (err) {
+    return this.sendResponse(res, 500, 'Unable to update account type');
+  }
+}
+
   // Update user profile
   @httpPatch('/profile', TYPES.RequireSignIn)
   public async updateUserProfile(@requestBody() payload: Partial<IUser>, @response() res: Response) {
