@@ -15,11 +15,17 @@ export interface IUserService {
   getWishlist(userId: string): Promise<IUser['wishlist']>;
   addToWishlist(userId: string, productId: any): Promise<IProduct>;
   removeFromWishlist(userId: string, productId: any): Promise<void>;
+
+  //explicit role switcher used by /user/profile/type
+  setAccountType(userId: string, type: 'buyer' | 'seller'): Promise<IUser>;
 }
 
 @injectable()
 export class UserService extends BaseService implements IUserService {
-  constructor(@inject(TYPES.User) private User: Model<IUser>, @inject(TYPES.Product) private Product: Model<IProduct>) {
+  constructor(
+    @inject(TYPES.User) private User: Model<IUser>,
+    @inject(TYPES.Product) private Product: Model<IProduct>
+  ) {
     super();
   }
 
@@ -30,18 +36,37 @@ export class UserService extends BaseService implements IUserService {
   }
 
   async updateUserProfile(userId: string, payload: Partial<IUser>): Promise<IUser> {
-    // Remove undefined fields from the payload
+    // Remove undefined fields & block non-updatable ones
     const filteredPayload = pickBy(payload, (value, key) => !nonUpdatableFields.includes(key));
     const updatedUser = await this.User.findByIdAndUpdate(userId, filteredPayload, { new: true });
     if (!updatedUser) throw new AppError('User not found', 404);
     return updatedUser;
   }
 
+  // ✅ NEW: dedicated method to set buyer/seller role and flags
+  async setAccountType(userId: string, type: 'buyer' | 'seller'): Promise<IUser> {
+    const t = (type || '').toLowerCase();
+    if (t !== 'buyer' && t !== 'seller') {
+      throw new AppError('Invalid type (must be "buyer" or "seller")', 400);
+    }
+
+    const update: Partial<IUser> & Record<string, any> =
+      t === 'seller'
+        ? { role: 'seller', isSeller: true, userType: 'seller' }
+        : { role: 'buyer', isSeller: false, userType: 'buyer' };
+
+    const updated = await this.User.findByIdAndUpdate(userId, update, { new: true });
+    if (!updated) throw new AppError('User not found', 404);
+
+    // If you later add a separate Seller model, you can create/link it here.
+    return updated;
+  }
+
   async getAllUsers(): Promise<IUser[]> {
     try {
       const users = await this.User.find().exec();
       return users;
-    } catch (error) {
+    } catch {
       throw new AppError('Unable to fetch users', 500);
     }
   }
@@ -53,18 +78,17 @@ export class UserService extends BaseService implements IUserService {
   }
 
   async addToWishlist(userId: string, productId: any): Promise<IProduct> {
-    // Fetch the user
     const user = await this.User.findById(userId);
     if (!user) throw new AppError('User not found', 404);
 
-    // Check if the product is already in the wishlist
-    const isAlreadyInWishlist = user.wishlist.some(item => item.toString() === productId.toString());
+    const isAlreadyInWishlist = user.wishlist.some(
+      (item) => item.toString() === productId.toString()
+    );
     if (!isAlreadyInWishlist) {
       user.wishlist.push(productId);
       await user.save();
     }
 
-    // Fetch the product details to return
     const product = await this.Product.findById(productId);
     if (!product) throw new AppError('Product not found', 404);
 
@@ -72,18 +96,19 @@ export class UserService extends BaseService implements IUserService {
   }
 
   async removeFromWishlist(userId: string, productId: any): Promise<void> {
-    // Fetch the user
     const user = await this.User.findById(userId);
     if (!user) throw new AppError('User not found', 404);
 
-    // Ensure the product exists in the wishlist before proceeding
-    const isInWishlist = user.wishlist.some(item => item.toString() === productId.toString());
+    const isInWishlist = user.wishlist.some(
+      (item) => item.toString() === productId.toString()
+    );
     if (!isInWishlist) {
       throw new AppError('Product not found in wishlist', 404);
     }
 
-    // Remove the product from the wishlist
-    user.wishlist = user.wishlist.filter((wishlistItem) => wishlistItem.toString() !== productId.toString());
+    user.wishlist = user.wishlist.filter(
+      (wishlistItem) => wishlistItem.toString() !== productId.toString()
+    );
     await user.save();
   }
 }
