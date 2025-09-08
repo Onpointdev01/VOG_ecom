@@ -26,8 +26,8 @@ export interface IAdminService {
   
   // Category Management
   getAllCategories(): Promise<ICategory[]>;
-  createCategory(data: { name: string; description?: string; isActive?: boolean }): Promise<ICategory>;
-  updateCategory(categoryId: string, data: { name?: string; description?: string; isActive?: boolean }): Promise<ICategory>;
+  createCategory(data: { name: string; description?: string; parent?: string | null; isActive?: boolean; imageUrl?: string }): Promise<ICategory>;
+  updateCategory(categoryId: string, data: { name?: string; description?: string; parent?: string | null; isActive?: boolean; imageUrl?: string }): Promise<ICategory>;
   deleteCategory(categoryId: string): Promise<void>;
   
   // Brand Management
@@ -240,7 +240,7 @@ export class AdminService extends BaseService implements IAdminService {
       .sort({ parent: 1, displayOrder: 1, createdAt: -1 });
   }
 
-  async createCategory(data: { name: string; description?: string; parent?: string | null; isActive?: boolean }): Promise<ICategory> {
+  async createCategory(data: { name: string; description?: string; parent?: string | null; isActive?: boolean; imageUrl?: string }): Promise<ICategory> {
     const existingCategory = await Category.findOne({ 
       name: { $regex: new RegExp(`^${data.name}$`, 'i') } 
     });
@@ -262,13 +262,14 @@ export class AdminService extends BaseService implements IAdminService {
       description: data.description?.trim(),
       parent: data.parent ? data.parent as any : null,
       isActive: data.isActive !== undefined ? data.isActive : true,
+      imageUrl: data.imageUrl?.trim(),
     });
 
     await category.save();
     return category;
   }
 
-  async updateCategory(categoryId: string, data: { name?: string; description?: string; parent?: string | null; isActive?: boolean }): Promise<ICategory> {
+  async updateCategory(categoryId: string, data: { name?: string; description?: string; parent?: string | null; isActive?: boolean; imageUrl?: string }): Promise<ICategory> {
     const category = await this.verifyDoc(categoryId, Category);
     
     if (data.name) {
@@ -313,6 +314,10 @@ export class AdminService extends BaseService implements IAdminService {
     
     if (data.isActive !== undefined) {
       category.isActive = data.isActive;
+    }
+
+    if (data.imageUrl !== undefined) {
+      category.imageUrl = data.imageUrl?.trim();
     }
 
     await category.save();

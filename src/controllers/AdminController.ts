@@ -297,15 +297,15 @@ export class AdminController extends BaseController {
   @httpPost('/categories', TYPES.RequireAdmin)
   public async createCategory(
     @response() res: Response,
-    @requestBody() payload: { name: string; description?: string; parent?: string | null; isActive?: boolean }
+    @requestBody() payload: { name: string; description?: string; parent?: string | null; isActive?: boolean; imageUrl?: string }
   ) {
-    const { name, description, parent, isActive } = payload;
+    const { name, description, parent, isActive, imageUrl } = payload;
 
     if (!name?.trim()) {
       throw new AppError('Category name is required', 400);
     }
 
-    const category = await this.adminService.createCategory({ name, description, parent, isActive });
+    const category = await this.adminService.createCategory({ name, description, parent, isActive, imageUrl });
     return this.sendResponse(res, 201, 'Category created successfully', category);
   }
 
@@ -313,15 +313,15 @@ export class AdminController extends BaseController {
   public async updateCategory(
     @response() res: Response,
     @requestParam('categoryId') categoryId: string,
-    @requestBody() payload: { name?: string; description?: string; parent?: string | null; isActive?: boolean }
+    @requestBody() payload: { name?: string; description?: string; parent?: string | null; isActive?: boolean; imageUrl?: string }
   ) {
-    const { name, description, parent, isActive } = payload;
+    const { name, description, parent, isActive, imageUrl } = payload;
 
-    if (!name && description === undefined && parent === undefined && isActive === undefined) {
+    if (!name && description === undefined && parent === undefined && isActive === undefined && imageUrl === undefined) {
       throw new AppError('At least one field is required for update', 400);
     }
 
-    const category = await this.adminService.updateCategory(categoryId, { name, description, parent, isActive });
+    const category = await this.adminService.updateCategory(categoryId, { name, description, parent, isActive, imageUrl });
     return this.sendResponse(res, 200, 'Category updated successfully', category);
   }
 

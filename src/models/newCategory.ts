@@ -29,7 +29,7 @@ const categorySchema: Schema = new Schema<INewCategory>(
     },
     imageUrl: {
       type: String,
-      default: 'https://example.com/default-category-image.jpg',
+      default: '',
     },
     isActive: {
       type: Boolean,
