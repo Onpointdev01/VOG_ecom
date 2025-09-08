@@ -16,8 +16,8 @@ import TYPES from '../di';
 import { ICategoryService } from '../services';
 import { ICategory } from '../models';
 
-@controller('/api/v1/categories')
-export class CategoryController extends BaseController {
+@controller('/api/v1/auth')
+export class AuthController extends BaseController {
   constructor(@inject(TYPES.CategoryService) private categoryService: ICategoryService) {
     super();
   }
