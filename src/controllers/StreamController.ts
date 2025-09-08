@@ -1,38 +1,37 @@
-// src/controllers/StreamController.ts
-import { controller, httpGet, response } from 'inversify-express-utils';
-import type { Response } from 'express';
-import TYPES from '../di';
-import { BaseController } from './BaseController';
+import { controller, httpGet, request, response, queryParam } from 'inversify-express-utils';
+import type { Request, Response } from 'express';
 import { streamController } from '../realtime/StreamController';
+import { env } from '../config';
+// re-use your JWT helper if you have one:
+import { verifyToken } from '../utils/helpers/token'; // adjust path/name if different
 
 @controller('/api/v1/stream')
-export class SSEController extends BaseController {
-  // NOTE: path matches app.ts SSE_PATH = '/api/v1/stream/events'
-  @httpGet('/events', TYPES.RequireSignIn)
-  public open(@response() res: Response) {
-    // Your auth middleware should have put the user (or id) here
-    const u = (res.locals as any).user;
-    const userId = typeof u === 'string' ? u : u?._id || u?.id;
-    if (!userId) {
-      res.status(401).end();
-      return;
-    }
-    // This keeps the HTTP response open for SSE
-    streamController.addClient(String(userId), res);
-  }
+export class StreamHttpController {
+  @httpGet('/events')
+  public events(
+    @request() _req: Request,
+    @response() res: Response,
+    @queryParam('token') token?: string,
+  ) {
+    try {
+      if (!token) {
+        res.status(401).json({ status: 'error', message: 'Missing token' });
+        return;
+      }
 
-  // Optional: quick ping route to verify delivery over SSE
-  @httpGet('/test', TYPES.RequireSignIn)
-  public test(@response() res: Response) {
-    const u = (res.locals as any).user;
-    const userId = typeof u === 'string' ? u : u?._id || u?.id;
-    if (userId) {
-      streamController.publishToUser(String(userId), 'notification', {
-        title: 'Ping',
-        message: 'SSE is up',
-        createdAt: new Date().toISOString(),
-      });
+      // verify token (adapt to your helper’s return shape)
+      const decoded: any = verifyToken(token, env.JWT_SECRET);
+      const userId = String(decoded?.id || decoded?._id || decoded?.userId || '');
+      if (!userId) {
+        res.status(401).json({ status: 'error', message: 'Invalid token' });
+        return;
+      }
+
+      // keep the connection open
+      streamController.addClient(userId, res);
+      // do not end the response
+    } catch {
+      res.status(401).json({ status: 'error', message: 'Unauthorized' });
     }
-    return this.sendResponse(res, 200, 'sent');
   }
 }

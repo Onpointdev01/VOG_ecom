@@ -7,8 +7,8 @@ import { PaymentOption, PaymentMethodType } from '../models/PaymentOption';
 import { PaymentService } from './PaymentService';
 import { PaymentMethod } from '../models/Payment';
 import AppError from '../utils/errors/AppError';
-import { TYPES } from '../di';
-// [SSE] add import
+import TYPES from '../di';
+// [SSE] realtime engine
 import { streamController } from '../realtime/StreamController';
 
 export interface CreateOrderRequest {
@@ -21,9 +21,7 @@ export interface CreateOrderRequest {
 
 @injectable()
 export class OrderService extends BaseService {
-  constructor(
-    @inject(TYPES.PaymentService) private paymentService: PaymentService
-  ) {
+  constructor(@inject(TYPES.PaymentService) private paymentService: PaymentService) {
     super();
   }
 
@@ -34,9 +32,9 @@ export class OrderService extends BaseService {
     if (!cart || cart.items.length === 0) throw new AppError('Cart is empty', 400);
 
     let itemsToOrder = cart.items;
-    if (selectedItems && selectedItems.length > 0) {
+    if (selectedItems?.length) {
       itemsToOrder = cart.items.filter(item => selectedItems.includes(item._id.toString()));
-      if (itemsToOrder.length === 0) throw new AppError('No valid items selected for checkout', 400);
+      if (!itemsToOrder.length) throw new AppError('No valid items selected for checkout', 400);
     }
 
     const paymentOption = await PaymentOption.findOne({ code: paymentMethod, isEnabled: true });
@@ -49,24 +47,22 @@ export class OrderService extends BaseService {
       let itemPrice = item.price;
       if (typeof itemPrice !== 'number' || isNaN(itemPrice) || itemPrice < 0) {
         const product = item.product as any;
-        if (product && typeof product.price === 'number') {
-          itemPrice = product.price;
-        } else {
-          throw new AppError(`Invalid price for item: ${product?.name || 'Unknown product'}. Please refresh your cart and try again.`, 400);
-        }
+        if (product && typeof product.price === 'number') itemPrice = product.price;
+        else throw new AppError(`Invalid price for item: ${product?.name || 'Unknown product'}.`, 400);
       }
       return sum + (itemPrice * item.quantity);
     }, 0);
 
-    if (isNaN(totalPrice) || totalPrice < 0) throw new AppError('Unable to calculate order total. Please check your cart items and try again.', 400);
-    
+    if (isNaN(totalPrice) || totalPrice < 0) throw new AppError('Unable to calculate order total.', 400);
+
     const shippingFee = this.calculateShippingFee(paymentMethod, totalPrice);
     const finalPrice = totalPrice + shippingFee;
 
-    const cartItemIdsToRemove = selectedItems && selectedItems.length > 0 
-      ? selectedItems 
+    const cartItemIdsToRemove = selectedItems?.length
+      ? selectedItems
       : cart.items.map(item => item._id.toString());
 
+    // order number
     const timestamp = Date.now().toString();
     const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
     const orderNumber = `ORD-${timestamp}-${random}`;
@@ -77,11 +73,8 @@ export class OrderService extends BaseService {
         let itemPrice = item.price;
         if (typeof itemPrice !== 'number' || isNaN(itemPrice) || itemPrice < 0) {
           const product = item.product as any;
-          if (product && typeof product.price === 'number') {
-            itemPrice = product.price;
-          } else {
-            throw new AppError(`Cannot create order: Invalid price for item ${product?.name || 'Unknown product'}`, 400);
-          }
+          if (product && typeof product.price === 'number') itemPrice = product.price;
+          else throw new AppError(`Cannot create order: Invalid price for item ${product?.name || 'Unknown product'}`, 400);
         }
         return {
           product: item.product,
@@ -113,40 +106,19 @@ export class OrderService extends BaseService {
       orderStatus: 'PENDING',
     });
 
+    await order.save();
+
+    // [SSE] order created
     try {
-      await order.save();
+      streamController.publishToUser(userId, 'order:update', {
+        orderId: order.id,
+        status: order.orderStatus,
+        total: order.finalPrice,
+        createdAt: order.createdAt,
+      });
+    } catch {}
 
-      // [SSE] notify user order created
-      try {
-        streamController.publishToUser(userId, 'order:update', {
-          orderId: order.id,
-          status: order.orderStatus, // PENDING
-          total: order.finalPrice,
-          createdAt: order.createdAt,
-        });
-      } catch (e) { /* noop */ }
-
-    } catch (error: any) {
-      console.error('Order save error:', error);
-      console.error('Order data:', JSON.stringify(order.toObject(), null, 2));
-      if (error.name === 'ValidationError') {
-        const validationErrors = Object.keys(error.errors).map(key => 
-          `${key}: ${error.errors[key].message}`
-        ).join(', ');
-        if (error.message.includes('totalPrice') || error.message.includes('finalPrice')) {
-          throw new AppError('Unable to process order due to pricing issues. Please refresh your cart and try again.', 400);
-        }
-        if (error.message.includes('orderNumber')) {
-          throw new AppError('Order processing failed. Please try again.', 500);
-        }
-        if (error.message.includes('price') && error.message.includes('required')) {
-          throw new AppError('Product pricing information is missing. Please refresh your cart and try again.', 400);
-        }
-        throw new AppError(`Order validation failed: ${validationErrors}`, 400);
-      }
-      throw error;
-    }
-
+    // create initial payment record
     try {
       const payment = await this.paymentService.createPayment({
         orderId: (order._id as string).toString(),
@@ -162,7 +134,7 @@ export class OrderService extends BaseService {
       order.payments = [payment._id as any];
       await order.save();
 
-      // [SSE] optional: notify user payment intent/record created
+      // [SSE] payment record created (lightweight update)
       try {
         streamController.publishToUser(userId, 'order:update', {
           orderId: order.id,
@@ -170,12 +142,12 @@ export class OrderService extends BaseService {
           paymentStatus: order.paymentStatus,
           createdAt: new Date().toISOString(),
         });
-      } catch (e) { /* noop */ }
-
-    } catch (error: any) {
-      console.error('Payment creation error:', error);
+      } catch {}
+    } catch (e) {
+      console.error('Payment creation error:', e);
+      // non-fatal for order creation
     }
-    
+
     return order;
   }
 
@@ -196,28 +168,27 @@ export class OrderService extends BaseService {
 
     let query = Order.find(filter).populate('items.product').sort({ createdAt: -1 });
     if (options?.page && options?.limit) {
-      const skip = (options.page - 1) * options.limit;
+      const skip = (options.page - 1) * (options.limit);
       query = query.skip(skip);
     }
     if (options?.limit) query = query.limit(options.limit);
     return query.exec();
   }
 
-  async getAllOrders(filter: any = {}, options: { page: number; limit: number })
-  : Promise<{ orders: IOrder[]; total: number; page: number; totalPages: number }> {
+  async getAllOrders(filter: any = {}, options: { page: number; limit: number }) {
     const { page, limit } = options;
     const skip = (page - 1) * limit;
-    
+
     const orders = await Order.find(filter)
       .populate('items.product')
       .populate('user', 'firstName lastName email phoneNumber')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
-    
+
     const total = await Order.countDocuments(filter);
     const totalPages = Math.ceil(total / limit);
-    
+
     return { orders, total, page, totalPages };
   }
 
@@ -236,14 +207,14 @@ export class OrderService extends BaseService {
       await this.clearCartItems(order.user.toString(), order.cartItemIds || []);
     }
 
-    // [SSE] notify user
+    // [SSE]
     try {
       streamController.publishToUser(order.user.toString(), 'order:update', {
         orderId: order.id,
         status: order.orderStatus,
         createdAt: new Date().toISOString(),
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return order;
   }
@@ -256,7 +227,7 @@ export class OrderService extends BaseService {
     if (trackingNumber) order.paymentReference = trackingNumber;
     await order.save();
 
-    // [SSE] notify user
+    // [SSE]
     try {
       streamController.publishToUser(order.user.toString(), 'order:update', {
         orderId: order.id,
@@ -264,7 +235,7 @@ export class OrderService extends BaseService {
         trackingNumber,
         createdAt: new Date().toISOString(),
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return order;
   }
@@ -279,7 +250,7 @@ export class OrderService extends BaseService {
     }
     await order.save();
 
-    // [SSE] notify user
+    // [SSE]
     try {
       streamController.publishToUser(order.user.toString(), 'order:update', {
         orderId: order.id,
@@ -287,19 +258,19 @@ export class OrderService extends BaseService {
         paymentStatus: order.paymentStatus,
         createdAt: new Date().toISOString(),
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return order;
   }
 
   private validateStatusTransition(currentStatus: string, newStatus: string): void {
-    const validTransitions: { [key: string]: string[] } = {
-      'PENDING': ['CONFIRMED', 'CANCELLED'],
-      'CONFIRMED': ['PROCESSING', 'CANCELLED'],
-      'PROCESSING': ['SHIPPED', 'CANCELLED'],
-      'SHIPPED': ['DELIVERED', 'CANCELLED'],
-      'DELIVERED': [],
-      'CANCELLED': []
+    const validTransitions: Record<string, string[]> = {
+      PENDING: ['CONFIRMED', 'CANCELLED'],
+      CONFIRMED: ['PROCESSING', 'CANCELLED'],
+      PROCESSING: ['SHIPPED', 'CANCELLED'],
+      SHIPPED: ['DELIVERED', 'CANCELLED'],
+      DELIVERED: [],
+      CANCELLED: [],
     };
     if (!validTransitions[currentStatus]?.includes(newStatus)) {
       throw new AppError(`Cannot transition from ${currentStatus} to ${newStatus}`, 400);
@@ -325,7 +296,7 @@ export class OrderService extends BaseService {
       await this.clearCartItems(order.user.toString(), order.cartItemIds || []);
     }
 
-    // [SSE] notify user
+    // [SSE]
     try {
       streamController.publishToUser(order.user.toString(), 'order:update', {
         orderId: order.id,
@@ -333,7 +304,7 @@ export class OrderService extends BaseService {
         paymentStatus: order.paymentStatus,
         createdAt: new Date().toISOString(),
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return order;
   }
@@ -347,34 +318,33 @@ export class OrderService extends BaseService {
     order.orderStatus = 'CANCELLED';
     await order.save();
 
-    // [SSE] notify user
+    // [SSE]
     try {
       streamController.publishToUser(order.user.toString(), 'order:update', {
         orderId: order.id,
         status: 'CANCELLED',
         createdAt: new Date().toISOString(),
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return order;
   }
 
   private calculateShippingFee(paymentMethod: PaymentMethodType, totalPrice: number): number {
-    if (paymentMethod === 'CASH_ON_DELIVERY') return 5.00;
+    if (paymentMethod === 'CASH_ON_DELIVERY') return 5.0;
     if (totalPrice >= 100) return 0;
-    return 10.00;
+    return 10.0;
   }
 
   private async clearCartItems(userId: string, cartItemIds: string[]): Promise<void> {
     try {
-      if (!cartItemIds || cartItemIds.length === 0) return;
+      if (!cartItemIds?.length) return;
 
       const result = await Cart.findOneAndUpdate(
         { user: userId },
         { $pull: { items: { _id: { $in: cartItemIds } } } },
         { new: true }
       );
-
       if (result) await result.save();
     } catch (error) {
       console.error('Failed to clear cart items:', error);

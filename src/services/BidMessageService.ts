@@ -3,7 +3,7 @@ import TYPES from '../di';
 import { IBidMessages, IUser } from '../models';
 import { Model } from 'mongoose';
 import { BaseService } from './BaseService';
-// [SSE] add import
+// [SSE] realtime engine
 import { streamController } from '../realtime/StreamController';
 
 export interface IBidMessageService {
@@ -15,9 +15,13 @@ export interface IBidMessageService {
   getBidMessages(userId: string, productId?: string): Promise<IBidMessages[]>;
   getConversations(userId: string): Promise<any[]>;
   markMessageAsRead(messageId: string, userId: string): Promise<IBidMessages>;
-  
-  // Admin methods
-  getAllMessagesForAdmin(filters: any, page: number, limit: number): Promise<{ messages: IBidMessages[]; total: number; page: number; totalPages: number }>;
+
+  // Admin
+  getAllMessagesForAdmin(
+    filters: any,
+    page: number,
+    limit: number
+  ): Promise<{ messages: IBidMessages[]; total: number; page: number; totalPages: number }>;
 }
 
 @injectable()
@@ -30,10 +34,10 @@ export class BidMessageService extends BaseService implements IBidMessageService
   }
 
   async createBidProposalMessage(
-    senderId: string, 
-    recipientId: string, 
-    productId: string, 
-    bidId: string, 
+    senderId: string,
+    recipientId: string,
+    productId: string,
+    bidId: string,
     message: string
   ): Promise<IBidMessages> {
     if (!this.isValidObjectId(senderId)) throw new Error(`Invalid senderId format: ${senderId}`);
@@ -47,10 +51,10 @@ export class BidMessageService extends BaseService implements IBidMessageService
       product: productId,
       bid: bidId,
       type: 'BID_PROPOSAL',
-      message: message
+      message
     });
 
-    // [SSE] notify both parties
+    // [SSE] fan-out to both parties
     try {
       streamController.publishToMany([senderId, recipientId], 'bid:message', {
         id: newBidMessage.id,
@@ -61,16 +65,16 @@ export class BidMessageService extends BaseService implements IBidMessageService
         senderId,
         createdAt: newBidMessage.createdAt,
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return newBidMessage;
   }
 
   async createSystemMessage(
-    senderId: string, 
-    recipientId: string, 
-    productId: string, 
-    bidId: string | null, 
+    senderId: string,
+    recipientId: string,
+    productId: string,
+    bidId: string | null,
     message: string
   ): Promise<IBidMessages> {
     if (!this.isValidObjectId(senderId)) throw new Error(`Invalid senderId format: ${senderId}`);
@@ -83,13 +87,13 @@ export class BidMessageService extends BaseService implements IBidMessageService
       recipient: recipientId,
       product: productId,
       type: 'SYSTEM',
-      message: message
+      message
     };
     if (bidId) messageData.bid = bidId;
 
     const newBidMessage = await this.BidMessage.create(messageData);
 
-    // [SSE] notify both parties
+    // [SSE]
     try {
       streamController.publishToMany([senderId, recipientId], 'bid:message', {
         id: newBidMessage.id,
@@ -100,17 +104,17 @@ export class BidMessageService extends BaseService implements IBidMessageService
         senderId,
         createdAt: newBidMessage.createdAt,
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return newBidMessage;
   }
 
   async createProductInquiryMessage(
-    senderId: string, 
-    recipientId: string, 
-    productId: string, 
+    senderId: string,
+    recipientId: string,
+    productId: string,
     message: string,
-    product: any
+    _product: any
   ): Promise<IBidMessages> {
     if (!this.isValidObjectId(senderId)) throw new Error(`Invalid senderId format: ${senderId}`);
     if (!this.isValidObjectId(recipientId)) throw new Error(`Invalid recipientId format: ${recipientId}`);
@@ -121,10 +125,10 @@ export class BidMessageService extends BaseService implements IBidMessageService
       recipient: recipientId,
       product: productId,
       type: 'PRODUCT_INQUIRY',
-      message: message
+      message
     });
 
-    // [SSE] notify both parties
+    // [SSE]
     try {
       streamController.publishToMany([senderId, recipientId], 'bid:message', {
         id: newBidMessage.id,
@@ -134,7 +138,7 @@ export class BidMessageService extends BaseService implements IBidMessageService
         senderId,
         createdAt: newBidMessage.createdAt,
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return newBidMessage;
   }
@@ -144,10 +148,10 @@ export class BidMessageService extends BaseService implements IBidMessageService
   }
 
   async createBidAcceptedMessage(
-    senderId: string, 
-    recipientId: string, 
-    productId: string, 
-    bidId: string, 
+    senderId: string,
+    recipientId: string,
+    productId: string,
+    bidId: string,
     message: string
   ): Promise<IBidMessages> {
     const newBidMessage = await this.BidMessage.create({
@@ -156,10 +160,10 @@ export class BidMessageService extends BaseService implements IBidMessageService
       product: productId,
       bid: bidId,
       type: 'BID_ACCEPTED',
-      message: message
+      message
     });
 
-    // [SSE] notify both parties
+    // [SSE]
     try {
       streamController.publishToMany([senderId, recipientId], 'bid:message', {
         id: newBidMessage.id,
@@ -170,23 +174,22 @@ export class BidMessageService extends BaseService implements IBidMessageService
         senderId,
         createdAt: newBidMessage.createdAt,
       });
-      // optional: a direct lightweight update
       streamController.publishToMany([senderId, recipientId], 'bid:update', {
         bidId,
         productId,
         status: 'ACCEPTED',
         createdAt: newBidMessage.createdAt,
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return newBidMessage;
   }
 
   async createBidRejectedMessage(
-    senderId: string, 
-    recipientId: string, 
-    productId: string, 
-    bidId: string, 
+    senderId: string,
+    recipientId: string,
+    productId: string,
+    bidId: string,
     message: string
   ): Promise<IBidMessages> {
     const newBidMessage = await this.BidMessage.create({
@@ -195,10 +198,10 @@ export class BidMessageService extends BaseService implements IBidMessageService
       product: productId,
       bid: bidId,
       type: 'BID_REJECTED',
-      message: message
+      message
     });
 
-    // [SSE] notify both parties
+    // [SSE]
     try {
       streamController.publishToMany([senderId, recipientId], 'bid:message', {
         id: newBidMessage.id,
@@ -215,7 +218,7 @@ export class BidMessageService extends BaseService implements IBidMessageService
         status: 'REJECTED',
         createdAt: newBidMessage.createdAt,
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return newBidMessage;
   }
@@ -223,10 +226,7 @@ export class BidMessageService extends BaseService implements IBidMessageService
   async getBidMessages(userId: string, productId?: string): Promise<IBidMessages[]> {
     try {
       const filter: any = {
-        $or: [
-          { sender: userId },
-          { recipient: userId }
-        ]
+        $or: [{ sender: userId }, { recipient: userId }]
       };
       if (productId) filter.product = productId;
 
@@ -246,11 +246,8 @@ export class BidMessageService extends BaseService implements IBidMessageService
 
   async getConversations(userId: string): Promise<any[]> {
     try {
-      console.log('=== CONVERSATIONS AGGREGATION DEBUG ===');
-      console.log('User ID:', userId);
-      
       const conversations = await this.BidMessage.aggregate([
-        { $match: { $or: [ { sender: this.toObjectId(userId) }, { recipient: this.toObjectId(userId) } ] } },
+        { $match: { $or: [{ sender: this.toObjectId(userId) }, { recipient: this.toObjectId(userId) }] } },
         { $sort: { createdAt: -1 } },
         { $group: { _id: '$product', lastMessage: { $first: '$$ROOT' }, messageCount: { $sum: 1 }, lastMessageDate: { $first: '$createdAt' } } },
         { $sort: { lastMessageDate: -1 } },
@@ -268,7 +265,7 @@ export class BidMessageService extends BaseService implements IBidMessageService
                   name: '$$productData.name',
                   images: '$$productData.images',
                   price: '$$productData.price',
-                  owner: '$$productData.owner'
+                  owner: '$$productData.owner',
                 }
               }
             },
@@ -285,7 +282,7 @@ export class BidMessageService extends BaseService implements IBidMessageService
                     _id: '$$senderData._id',
                     firstName: '$$senderData.firstName',
                     lastName: '$$senderData.lastName',
-                    email: '$$senderData.email'
+                    email: '$$senderData.email',
                   }
                 }
               },
@@ -296,7 +293,7 @@ export class BidMessageService extends BaseService implements IBidMessageService
                     _id: '$$recipientData._id',
                     firstName: '$$recipientData.firstName',
                     lastName: '$$recipientData.lastName',
-                    email: '$$recipientData.email'
+                    email: '$$recipientData.email',
                   }
                 }
               }
@@ -306,63 +303,46 @@ export class BidMessageService extends BaseService implements IBidMessageService
           }
         }
       ]);
-      
-      console.log('Aggregation pipeline completed');
-      console.log('Conversations found:', conversations.length);
-      if (conversations.length > 0) {
-        console.log('First conversation structure:', {
-          productId: conversations[0].product?.id,
-          productName: conversations[0].product?.name,
-          lastMessageType: conversations[0].lastMessage?.type,
-          lastMessageDate: conversations[0].lastMessage?.createdAt
-        });
-      }
-      console.log('=== END CONVERSATIONS DEBUG ===');
-      
+
       return conversations;
     } catch (error) {
-      console.error('Error in MongoDB aggregation:', error);
-      console.error('Error details:', error instanceof Error ? error.message : 'Unknown error');
-      console.log('Falling back to application-level grouping...');
+      console.error('Aggregation failed in getConversations:', error);
       return this.getConversationsFallback(userId);
     }
   }
-  
+
   private async getConversationsFallback(userId: string): Promise<any[]> {
     try {
       const allMessages = await this.getBidMessages(userId);
-      if (allMessages.length === 0) return [];
-      
-      const plainMessages = allMessages.map(msg => {
-        const msgObj = (msg as any).toJSON ? (msg as any).toJSON() : msg;
-        return msgObj;
-      });
-      
-      const conversationsMap = new Map();
+      if (!allMessages.length) return [];
+
+      const plainMessages = allMessages.map((m: any) => (m.toJSON ? m.toJSON() : m));
+      const byProduct = new Map<string, any>();
+
       for (const message of plainMessages) {
-        const productId = message.product?.id || message.product?._id?.toString() || message.product?.toString();
+        const productId =
+          message.product?.id || message.product?._id?.toString() || message.product?.toString();
         if (!productId) continue;
-        
-        if (!conversationsMap.has(productId)) {
-          conversationsMap.set(productId, {
+
+        if (!byProduct.has(productId)) {
+          byProduct.set(productId, {
             product: {
               id: productId,
               _id: message.product._id || message.product.id,
               name: message.product.name,
               images: message.product.images,
               price: message.product.price,
-              owner: message.product.owner
+              owner: message.product.owner,
             },
             lastMessage: null,
             messageCount: 0,
-            unreadCount: 0
+            unreadCount: 0,
           });
         }
-        
-        const conversation = conversationsMap.get(productId);
-        conversation.messageCount++;
-        if (!conversation.lastMessage || new Date(message.createdAt) > new Date(conversation.lastMessage.createdAt)) {
-          conversation.lastMessage = {
+        const c = byProduct.get(productId);
+        c.messageCount += 1;
+        if (!c.lastMessage || new Date(message.createdAt) > new Date(c.lastMessage.createdAt)) {
+          c.lastMessage = {
             id: message.id || message._id?.toString(),
             _id: message._id,
             message: message.message,
@@ -370,37 +350,30 @@ export class BidMessageService extends BaseService implements IBidMessageService
             createdAt: message.createdAt,
             sender: message.sender,
             recipient: message.recipient,
-            bid: message.bid
+            bid: message.bid,
           };
         }
       }
-      
-      return Array.from(conversationsMap.values()).sort((a, b) => {
-        const dateA = new Date(a.lastMessage?.createdAt || 0);
-        const dateB = new Date(b.lastMessage?.createdAt || 0);
-        return dateB.getTime() - dateA.getTime();
-      });
+
+      return Array.from(byProduct.values()).sort((a, b) =>
+        new Date(b.lastMessage?.createdAt || 0).getTime() -
+        new Date(a.lastMessage?.createdAt || 0).getTime()
+      );
     } catch (error) {
-      console.error('Fallback method also failed:', error);
+      console.error('Fallback grouping failed:', error);
       return [];
     }
   }
 
   private toObjectId(id: string) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mongoose = require('mongoose');
     return new mongoose.Types.ObjectId(id);
   }
 
   async markMessageAsRead(messageId: string, userId: string): Promise<IBidMessages> {
-    const message = await this.BidMessage.findOne({
-      _id: messageId,
-      recipient: userId
-    });
-
-    if (!message) {
-      throw new Error('Message not found or you are not the recipient');
-    }
-
+    const message = await this.BidMessage.findOne({ _id: messageId, recipient: userId });
+    if (!message) throw new Error('Message not found or you are not the recipient');
     return message;
   }
 

@@ -3,7 +3,7 @@ import TYPES from '../di';
 import { IBid, IProduct, IUser } from '../models';
 import { Model } from 'mongoose';
 import AppError from '../utils/errors/AppError';
-// [SSE] add import
+// [SSE] realtime engine
 import { streamController } from '../realtime/StreamController';
 
 export interface IProductBidService {
@@ -18,6 +18,7 @@ export interface IProductBidService {
   getSellerBids(sellerId: string, status?: string, page?: number, limit?: number): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }>;
   markBidAsConverted(bidId: string): Promise<IBid>;
 
+  // Admin
   getAllBidsForAdmin(filters: any, page: number, limit: number, search?: string): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }>;
   getBidStatistics(): Promise<any>;
   forceAcceptBid(bidId: string, reason?: string): Promise<IBid>;
@@ -37,14 +38,12 @@ export class ProductBidService implements IProductBidService {
     @inject(TYPES.Bid) private Bid: Model<IBid>
   ) {}
 
-  async validateBidSubmission(productId: string, buyerId: string, bidPrice: number): Promise<{ isValid: boolean; message?: string }> {
+  async validateBidSubmission(productId: string, buyerId: string, bidPrice: number) {
     const product = await this.Product.findById(productId);
     if (!product) return { isValid: false, message: 'Product not found' };
 
-    if (!product.price) {
-      return { isValid: false, message: 'Cannot bid on products without a defined price (variable products)' };
-    }
-    
+    if (!product.price) return { isValid: false, message: 'Cannot bid on products without a defined price (variable products)' };
+
     const lowerBound = product.price * 0.75;
     const upperBound = product.price * 1.25;
     if (bidPrice < lowerBound || bidPrice > upperBound) {
@@ -57,10 +56,7 @@ export class ProductBidService implements IProductBidService {
       status: { $in: ['PENDING', 'ACCEPTED'] },
       createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
     });
-
-    if (existingBid) {
-      return { isValid: false, message: 'You can only place one bid per product in 24 hours' };
-    }
+    if (existingBid) return { isValid: false, message: 'You can only place one bid per product in 24 hours' };
 
     return { isValid: true };
   }
@@ -81,30 +77,21 @@ export class ProductBidService implements IProductBidService {
       isWithinPriceRange: true,
     });
 
+    const savedBid = await newBid.save();
+
+    // [SSE] notify buyer (optional lightweight)
     try {
-      const savedBid = await newBid.save();
+      const buyer = (savedBid.buyer as any)?.toString?.() || savedBid.buyer;
+      streamController.publishToUser(String(buyer), 'bid:update', {
+        bidId: String(savedBid._id),
+        productId: String(savedBid.product),
+        status: 'PENDING',
+        price: savedBid.bidPrice,
+        createdAt: savedBid.createdAt,
+      });
+    } catch {}
 
-      // [SSE] optional: notify buyer a bid was created (lightweight)
-      try {
-        const buyer = (savedBid.buyer as any)?.toString?.() || savedBid.buyer;
-        streamController.publishToUser(String(buyer), 'bid:update', {
-          bidId: String(savedBid._id),
-          productId: String(savedBid.product),
-          status: 'PENDING',
-          price: savedBid.bidPrice,
-          createdAt: savedBid.createdAt,
-        });
-      } catch (e) { /* noop */ }
-
-      if (!savedBid || !savedBid._id) throw new AppError('Failed to create bid - document not saved properly', 500);
-      return savedBid;
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('Only one bid per product within 24 hours')) {
-        throw new AppError('You can only place one bid per product in 24 hours', 400);
-      }
-      if (error instanceof AppError) throw error;
-      throw new AppError('Failed to create bid', 500);
-    }
+    return savedBid;
   }
 
   async acceptBid(bidId: string, sellerId: string): Promise<IBid> {
@@ -116,7 +103,7 @@ export class ProductBidService implements IProductBidService {
     bid.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const saved = await bid.save();
 
-    // [SSE] notify buyer (minimal, no extra lookups)
+    // [SSE] notify buyer
     try {
       const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
       streamController.publishToUser(String(buyer), 'bid:update', {
@@ -127,7 +114,7 @@ export class ProductBidService implements IProductBidService {
         expiresAt: saved.expiresAt,
         createdAt: new Date().toISOString(),
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return saved;
   }
@@ -141,7 +128,7 @@ export class ProductBidService implements IProductBidService {
     bid.cooldownUntil = new Date(Date.now() + 12 * 60 * 60 * 1000);
     const saved = await bid.save();
 
-    // [SSE] notify buyer
+    // [SSE]
     try {
       const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
       streamController.publishToUser(String(buyer), 'bid:update', {
@@ -152,7 +139,7 @@ export class ProductBidService implements IProductBidService {
         cooldownUntil: saved.cooldownUntil,
         createdAt: new Date().toISOString(),
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return saved;
   }
@@ -165,7 +152,7 @@ export class ProductBidService implements IProductBidService {
       bid.status = 'EXPIRED';
       const saved = await bid.save();
 
-      // [SSE] notify buyer
+      // [SSE]
       try {
         const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
         streamController.publishToUser(String(buyer), 'bid:update', {
@@ -174,7 +161,7 @@ export class ProductBidService implements IProductBidService {
           status: 'EXPIRED',
           createdAt: new Date().toISOString(),
         });
-      } catch (e) { /* noop */ }
+      } catch {}
 
       return saved;
     }
@@ -182,7 +169,7 @@ export class ProductBidService implements IProductBidService {
   }
 
   async getBidsForProduct(productId: string): Promise<IBid[]> {
-    return await this.Bid.find({
+    return this.Bid.find({
       product: productId,
       status: { $in: ['PENDING', 'ACCEPTED'] },
     })
@@ -191,14 +178,13 @@ export class ProductBidService implements IProductBidService {
   }
 
   async getBidById(bidId: string): Promise<IBid | null> {
-    return await this.Bid.findById(bidId)
+    return this.Bid.findById(bidId)
       .populate('buyer', 'firstName lastName email')
       .populate('seller', 'name')
       .populate('product', 'name images price');
   }
 
-  async getUserBids(userId: string, status?: string, page: number = 1, limit: number = 10)
-  : Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
+  async getUserBids(userId: string, status?: string, page = 1, limit = 10) {
     const filter: any = { buyer: userId };
     if (status) filter.status = status.toUpperCase();
 
@@ -216,8 +202,7 @@ export class ProductBidService implements IProductBidService {
     return { bids, total, page, totalPages };
   }
 
-  async getSellerBids(sellerId: string, status?: string, page: number = 1, limit: number = 10)
-  : Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
+  async getSellerBids(sellerId: string, status?: string, page = 1, limit = 10) {
     const filter: any = { seller: sellerId };
     if (status) filter.status = status.toUpperCase();
 
@@ -243,7 +228,7 @@ export class ProductBidService implements IProductBidService {
     (bid as any).convertedAt = new Date();
     const saved = await bid.save();
 
-    // [SSE] notify buyer
+    // [SSE]
     try {
       const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
       streamController.publishToUser(String(buyer), 'bid:update', {
@@ -252,15 +237,14 @@ export class ProductBidService implements IProductBidService {
         status: 'CONVERTED',
         createdAt: new Date().toISOString(),
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return saved;
   }
 
   // ===== Admin methods (unchanged) =====
 
-  async getAllBidsForAdmin(filters: any, page: number, limit: number, search?: string)
-  : Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
+  async getAllBidsForAdmin(filters: any, page: number, limit: number, search?: string) {
     const query: any = { ...filters };
 
     if (search) {
@@ -347,7 +331,7 @@ export class ProductBidService implements IProductBidService {
     (bid as any).adminReason = reason;
     const saved = await bid.save();
 
-    // [SSE] notify buyer
+    // [SSE]
     try {
       const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
       streamController.publishToUser(String(buyer), 'bid:update', {
@@ -356,7 +340,7 @@ export class ProductBidService implements IProductBidService {
         status: 'ACCEPTED',
         createdAt: new Date().toISOString(),
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return saved;
   }
@@ -371,7 +355,7 @@ export class ProductBidService implements IProductBidService {
     (bid as any).adminReason = reason;
     const saved = await bid.save();
 
-    // [SSE] notify buyer
+    // [SSE]
     try {
       const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
       streamController.publishToUser(String(buyer), 'bid:update', {
@@ -380,7 +364,7 @@ export class ProductBidService implements IProductBidService {
         status: 'REJECTED',
         createdAt: new Date().toISOString(),
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return saved;
   }
@@ -395,7 +379,7 @@ export class ProductBidService implements IProductBidService {
     (bid as any).cancelledAt = new Date();
     const saved = await bid.save();
 
-    // [SSE] notify buyer
+    // [SSE]
     try {
       const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
       streamController.publishToUser(String(buyer), 'bid:update', {
@@ -404,7 +388,7 @@ export class ProductBidService implements IProductBidService {
         status: 'CANCELLED',
         createdAt: new Date().toISOString(),
       });
-    } catch (e) { /* noop */ }
+    } catch {}
 
     return saved;
   }
@@ -465,8 +449,7 @@ export class ProductBidService implements IProductBidService {
     return analytics;
   }
 
-  async getProductsWithBids(filters: any, page: number, limit: number)
-  : Promise<{ products: any[]; total: number; page: number; totalPages: number }> {
+  async getProductsWithBids(filters: any, page: number, limit: number) {
     const { search } = filters;
     const pipeline: any[] = [
       { $lookup: { from: 'bids', localField: '_id', foreignField: 'product', as: 'bids' } },
@@ -546,9 +529,9 @@ export class ProductBidService implements IProductBidService {
     const acceptedBids = bids.filter(b => b.status === 'ACCEPTED').length;
     const rejectedBids = bids.filter(b => b.status === 'REJECTED').length;
     const bidPrices = bids.map(b => b.bidPrice);
-    const highestBid = bidPrices.length > 0 ? Math.max(...bidPrices) : 0;
-    const lowestBid = bidPrices.length > 0 ? Math.min(...bidPrices) : 0;
-    const avgBidPrice = bidPrices.length > 0 ? bidPrices.reduce((a, b) => a + b, 0) / bidPrices.length : 0;
+    const highestBid = bidPrices.length ? Math.max(...bidPrices) : 0;
+    const lowestBid = bidPrices.length ? Math.min(...bidPrices) : 0;
+    const avgBidPrice = bidPrices.length ? bidPrices.reduce((a, b) => a + b, 0) / bidPrices.length : 0;
 
     return {
       product: {
@@ -602,7 +585,7 @@ export class ProductBidService implements IProductBidService {
       { $match: { 'bids.0': { $exists: true } } },
       { $limit: 5 }
     ]);
-    
+
     return {
       totalBids,
       totalProducts,
