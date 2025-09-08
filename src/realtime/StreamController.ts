@@ -1,4 +1,3 @@
-// src/realtime/StreamController.ts
 import type { Response } from 'express';
 
 type Client = {
@@ -20,11 +19,11 @@ class StreamController {
     // @ts-ignore (flushHeaders exists on Express+Node)
     res.flushHeaders?.();
 
-    // open stream (comment line)
+    // open stream
     try {
       res.write(':ok\n\n');
     } catch {
-      /* ignore early close */
+      /* connection may close immediately */
     }
 
     const bucket = this.clients.get(userId) ?? new Set<Client>();
@@ -32,7 +31,7 @@ class StreamController {
     bucket.add(client);
     this.clients.set(userId, bucket);
 
-    // heartbeat so hosts/browsers don't cut the stream
+    // tiny heartbeat so platforms (and browsers) won’t cut the stream
     const ka = setInterval(() => {
       try {
         res.write(`:ka ${Date.now()}\n\n`);
@@ -66,16 +65,23 @@ class StreamController {
   publishToUser(userId: string, event: string, data: unknown): number {
     const set = this.clients.get(String(userId));
     if (!set || set.size === 0) return 0;
-    for (const c of set) {
+
+    // Use forEach to avoid TS downlevel iteration requirements
+    set.forEach((c) => {
       try {
         this.send(c.res, event, data);
       } catch {}
-    }
+    });
+
     return set.size;
   }
 
   /** Send to many users. */
-  publishToMany(userIds: Array<string | undefined | null>, event: string, data: unknown): number {
+  publishToMany(
+    userIds: Array<string | undefined | null>,
+    event: string,
+    data: unknown
+  ): number {
     const uniq = new Set(userIds.filter(Boolean).map(String));
     let count = 0;
     uniq.forEach((uid) => {
@@ -87,14 +93,17 @@ class StreamController {
   /** Broadcast to everyone (rarely needed). */
   broadcast(event: string, data: unknown): number {
     let count = 0;
-    for (const [, set] of this.clients) {
-      for (const c of set) {
+
+    // Use forEach to avoid TS downlevel iteration requirements
+    this.clients.forEach((set) => {
+      set.forEach((c) => {
         try {
           this.send(c.res, event, data);
           count++;
         } catch {}
-      }
-    }
+      });
+    });
+
     return count;
   }
 }
