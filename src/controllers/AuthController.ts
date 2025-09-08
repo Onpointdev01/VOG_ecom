@@ -1,109 +1,121 @@
 import { inject } from 'inversify';
-import {
-  controller,
-  httpPost,
-  httpGet,
-  httpPut,
-  httpDelete,
-  requestParam,
-  requestBody,
-  response,
-} from 'inversify-express-utils';
+import { controller, httpPost, requestBody, response } from 'inversify-express-utils';
 import { Response } from 'express';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
-import { ICategoryService } from '../services';
-import { ICategory } from '../models';
+import { IAuthService } from '../services';
+import {
+  LoginDTO,
+  ResetPasswordDTO,
+  SignUpSellerDTO,
+  SignUpUserDTO,
+  socialLoginDTO,
+  VerifyEmailDTO,
+} from '../utils/dtos';
+import logger from '../utils/logger';
+import AppError from '../utils/errors/AppError';
 
 @controller('/api/v1/auth')
 export class AuthController extends BaseController {
-  constructor(@inject(TYPES.CategoryService) private categoryService: ICategoryService) {
+  constructor(@inject(TYPES.AuthService) private authService: IAuthService) {
     super();
   }
 
-  // Basic CRUD Methods
-
-  @httpPost('/')
-  async createCategory(@response() res: Response, @requestBody() payload: Partial<ICategory>) {
-    const newCategory = await this.categoryService.createCategory(payload);
-    return this.sendResponse(res, 201, 'Category created successfully', newCategory);
+  //signup
+  @httpPost('/signup')
+  async signUpUser(@response() res: Response, @requestBody() payload: SignUpUserDTO) {
+    const newUser = await this.authService.signupUser(payload);
+    return this.sendResponse(res, 201, 'created user successfully', newUser);
   }
 
-  @httpGet('/:id')
-  async getCategoryById(@response() res: Response, @requestParam('id') id: string) {
-    const category = await this.categoryService.getCategoryById(id);
-    return this.sendResponse(res, 200, 'Category retrieved successfully', category);
+  //signup seller
+  @httpPost('/signup-seller')
+  async signUpSeller(@response() res: Response, @requestBody() payload: SignUpSellerDTO) {
+    const newSeller = await this.authService.signupSeller(payload);
+    return this.sendResponse(res, 201, 'created seller successfully', newSeller);
   }
 
-  @httpGet('/')
-  async getAllCategories(@response() res: Response) {
-    const categories = await this.categoryService.getAllCategories();
-    return this.sendResponse(res, 200, 'Categories retrieved successfully', categories);
+  //login
+  @httpPost('/login')
+  async login(@response() res: Response, @requestBody() payload: LoginDTO) {
+    const { email, password } = payload;
+    logger.info(`Login attempt for email: ${email}`);
+    const result = await this.authService.login(email, password);
+    return this.sendResponse(res, 200, 'Successfully logged in', result);
   }
 
-  @httpPut('/:id')
-  async updateCategory(
-    @response() res: Response,
-    @requestParam('id') id: string,
-    @requestBody() payload: Partial<ICategory>
-  ) {
-    const updatedCategory = await this.categoryService.updateCategory(id, payload);
-    return this.sendResponse(res, 200, 'Category updated successfully', updatedCategory);
+  @httpPost('/social-login')
+  async socialLogin(@response() res: Response, @requestBody() payload: socialLoginDTO) {
+    const { idToken, provider } = payload;
+    if (!idToken || !provider) throw new AppError('All fields are required', 400);
+
+    logger.info(`Social login attempt for provider: ${provider}`);
+    const result = await this.authService.socialLogin(idToken, provider);
+    return this.sendResponse(res, 200, 'Successfully logged in', result);
   }
 
-  @httpDelete('/:id')
-  async deleteCategory(@response() res: Response, @requestParam('id') id: string) {
-    await this.categoryService.deleteCategory(id);
-    return this.sendResponse(res, 204, 'Category deleted successfully');
+  //forgot password
+  @httpPost('/forgot-password')
+  async forgotPassword(@response() res: Response, @requestBody() payload: { email: string }) {
+    const { email } = payload;
+    if (!email) throw new AppError('Email is required', 400);
+    await this.authService.forgotPassword(email);
+    return this.sendResponse(res, 200, 'Password reset code sent');
   }
 
-  //  Subcategory Management Methods
-
-  @httpPost('/:id/subcategories')
-  async createSubcategory(
-    @response() res: Response,
-    @requestParam('id') parentId: string,
-    @requestBody() payload: Partial<ICategory>
-  ) {
-    const newSubcategory = await this.categoryService.createSubcategory(parentId, payload);
-    return this.sendResponse(res, 201, 'Subcategory created successfully', newSubcategory);
+  //reset password
+  @httpPost('/reset-password')
+  async resetPassword(@response() res: Response, @requestBody() payload: ResetPasswordDTO) {
+    const { email, code, password } = payload;
+    if (!email || !code || !password) throw new AppError('All fields are required', 400);
+    await this.authService.resetPassword(email, code, password);
+    return this.sendResponse(res, 200, 'Password reset successful');
   }
 
-  @httpPut('/:id/subcategories/:subId')
-  async updateSubcategory(
-    @response() res: Response,
-    @requestParam('id') categoryId: string,
-    @requestParam('subId') subcategoryId: string,
-    @requestBody() payload: Partial<ICategory>
-  ) {
-    const updatedSubcategory = await this.categoryService.updateSubcategory(subcategoryId, payload);
-    return this.sendResponse(res, 200, 'Subcategory updated successfully', updatedSubcategory);
+  //verify email
+  @httpPost('/verify-email')
+  async verifyEmail(@response() res: Response, @requestBody() payload: VerifyEmailDTO) {
+    const { email, code } = payload;
+    if (!email || !code) throw new AppError('All fields are required', 400);
+    const token = await this.authService.verifyEmail(code, email);
+    return this.sendResponse(res, 200, 'Email verified', { token });
   }
 
-  @httpDelete('/:id/subcategories/:subId')
-  async deleteSubcategory(
-    @response() res: Response,
-    @requestParam('id') categoryId: string,
-    @requestParam('subId') subcategoryId: string
-  ) {
-    await this.categoryService.deleteSubcategory(subcategoryId);
-    return this.sendResponse(res, 204, 'Subcategory deleted successfully');
+  //resend verification code
+  @httpPost('/resend-verification')
+  async resendVerification(@response() res: Response, @requestBody() payload: { email: string }) {
+    const { email } = payload;
+    if (!email) throw new AppError('Email is required', 400);
+    await this.authService.resendVerification(email);
+    return this.sendResponse(res, 200, 'Verification code sent');
   }
 
-  @httpGet('/:id/subcategories')
-  async getAllSubcategories(@response() res: Response, @requestParam('id') categoryId: string) {
-    const subcategories = await this.categoryService.getAllSubcategories(categoryId);
-    return this.sendResponse(res, 200, 'Subcategories retrieved successfully', subcategories);
+  //check email
+  @httpPost('/check-email')
+  async checkEmail(@response() res: Response, @requestBody() payload: { email: string }) {
+    const { email } = payload;
+    if (!email) throw new AppError('Email is required', 400);
+    const result = await this.authService.checkEmail(email);
+
+    if (!result.isValid) {
+      throw new AppError(result.message, 400);
+    }
+
+    if (!result.isAvailable) {
+      throw new AppError(result.message, 409);
+    }
+
+    return this.sendResponse(res, 200, result.message, result);
   }
 
-  @httpGet('/:id/subcategories/:name')
-  async getSubcategoryByName(
-    @response() res: Response,
-    @requestParam('id') categoryId: string,
-    @requestParam('name') subcategoryName: string
-  ) {
-    const subcategory = await this.categoryService.getSubcategoryByName(categoryId, subcategoryName);
-    return this.sendResponse(res, 200, 'Subcategory retrieved successfully', subcategory);
+  //refresh token
+  @httpPost('/refresh-token')
+  async refreshToken(@response() res: Response, @requestBody() payload: { refreshToken: string }) {
+    const { refreshToken } = payload;
+    if (!refreshToken) throw new AppError('Refresh token is required', 400);
+
+    const result = await this.authService.refreshToken(refreshToken);
+    return this.sendResponse(res, 200, 'Token refreshed successfully', result);
   }
 }
