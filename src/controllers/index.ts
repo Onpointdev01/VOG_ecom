@@ -1,15 +1,13 @@
-// src/controllers/index.ts
-// Side-effect imports so inversify-express-utils registers controllers once
-import './BaseController';
-import './AuthController';
-import './AdminController';
-import './UserController';
-import './NewCategoriesController';
-import './ProductController';
-import './ReviewController';
-import './CartController';
-import './PaymentOptionController';
-import './PaymentController';
-import './BidController';
-import './NotificationController';
-import './OrderController';
+export * from './BaseController';
+export * from './AuthController';
+export * from './AdminController';
+export * from './UserController';
+export * from './NewCategoriesController';
+export * from './ProductController';
+export * from './ReviewController';
+export * from './CartController';
+export * from './PaymentOptionController';
+export * from './PaymentController';
+export * from './BidController';
+export * from './NotificationController';
+export * from './OrderController';

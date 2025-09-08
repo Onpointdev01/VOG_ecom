@@ -16,8 +16,6 @@ import { BaseController } from './BaseController';
 import TYPES from '../di';
 import { IProductBidService, IBidMessageService, ICartService } from '../services';
 import { IUser, IBid } from '../models';
-// [SSE] add import
-import { streamController } from '../realtime/StreamController';
 
 // Type guard to check if buyer is populated
 function isPopulatedBuyer(buyer: any): buyer is IUser {
@@ -73,20 +71,7 @@ export class BidController extends BaseController {
 
     // Generate add-to-cart link for the buyer
     const addToCartLink = `/api/v1/bids/${bidId}/add-to-cart`;
-
-    // [SSE] lightweight generic notifications for both parties
-    try {
-      streamController.publishToMany([buyerId, sellerId.toString()], 'notification', {
-        type: 'BID_ACCEPTED',
-        bidId,
-        productId: acceptedBid.product.toString(),
-        message: payload.message || `Your bid of $${acceptedBid.bidPrice} has been accepted!`,
-        addToCartLink,
-        expiresAt: acceptedBid.expiresAt,
-        createdAt: new Date().toISOString(),
-      });
-    } catch (_) {}
-
+    
     return this.sendResponse(res, 200, 'Bid accepted successfully', {
       bid: acceptedBid,
       addToCartLink,
@@ -119,17 +104,6 @@ export class BidController extends BaseController {
       bidId,
       payload.reason || 'Your bid has been rejected.'
     );
-
-    // [SSE] lightweight generic notifications for both parties
-    try {
-      streamController.publishToMany([buyerId, sellerId.toString()], 'notification', {
-        type: 'BID_REJECTED',
-        bidId,
-        productId: rejectedBid.product.toString(),
-        message: payload.reason || 'Your bid has been rejected.',
-        createdAt: new Date().toISOString(),
-      });
-    } catch (_) {}
 
     return this.sendResponse(res, 200, 'Bid rejected successfully', rejectedBid);
   }
@@ -177,18 +151,6 @@ export class BidController extends BaseController {
 
     // Mark bid as converted to cart
     await this.productBidService.markBidAsConverted(bidId);
-
-    // [SSE] notify buyer & seller (lightweight)
-    try {
-      const sellerId = (bid.seller as any)?.toString?.() || bid.seller?.toString?.() || String(bid.seller);
-      streamController.publishToMany([String(user._id), sellerId], 'notification', {
-        type: 'BID_CONVERTED_TO_CART',
-        bidId,
-        productId: bid.product.toString(),
-        cartItemId: (cartItem as any)?._id?.toString?.() || undefined,
-        createdAt: new Date().toISOString(),
-      });
-    } catch (_) {}
 
     return this.sendResponse(res, 200, 'Product added to cart successfully', cartItem);
   }
