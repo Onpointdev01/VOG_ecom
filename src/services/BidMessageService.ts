@@ -4,7 +4,7 @@ import { IBidMessages, IUser } from '../models';
 import { Model } from 'mongoose';
 import { BaseService } from './BaseService';
 // [SSE] add import
-import { streamController } from '../realtime/streamController';
+import { streamController } from '../realtime/StreamController';
 
 export interface IBidMessageService {
   createBidProposalMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;

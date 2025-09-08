@@ -9,7 +9,7 @@ import { PaymentMethod } from '../models/Payment';
 import AppError from '../utils/errors/AppError';
 import { TYPES } from '../di';
 // [SSE] add import
-import { streamController } from '../realtime/streamController';
+import { streamController } from '../realtime/StreamController';
 
 export interface CreateOrderRequest {
   userId: string;

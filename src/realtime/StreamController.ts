@@ -1,4 +1,4 @@
-// src/realtime/streamController.ts
+// src/realtime/StreamController.ts
 import type { Response } from 'express';
 
 type Client = {
@@ -20,11 +20,11 @@ class StreamController {
     // @ts-ignore (flushHeaders exists on Express+Node)
     res.flushHeaders?.();
 
-    // open stream
+    // open stream (comment line)
     try {
       res.write(':ok\n\n');
     } catch {
-      /* connection may close immediately */
+      /* ignore early close */
     }
 
     const bucket = this.clients.get(userId) ?? new Set<Client>();
@@ -32,7 +32,7 @@ class StreamController {
     bucket.add(client);
     this.clients.set(userId, bucket);
 
-    // tiny heartbeat so platforms (and browsers) won’t cut the stream
+    // heartbeat so hosts/browsers don't cut the stream
     const ka = setInterval(() => {
       try {
         res.write(`:ka ${Date.now()}\n\n`);

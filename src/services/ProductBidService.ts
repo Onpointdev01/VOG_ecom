@@ -4,7 +4,7 @@ import { IBid, IProduct, IUser } from '../models';
 import { Model } from 'mongoose';
 import AppError from '../utils/errors/AppError';
 // [SSE] add import
-import { streamController } from '../realtime/streamController';
+import { streamController } from '../realtime/StreamController';
 
 export interface IProductBidService {
   validateBidSubmission(productId: string, buyerId: string, bidPrice: number): Promise<{ isValid: boolean; message?: string }>;

@@ -16,7 +16,7 @@ import { OrderService, CreateOrderRequest } from '../services/OrderService';
 import { BaseController } from './BaseController';
 import AppError from '../utils/errors/AppError';
 // [SSE] add import
-import { streamController } from '../realtime/streamController';
+import { streamController } from '../realtime/StreamController';
 
 export interface CreateOrderDTO {
   paymentMethod: string;

@@ -17,7 +17,7 @@ import TYPES from '../di';
 import { IProductBidService, IBidMessageService, ICartService } from '../services';
 import { IUser, IBid } from '../models';
 // [SSE] add import
-import { streamController } from '../realtime/streamController';
+import { streamController } from '../realtime/StreamController';
 
 // Type guard to check if buyer is populated
 function isPopulatedBuyer(buyer: any): buyer is IUser {
