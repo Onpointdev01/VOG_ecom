@@ -551,7 +551,7 @@ export class AdminController extends BaseController {
   ) {
     const { orderStatus } = payload;
 
-    const validStatuses = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+    const validStatuses = ['PENDING', 'CONFIRMED', 'OUT_FOR_DELIVERY', 'COMPLETE', 'CANCELLED'];
     if (!validStatuses.includes(orderStatus)) {
       throw new AppError('Invalid order status', 400);
     }
@@ -569,7 +569,7 @@ export class AdminController extends BaseController {
   ) {
     const { paymentStatus } = payload;
 
-    const validStatuses = ['PENDING', 'COMPLETED', 'FAILED', 'REFUNDED'];
+    const validStatuses = ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'REFUNDED', 'CANCELLED'];
     if (!validStatuses.includes(paymentStatus)) {
       throw new AppError('Invalid payment status', 400);
     }
@@ -649,6 +649,27 @@ export class AdminController extends BaseController {
     }
     
     return this.sendResponse(res, 200, 'Bid details retrieved successfully', bid);
+  }
+
+  @httpPut('/bids/:bidId/accept', TYPES.RequireAdmin)
+  public async acceptBid(
+    @response() res: Response,
+    @requestParam('bidId') bidId: string
+  ) {
+    const bid = await this.productBidService.forceAcceptBid(bidId);
+    
+    // Send notification to buyer - same as seller acceptance
+    if (bid.seller && bid.buyer) {
+      await this.bidMessageService.createBidAcceptedMessage(
+        bid.seller.toString(),
+        bid.buyer.toString(),
+        bid.product.toString(),
+        bidId,
+        `Your bid of $${bid.bidPrice} has been accepted by admin!`
+      );
+    }
+    
+    return this.sendResponse(res, 200, 'Bid accepted successfully', bid);
   }
 
   @httpPut('/bids/:bidId/force-accept', TYPES.RequireAdmin)

@@ -522,8 +522,7 @@ export class AdminService extends BaseService implements IAdminService {
       .populate('activePayment', 'transactionId paymentMethod status amount providerTransactionId createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit)
-      .lean();
+      .limit(limit);
 
     const total = await Order.countDocuments(filters);
     const totalPages = Math.ceil(total / limit);
@@ -559,8 +558,7 @@ export class AdminService extends BaseService implements IAdminService {
       .populate('user', 'firstName lastName email phoneNumber')
       .populate('items.product', 'name price images brand description')
       .populate('payments', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt')
-      .populate('activePayment', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt')
-      .lean();
+      .populate('activePayment', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt');
 
     if (!order) {
       throw new AppError('Order not found', 404);
