@@ -7,12 +7,12 @@ import cors from 'cors';
 import morgan from 'morgan';
 import compression from 'compression';
 import { Model } from 'mongoose';
+import jwt from 'jsonwebtoken'; // ⬅️ added
 
 import { env } from './config';
 
-// ⚠️ Ensure ALL controllers (including SSE) are loaded
+// ✅ load all “normal” controllers (no SSE controller needed now)
 import './controllers';
-import './controllers/StreamController';
 
 import errorMiddleWare from './utils/errors/errorHandler';
 import {
@@ -20,8 +20,8 @@ import {
   Admin, IAdmin,
   Category, ICategory,
   Product, IProduct,
-  ProductVariant, IProductVariant
-  , Review, IReview,
+  ProductVariant, IProductVariant,
+  Review, IReview,
   Seller, ISeller,
   User, IUser,
   Cart, ICart,
@@ -51,6 +51,7 @@ import {
   IViewTrackingService, ViewTrackingService,
 } from './services';
 import { OptionalAuth, RequireAdmin, RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
+import { streamController } from './realtime/StreamController'; // ⬅️ added
 
 const { NODE_ENV } = env;
 const container = new Container();
@@ -96,16 +97,15 @@ container.bind<IViewTrackingService>(TYPES.ViewTrackingService).to(ViewTrackingS
 
 const server = new InversifyExpressServer(container);
 
-// keep this in sync with your StreamController route
+// keep this in sync with your frontend
 const SSE_PATH = '/api/v1/stream/events';
 
 server.setConfig((app) => {
-  app.set('trust proxy', 1); // Render / proxies
+  app.set('trust proxy', 1);
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // CORS (SSE uses GET; token is in query, so no credentials needed)
   app.use(cors({ origin: true, credentials: false }));
 
   // Disable compression for SSE, or events will be buffered
@@ -130,8 +130,40 @@ server.setConfig((app) => {
     app.use(morgan('dev'));
   }
 
+  // --- ✅ SSE endpoint as a plain Express route (no decorators)
+  app.get(SSE_PATH, (req: Request, res: Response) => {
+    // token can come from query ?token=... or Authorization: Bearer ...
+    const qToken = (req.query.token as string) || '';
+    const hToken = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const token = (qToken || hToken || '').trim();
+
+    if (!token) {
+      res.status(401).json({ status: 'error', message: 'Missing token' });
+      return;
+    }
+
+    let userId = '';
+    try {
+      const payload = jwt.verify(token, env.JWT_SECRET) as { id?: string; _id?: string };
+      userId = String(payload.id || payload._id || '');
+      if (!userId) throw new Error('no id');
+    } catch {
+      res.status(401).json({ status: 'error', message: 'Invalid token' });
+      return;
+    }
+
+    // Hand off to the stream controller (sets headers, ka, cleanup, etc.)
+    streamController.addClient(userId, res);
+
+    // tiny hello
+    try {
+      res.write(`event: ping\n`);
+      res.write(`data: {"ok":true,"connected":"${new Date().toISOString()}"}\n\n`);
+    } catch {}
+  });
+
   // optional health check
-  app.get('/healthz', (_req, res) => res.json({ ok: true }));
+  app.get('/healthz', (_req: Request, res: Response) => res.json({ ok: true }));
 });
 
 server.setErrorConfig((app) => {
