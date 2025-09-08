@@ -15,6 +15,8 @@ import TYPES from '../di';
 import { OrderService, CreateOrderRequest } from '../services/OrderService';
 import { BaseController } from './BaseController';
 import AppError from '../utils/errors/AppError';
+// [SSE] add import
+import { streamController } from '../realtime/streamController';
 
 export interface CreateOrderDTO {
   paymentMethod: string;
@@ -41,6 +43,18 @@ export class OrderController extends BaseController {
     };
 
     const order = await this.orderService.createOrder(orderData);
+
+    // [SSE] generic notification (service already emits order:update)
+    try {
+      streamController.publishToUser(String(userId), 'notification', {
+        type: 'ORDER_CREATED',
+        orderId: order.id,
+        total: order.finalPrice,
+        status: order.orderStatus,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (_) {}
+
     return this.sendResponse(res, 201, 'Order created successfully', order);
   }
 
@@ -84,30 +98,86 @@ export class OrderController extends BaseController {
     }
     
     const order = await this.orderService.updateOrderStatus(orderId, payload.orderStatus);
+
+    // [SSE] generic notification to the owner (service already emits order:update)
+    try {
+      streamController.publishToUser(order.user.toString(), 'notification', {
+        type: 'ORDER_STATUS_CHANGED',
+        orderId: order.id,
+        status: order.orderStatus,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (_) {}
+
     return this.sendResponse(res, 200, 'Order status updated successfully', order);
   }
 
   @httpPut('/:orderId/confirm', TYPES.RequireSignIn, TYPES.RequireAdmin)
   public async confirmOrder(@response() res: Response, @requestParam('orderId') orderId: string) {
     const order = await this.orderService.updateOrderStatus(orderId, 'CONFIRMED');
+
+    // [SSE]
+    try {
+      streamController.publishToUser(order.user.toString(), 'notification', {
+        type: 'ORDER_CONFIRMED',
+        orderId: order.id,
+        status: order.orderStatus,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (_) {}
+
     return this.sendResponse(res, 200, 'Order confirmed successfully', order);
   }
 
   @httpPut('/:orderId/process', TYPES.RequireSignIn, TYPES.RequireAdmin)
   public async processOrder(@response() res: Response, @requestParam('orderId') orderId: string) {
     const order = await this.orderService.updateOrderStatus(orderId, 'PROCESSING');
+
+    // [SSE]
+    try {
+      streamController.publishToUser(order.user.toString(), 'notification', {
+        type: 'ORDER_PROCESSING',
+        orderId: order.id,
+        status: order.orderStatus,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (_) {}
+
     return this.sendResponse(res, 200, 'Order processing started', order);
   }
 
   @httpPut('/:orderId/ship', TYPES.RequireSignIn, TYPES.RequireAdmin)
   public async shipOrder(@response() res: Response, @requestParam('orderId') orderId: string, @requestBody() payload: { trackingNumber?: string }) {
     const order = await this.orderService.shipOrder(orderId, payload.trackingNumber);
+
+    // [SSE]
+    try {
+      streamController.publishToUser(order.user.toString(), 'notification', {
+        type: 'ORDER_SHIPPED',
+        orderId: order.id,
+        status: 'OUT_FOR_DELIVERY',
+        trackingNumber: payload.trackingNumber,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (_) {}
+
     return this.sendResponse(res, 200, 'Order shipped successfully', order);
   }
 
   @httpPut('/:orderId/deliver', TYPES.RequireSignIn, TYPES.RequireAdmin)
   public async deliverOrder(@response() res: Response, @requestParam('orderId') orderId: string) {
     const order = await this.orderService.deliverOrder(orderId);
+
+    // [SSE]
+    try {
+      streamController.publishToUser(order.user.toString(), 'notification', {
+        type: 'ORDER_DELIVERED',
+        orderId: order.id,
+        status: order.orderStatus,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (_) {}
+
     return this.sendResponse(res, 200, 'Order delivered successfully', order);
   }
 
@@ -118,6 +188,18 @@ export class OrderController extends BaseController {
     }
     
     const order = await this.orderService.updatePaymentStatus(orderId, payload.paymentStatus, payload.paymentReference);
+
+    // [SSE]
+    try {
+      streamController.publishToUser(order.user.toString(), 'notification', {
+        type: 'ORDER_PAYMENT_STATUS_CHANGED',
+        orderId: order.id,
+        status: order.orderStatus,
+        paymentStatus: order.paymentStatus,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (_) {}
+
     return this.sendResponse(res, 200, 'Payment status updated successfully', order);
   }
 
@@ -133,6 +215,17 @@ export class OrderController extends BaseController {
     }
     
     const cancelledOrder = await this.orderService.cancelOrder(orderId);
+
+    // [SSE]
+    try {
+      streamController.publishToUser(order.user.toString(), 'notification', {
+        type: 'ORDER_CANCELLED',
+        orderId: cancelledOrder.id,
+        status: cancelledOrder.orderStatus,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (_) {}
+
     return this.sendResponse(res, 200, 'Order cancelled successfully', cancelledOrder);
   }
 }

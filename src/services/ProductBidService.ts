@@ -3,13 +3,11 @@ import TYPES from '../di';
 import { IBid, IProduct, IUser } from '../models';
 import { Model } from 'mongoose';
 import AppError from '../utils/errors/AppError';
+// [SSE] add import
+import { streamController } from '../realtime/streamController';
 
 export interface IProductBidService {
-  validateBidSubmission(
-    productId: string,
-    buyerId: string,
-    bidPrice: number
-  ): Promise<{ isValid: boolean; message?: string }>;
+  validateBidSubmission(productId: string, buyerId: string, bidPrice: number): Promise<{ isValid: boolean; message?: string }>;
   createBid(productId: string, buyerId: string, bidPrice: number): Promise<IBid>;
   acceptBid(bidId: string, sellerId: string): Promise<IBid>;
   rejectBid(bidId: string, sellerId: string): Promise<IBid>;
@@ -19,20 +17,18 @@ export interface IProductBidService {
   getUserBids(userId: string, status?: string, page?: number, limit?: number): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }>;
   getSellerBids(sellerId: string, status?: string, page?: number, limit?: number): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }>;
   markBidAsConverted(bidId: string): Promise<IBid>;
-  
-  // Admin methods
+
   getAllBidsForAdmin(filters: any, page: number, limit: number, search?: string): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }>;
   getBidStatistics(): Promise<any>;
   forceAcceptBid(bidId: string, reason?: string): Promise<IBid>;
   forceRejectBid(bidId: string, reason?: string): Promise<IBid>;
   cancelBid(bidId: string, reason: string): Promise<IBid>;
   getBidAnalytics(period: string, dateFrom?: string, dateTo?: string): Promise<any>;
-  
-  // Product-centric admin methods
   getProductsWithBids(filters: any, page: number, limit: number): Promise<{ products: any[]; total: number; page: number; totalPages: number }>;
   getProductBidsForAdmin(productId: string): Promise<any>;
   getDebugBidCounts(): Promise<any>;
 }
+
 @injectable()
 export class ProductBidService implements IProductBidService {
   constructor(
@@ -41,36 +37,20 @@ export class ProductBidService implements IProductBidService {
     @inject(TYPES.Bid) private Bid: Model<IBid>
   ) {}
 
-  async validateBidSubmission(
-    productId: string,
-    buyerId: string,
-    bidPrice: number
-  ): Promise<{ isValid: boolean; message?: string }> {
-    // Check if product exists
+  async validateBidSubmission(productId: string, buyerId: string, bidPrice: number): Promise<{ isValid: boolean; message?: string }> {
     const product = await this.Product.findById(productId);
-    if (!product) {
-      return { isValid: false, message: 'Product not found' };
-    }
+    if (!product) return { isValid: false, message: 'Product not found' };
 
-    // Check price range - only for products with defined price
     if (!product.price) {
-      return {
-        isValid: false,
-        message: 'Cannot bid on products without a defined price (variable products)',
-      };
+      return { isValid: false, message: 'Cannot bid on products without a defined price (variable products)' };
     }
     
     const lowerBound = product.price * 0.75;
     const upperBound = product.price * 1.25;
-
     if (bidPrice < lowerBound || bidPrice > upperBound) {
-      return {
-        isValid: false,
-        message: `Bid must be between $${lowerBound.toFixed(2)} and $${upperBound.toFixed(2)}`,
-      };
+      return { isValid: false, message: `Bid must be between $${lowerBound.toFixed(2)} and $${upperBound.toFixed(2)}` };
     }
 
-    // Check for existing active bids
     const existingBid = await this.Bid.findOne({
       product: productId,
       buyer: buyerId,
@@ -79,32 +59,19 @@ export class ProductBidService implements IProductBidService {
     });
 
     if (existingBid) {
-      return {
-        isValid: false,
-        message: 'You can only place one bid per product in 24 hours',
-      };
+      return { isValid: false, message: 'You can only place one bid per product in 24 hours' };
     }
 
     return { isValid: true };
   }
 
-  /**
-   * Create a new bid
-   */
   async createBid(productId: string, buyerId: string, bidPrice: number): Promise<IBid> {
-    // Validate bid first
     const validation = await this.validateBidSubmission(productId, buyerId, bidPrice);
-    if (!validation.isValid) {
-      throw new AppError(validation.message || 'error placing bid', 400);
-    }
+    if (!validation.isValid) throw new AppError(validation.message || 'error placing bid', 400);
 
-    // Find the product to get seller
     const product = await this.Product.findById(productId);
-    if (!product) {
-      throw new AppError('Product not found', 404);
-    }
+    if (!product) throw new AppError('Product not found', 404);
 
-    // Create bid
     const newBid = new this.Bid({
       product: productId,
       buyer: buyerId,
@@ -117,90 +84,103 @@ export class ProductBidService implements IProductBidService {
     try {
       const savedBid = await newBid.save();
 
-      if (!savedBid || !savedBid._id) {
-        throw new AppError('Failed to create bid - document not saved properly', 500);
-      }
+      // [SSE] optional: notify buyer a bid was created (lightweight)
+      try {
+        const buyer = (savedBid.buyer as any)?.toString?.() || savedBid.buyer;
+        streamController.publishToUser(String(buyer), 'bid:update', {
+          bidId: String(savedBid._id),
+          productId: String(savedBid.product),
+          status: 'PENDING',
+          price: savedBid.bidPrice,
+          createdAt: savedBid.createdAt,
+        });
+      } catch (e) { /* noop */ }
+
+      if (!savedBid || !savedBid._id) throw new AppError('Failed to create bid - document not saved properly', 500);
       return savedBid;
     } catch (error) {
       if (error instanceof Error && error.message.includes('Only one bid per product within 24 hours')) {
         throw new AppError('You can only place one bid per product in 24 hours', 400);
       }
-      
-      // Re-throw the original error if it's already an AppError
-      if (error instanceof AppError) {
-        throw error;
-      }
-      
+      if (error instanceof AppError) throw error;
       throw new AppError('Failed to create bid', 500);
     }
   }
 
-  /**
-   * Handle bid acceptance by seller
-   */
   async acceptBid(bidId: string, sellerId: string): Promise<IBid> {
     const bid = await this.Bid.findById(bidId);
+    if (!bid) throw new AppError('Bid not found', 404);
+    if (bid.seller?.toString() !== sellerId) throw new AppError('Unauthorized to accept this bid', 403);
 
-    if (!bid) {
-      throw new AppError('Bid not found', 404);
-    }
-
-    // Ensure only the product owner can accept the bid
-    if (bid.seller?.toString() !== sellerId) {
-      throw new AppError('Unauthorized to accept this bid', 403);
-    }
-
-    // Update bid status and set expiration
     bid.status = 'ACCEPTED';
-    bid.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
+    bid.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const saved = await bid.save();
 
-    return await bid.save();
+    // [SSE] notify buyer (minimal, no extra lookups)
+    try {
+      const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
+      streamController.publishToUser(String(buyer), 'bid:update', {
+        bidId: String(saved._id),
+        productId: String(saved.product),
+        status: 'ACCEPTED',
+        price: saved.bidPrice,
+        expiresAt: saved.expiresAt,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) { /* noop */ }
+
+    return saved;
   }
 
-  /**
-   * Handle bid rejection by seller
-   */
   async rejectBid(bidId: string, sellerId: string): Promise<IBid> {
     const bid = await this.Bid.findById(bidId);
+    if (!bid) throw new AppError('Bid not found', 404);
+    if (bid.seller?.toString() !== sellerId) throw new AppError('Unauthorized to reject this bid', 403);
 
-    if (!bid) {
-      throw new AppError('Bid not found', 404);
-    }
-
-    // Ensure only the product owner can reject the bid
-    if (bid.seller?.toString() !== sellerId) {
-      throw new AppError('Unauthorized to reject this bid', 403);
-    }
-
-    // Update bid status and set cooldown
     bid.status = 'REJECTED';
-    bid.cooldownUntil = new Date(Date.now() + 12 * 60 * 60 * 1000); // 12 hours cooldown
+    bid.cooldownUntil = new Date(Date.now() + 12 * 60 * 60 * 1000);
+    const saved = await bid.save();
 
-    return await bid.save();
+    // [SSE] notify buyer
+    try {
+      const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
+      streamController.publishToUser(String(buyer), 'bid:update', {
+        bidId: String(saved._id),
+        productId: String(saved.product),
+        status: 'REJECTED',
+        price: saved.bidPrice,
+        cooldownUntil: saved.cooldownUntil,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) { /* noop */ }
+
+    return saved;
   }
 
-  /**
-   * Check bid expiration and update status
-   */
   async checkBidExpiration(bidId: string): Promise<IBid | null> {
     const bid = await this.Bid.findById(bidId);
+    if (!bid || bid.status !== 'ACCEPTED') return null;
 
-    if (!bid || bid.status !== 'ACCEPTED') {
-      return null;
-    }
-
-    // Check if bid has expired
     if (bid.expiresAt && bid.expiresAt < new Date()) {
       bid.status = 'EXPIRED';
-      return await bid.save();
-    }
+      const saved = await bid.save();
 
+      // [SSE] notify buyer
+      try {
+        const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
+        streamController.publishToUser(String(buyer), 'bid:update', {
+          bidId: String(saved._id),
+          productId: String(saved.product),
+          status: 'EXPIRED',
+          createdAt: new Date().toISOString(),
+        });
+      } catch (e) { /* noop */ }
+
+      return saved;
+    }
     return bid;
   }
 
-  /**
-   * Get bids for a specific product
-   */
   async getBidsForProduct(productId: string): Promise<IBid[]> {
     return await this.Bid.find({
       product: productId,
@@ -210,9 +190,6 @@ export class ProductBidService implements IProductBidService {
       .sort({ createdAt: -1 });
   }
 
-  /**
-   * Get a specific bid by ID
-   */
   async getBidById(bidId: string): Promise<IBid | null> {
     return await this.Bid.findById(bidId)
       .populate('buyer', 'firstName lastName email')
@@ -220,20 +197,10 @@ export class ProductBidService implements IProductBidService {
       .populate('product', 'name images price');
   }
 
-  /**
-   * Get bids for a specific user (buyer)
-   */
-  async getUserBids(
-    userId: string, 
-    status?: string, 
-    page: number = 1, 
-    limit: number = 10
-  ): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
+  async getUserBids(userId: string, status?: string, page: number = 1, limit: number = 10)
+  : Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
     const filter: any = { buyer: userId };
-    
-    if (status) {
-      filter.status = status.toUpperCase();
-    }
+    if (status) filter.status = status.toUpperCase();
 
     const skip = (page - 1) * limit;
     const total = await this.Bid.countDocuments(filter);
@@ -249,20 +216,10 @@ export class ProductBidService implements IProductBidService {
     return { bids, total, page, totalPages };
   }
 
-  /**
-   * Get bids for a specific seller
-   */
-  async getSellerBids(
-    sellerId: string, 
-    status?: string, 
-    page: number = 1, 
-    limit: number = 10
-  ): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
+  async getSellerBids(sellerId: string, status?: string, page: number = 1, limit: number = 10)
+  : Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
     const filter: any = { seller: sellerId };
-    
-    if (status) {
-      filter.status = status.toUpperCase();
-    }
+    if (status) filter.status = status.toUpperCase();
 
     const skip = (page - 1) * limit;
     const total = await this.Bid.countDocuments(filter);
@@ -278,44 +235,36 @@ export class ProductBidService implements IProductBidService {
     return { bids, total, page, totalPages };
   }
 
-  /**
-   * Mark bid as converted to cart
-   */
   async markBidAsConverted(bidId: string): Promise<IBid> {
     const bid = await this.Bid.findById(bidId);
-    
-    if (!bid) {
-      throw new AppError('Bid not found', 404);
-    }
+    if (!bid) throw new AppError('Bid not found', 404);
 
-    // Add a converted flag to track this
     (bid as any).convertedToCart = true;
     (bid as any).convertedAt = new Date();
-    
-    return await bid.save();
+    const saved = await bid.save();
+
+    // [SSE] notify buyer
+    try {
+      const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
+      streamController.publishToUser(String(buyer), 'bid:update', {
+        bidId: String(saved._id),
+        productId: String(saved.product),
+        status: 'CONVERTED',
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) { /* noop */ }
+
+    return saved;
   }
 
-  // =====================================
-  // ADMIN METHODS
-  // =====================================
+  // ===== Admin methods (unchanged) =====
 
-  /**
-   * Get all bids for admin with filtering and pagination
-   */
-  async getAllBidsForAdmin(
-    filters: any, 
-    page: number, 
-    limit: number, 
-    search?: string
-  ): Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
+  async getAllBidsForAdmin(filters: any, page: number, limit: number, search?: string)
+  : Promise<{ bids: IBid[]; total: number; page: number; totalPages: number }> {
     const query: any = { ...filters };
 
-    // Add search functionality (search by product name or user email)
     if (search) {
-      const searchProducts = await this.Product.find({
-        name: { $regex: search, $options: 'i' }
-      }).select('_id');
-      
+      const searchProducts = await this.Product.find({ name: { $regex: search, $options: 'i' } }).select('_id');
       const searchUsers = await this.User.find({
         $or: [
           { email: { $regex: search, $options: 'i' } },
@@ -346,9 +295,6 @@ export class ProductBidService implements IProductBidService {
     return { bids, total, page, totalPages };
   }
 
-  /**
-   * Get bid statistics for admin dashboard
-   */
   async getBidStatistics(): Promise<any> {
     const today = new Date();
     const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -356,16 +302,9 @@ export class ProductBidService implements IProductBidService {
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
     const [
-      totalBids,
-      pendingBids,
-      acceptedBids,
-      rejectedBids,
-      todayBids,
-      weekBids,
-      monthBids,
-      avgBidPrice,
-      topProducts,
-      totalProducts
+      totalBids, pendingBids, acceptedBids, rejectedBids,
+      todayBids, weekBids, monthBids,
+      avgBidPrice, topProducts, totalProducts
     ] = await Promise.all([
       this.Bid.countDocuments(),
       this.Bid.countDocuments({ status: 'PENDING' }),
@@ -374,122 +313,104 @@ export class ProductBidService implements IProductBidService {
       this.Bid.countDocuments({ createdAt: { $gte: startOfDay } }),
       this.Bid.countDocuments({ createdAt: { $gte: startOfWeek } }),
       this.Bid.countDocuments({ createdAt: { $gte: startOfMonth } }),
-      this.Bid.aggregate([
-        { $group: { _id: null, avg: { $avg: '$bidPrice' } } }
-      ]),
+      this.Bid.aggregate([{ $group: { _id: null, avg: { $avg: '$bidPrice' } } }]),
       this.Bid.aggregate([
         { $group: { _id: '$product', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
         { $limit: 5 },
-        {
-          $lookup: {
-            from: 'products',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'product'
-          }
-        },
+        { $lookup: { from: 'products', localField: '_id', foreignField: '_id', as: 'product' } },
         { $unwind: '$product' },
-        {
-          $project: {
-            productName: '$product.name',
-            bidCount: '$count'
-          }
-        }
+        { $project: { productName: '$product.name', bidCount: '$count' } }
       ]),
-      // Count distinct products that have bids
-      this.Bid.aggregate([
-        { $group: { _id: '$product' } },
-        { $count: 'totalProducts' }
-      ])
+      this.Bid.aggregate([{ $group: { _id: '$product' } }, { $count: 'totalProducts' }])
     ]);
 
     return {
       totalProducts: totalProducts[0]?.totalProducts || 0,
-      totalBids,
-      pendingBids,
-      acceptedBids,
-      rejectedBids,
-      todayBids,
-      weekBids,
-      monthBids,
+      totalBids, pendingBids, acceptedBids, rejectedBids,
+      todayBids, weekBids, monthBids,
       avgBidPrice: avgBidPrice[0]?.avg || 0,
       topProducts,
       acceptanceRate: totalBids > 0 ? ((acceptedBids / totalBids) * 100).toFixed(2) : 0
     };
   }
 
-  /**
-   * Force accept a bid (admin override)
-   */
   async forceAcceptBid(bidId: string, reason?: string): Promise<IBid> {
     const bid = await this.Bid.findById(bidId);
-    
-    if (!bid) {
-      throw new AppError('Bid not found', 404);
-    }
+    if (!bid) throw new AppError('Bid not found', 404);
+    if (bid.status === 'ACCEPTED') throw new AppError('Bid is already accepted', 400);
 
-    if (bid.status === 'ACCEPTED') {
-      throw new AppError('Bid is already accepted', 400);
-    }
-
-    // Set expiration to 24 hours from now
-    const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + 24);
-
+    const expiresAt = new Date(); expiresAt.setHours(expiresAt.getHours() + 24);
     bid.status = 'ACCEPTED';
     bid.expiresAt = expiresAt;
     (bid as any).adminOverride = true;
     (bid as any).adminReason = reason;
+    const saved = await bid.save();
 
-    return await bid.save();
+    // [SSE] notify buyer
+    try {
+      const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
+      streamController.publishToUser(String(buyer), 'bid:update', {
+        bidId: String(saved._id),
+        productId: String(saved.product),
+        status: 'ACCEPTED',
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) { /* noop */ }
+
+    return saved;
   }
 
-  /**
-   * Force reject a bid (admin override)
-   */
   async forceRejectBid(bidId: string, reason?: string): Promise<IBid> {
     const bid = await this.Bid.findById(bidId);
-    
-    if (!bid) {
-      throw new AppError('Bid not found', 404);
-    }
-
-    if (bid.status === 'REJECTED') {
-      throw new AppError('Bid is already rejected', 400);
-    }
+    if (!bid) throw new AppError('Bid not found', 404);
+    if (bid.status === 'REJECTED') throw new AppError('Bid is already rejected', 400);
 
     bid.status = 'REJECTED';
     (bid as any).adminOverride = true;
     (bid as any).adminReason = reason;
+    const saved = await bid.save();
 
-    return await bid.save();
+    // [SSE] notify buyer
+    try {
+      const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
+      streamController.publishToUser(String(buyer), 'bid:update', {
+        bidId: String(saved._id),
+        productId: String(saved.product),
+        status: 'REJECTED',
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) { /* noop */ }
+
+    return saved;
   }
 
-  /**
-   * Cancel a bid (admin action)
-   */
   async cancelBid(bidId: string, reason: string): Promise<IBid> {
     const bid = await this.Bid.findById(bidId);
-    
-    if (!bid) {
-      throw new AppError('Bid not found', 404);
-    }
+    if (!bid) throw new AppError('Bid not found', 404);
 
     bid.status = 'CANCELLED';
     (bid as any).cancelledBy = 'ADMIN';
     (bid as any).cancellationReason = reason;
     (bid as any).cancelledAt = new Date();
+    const saved = await bid.save();
 
-    return await bid.save();
+    // [SSE] notify buyer
+    try {
+      const buyer = (saved.buyer as any)?.toString?.() || saved.buyer;
+      streamController.publishToUser(String(buyer), 'bid:update', {
+        bidId: String(saved._id),
+        productId: String(saved.product),
+        status: 'CANCELLED',
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) { /* noop */ }
+
+    return saved;
   }
 
-  /**
-   * Get bid analytics for admin reporting
-   */
   async getBidAnalytics(period: string, dateFrom?: string, dateTo?: string): Promise<any> {
     const matchStage: any = {};
-    
     if (dateFrom || dateTo) {
       matchStage.createdAt = {};
       if (dateFrom) matchStage.createdAt.$gte = new Date(dateFrom);
@@ -497,16 +418,11 @@ export class ProductBidService implements IProductBidService {
     }
 
     let groupStage: any;
-    
     switch (period) {
       case 'daily':
         groupStage = {
           $group: {
-            _id: {
-              year: { $year: '$createdAt' },
-              month: { $month: '$createdAt' },
-              day: { $dayOfMonth: '$createdAt' }
-            },
+            _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' }, day: { $dayOfMonth: '$createdAt' } },
             totalBids: { $sum: 1 },
             acceptedBids: { $sum: { $cond: [{ $eq: ['$status', 'ACCEPTED'] }, 1, 0] } },
             rejectedBids: { $sum: { $cond: [{ $eq: ['$status', 'REJECTED'] }, 1, 0] } },
@@ -517,10 +433,7 @@ export class ProductBidService implements IProductBidService {
       case 'weekly':
         groupStage = {
           $group: {
-            _id: {
-              year: { $year: '$createdAt' },
-              week: { $week: '$createdAt' }
-            },
+            _id: { year: { $year: '$createdAt' }, week: { $week: '$createdAt' } },
             totalBids: { $sum: 1 },
             acceptedBids: { $sum: { $cond: [{ $eq: ['$status', 'ACCEPTED'] }, 1, 0] } },
             rejectedBids: { $sum: { $cond: [{ $eq: ['$status', 'REJECTED'] }, 1, 0] } },
@@ -531,10 +444,7 @@ export class ProductBidService implements IProductBidService {
       case 'monthly':
         groupStage = {
           $group: {
-            _id: {
-              year: { $year: '$createdAt' },
-              month: { $month: '$createdAt' }
-            },
+            _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
             totalBids: { $sum: 1 },
             acceptedBids: { $sum: { $cond: [{ $eq: ['$status', 'ACCEPTED'] }, 1, 0] } },
             rejectedBids: { $sum: { $cond: [{ $eq: ['$status', 'REJECTED'] }, 1, 0] } },
@@ -555,61 +465,16 @@ export class ProductBidService implements IProductBidService {
     return analytics;
   }
 
-  // =====================================
-  // PRODUCT-CENTRIC ADMIN METHODS
-  // =====================================
-
-  /**
-   * Get products with bid statistics for admin dashboard
-   */
-  async getProductsWithBids(
-    filters: any, 
-    page: number, 
-    limit: number
-  ): Promise<{ products: any[]; total: number; page: number; totalPages: number }> {
+  async getProductsWithBids(filters: any, page: number, limit: number)
+  : Promise<{ products: any[]; total: number; page: number; totalPages: number }> {
     const { search } = filters;
-    
-    // Build aggregation pipeline
     const pipeline: any[] = [
-      // Match products that have bids
-      {
-        $lookup: {
-          from: 'bids',
-          localField: '_id',
-          foreignField: 'product',
-          as: 'bids'
-        }
-      },
-      {
-        $match: {
-          'bids.0': { $exists: true } // Only products with at least one bid
-        }
-      },
-      // Populate seller information
-      {
-        $lookup: {
-          from: 'sellers',
-          localField: 'owner',
-          foreignField: '_id',
-          as: 'seller'
-        }
-      },
-      {
-        $unwind: '$seller'
-      },
-      // Populate the user info from seller
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'seller.user',
-          foreignField: '_id',
-          as: 'sellerUser'
-        }
-      },
-      {
-        $unwind: '$sellerUser'
-      },
-      // Add search functionality
+      { $lookup: { from: 'bids', localField: '_id', foreignField: 'product', as: 'bids' } },
+      { $match: { 'bids.0': { $exists: true } } },
+      { $lookup: { from: 'sellers', localField: 'owner', foreignField: '_id', as: 'seller' } },
+      { $unwind: '$seller' },
+      { $lookup: { from: 'users', localField: 'seller.user', foreignField: '_id', as: 'sellerUser' } },
+      { $unwind: '$sellerUser' },
       ...(search ? [{
         $match: {
           $or: [
@@ -621,33 +486,17 @@ export class ProductBidService implements IProductBidService {
           ]
         }
       }] : []),
-      // Calculate bid statistics
       {
         $addFields: {
           bidCount: { $size: '$bids' },
-          pendingBids: {
-            $size: {
-              $filter: {
-                input: '$bids',
-                cond: { $eq: ['$$this.status', 'PENDING'] }
-              }
-            }
-          },
-          acceptedBids: {
-            $size: {
-              $filter: {
-                input: '$bids',
-                cond: { $eq: ['$$this.status', 'ACCEPTED'] }
-              }
-            }
-          },
+          pendingBids: { $size: { $filter: { input: '$bids', cond: { $eq: ['$$this.status', 'PENDING'] } } } },
+          acceptedBids: { $size: { $filter: { input: '$bids', cond: { $eq: ['$$this.status', 'ACCEPTED'] } } } },
           highestBid: { $max: '$bids.bidPrice' },
           lowestBid: { $min: '$bids.bidPrice' },
           avgBidPrice: { $avg: '$bids.bidPrice' },
           latestBidDate: { $max: '$bids.createdAt' }
         }
       },
-      // Project final fields
       {
         $project: {
           id: '$_id',
@@ -669,50 +518,34 @@ export class ProductBidService implements IProductBidService {
           latestBidDate: 1
         }
       },
-      // Sort by latest bid activity
-      {
-        $sort: { latestBidDate: -1 }
-      }
+      { $sort: { latestBidDate: -1 } }
     ];
 
-    // Get total count for pagination
     const countPipeline = [...pipeline, { $count: 'total' }];
     const countResult = await this.Product.aggregate(countPipeline);
     const total = countResult[0]?.total || 0;
     const totalPages = Math.ceil(total / limit);
 
-    // Add pagination
     const skip = (page - 1) * limit;
     pipeline.push({ $skip: skip }, { $limit: limit });
 
     const products = await this.Product.aggregate(pipeline);
-
     return { products, total, page, totalPages };
   }
 
-  /**
-   * Get all bids for a specific product with product details and statistics
-   */
   async getProductBidsForAdmin(productId: string): Promise<any> {
-    // Get product details
-    const product = await this.Product.findById(productId)
-      .populate('owner', 'firstName lastName email');
+    const product = await this.Product.findById(productId).populate('owner', 'firstName lastName email');
+    if (!product) throw new AppError('Product not found', 404);
 
-    if (!product) {
-      throw new AppError('Product not found', 404);
-    }
-
-    // Get all bids for this product
     const bids = await this.Bid.find({ product: productId })
       .populate('buyer', 'firstName lastName email')
       .sort({ createdAt: -1 });
 
-    // Calculate statistics
     const totalBids = bids.length;
-    const pendingBids = bids.filter(bid => bid.status === 'PENDING').length;
-    const acceptedBids = bids.filter(bid => bid.status === 'ACCEPTED').length;
-    const rejectedBids = bids.filter(bid => bid.status === 'REJECTED').length;
-    const bidPrices = bids.map(bid => bid.bidPrice);
+    const pendingBids = bids.filter(b => b.status === 'PENDING').length;
+    const acceptedBids = bids.filter(b => b.status === 'ACCEPTED').length;
+    const rejectedBids = bids.filter(b => b.status === 'REJECTED').length;
+    const bidPrices = bids.map(b => b.bidPrice);
     const highestBid = bidPrices.length > 0 ? Math.max(...bidPrices) : 0;
     const lowestBid = bidPrices.length > 0 ? Math.min(...bidPrices) : 0;
     const avgBidPrice = bidPrices.length > 0 ? bidPrices.reduce((a, b) => a + b, 0) / bidPrices.length : 0;
@@ -754,47 +587,19 @@ export class ProductBidService implements IProductBidService {
     };
   }
 
-  /**
-   * Debug method to check database contents and aggregation
-   */
   async getDebugBidCounts(): Promise<any> {
     const totalBids = await this.Bid.countDocuments();
     const totalProducts = await this.Product.countDocuments();
     const totalUsers = await this.User.countDocuments();
-    
-    // Get sample bids with populated data
     const sampleBids = await this.Bid.find().limit(5).populate('product', 'name').populate('buyer', 'firstName lastName');
-    
-    // Get products with at least one bid using direct query
     const productsWithBids = await this.Bid.distinct('product');
-    
-    // Test the aggregation step by step
     const step1 = await this.Product.aggregate([
-      {
-        $lookup: {
-          from: 'bids',
-          localField: '_id',
-          foreignField: 'product',
-          as: 'bids'
-        }
-      },
+      { $lookup: { from: 'bids', localField: '_id', foreignField: 'product', as: 'bids' } },
       { $limit: 5 }
     ]);
-    
     const step2 = await this.Product.aggregate([
-      {
-        $lookup: {
-          from: 'bids',
-          localField: '_id',
-          foreignField: 'product',
-          as: 'bids'
-        }
-      },
-      {
-        $match: {
-          'bids.0': { $exists: true }
-        }
-      },
+      { $lookup: { from: 'bids', localField: '_id', foreignField: 'product', as: 'bids' } },
+      { $match: { 'bids.0': { $exists: true } } },
       { $limit: 5 }
     ]);
     
