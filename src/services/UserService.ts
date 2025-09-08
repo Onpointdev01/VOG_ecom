@@ -11,13 +11,11 @@ import { nonUpdatableFields } from '../utils/helpers';
 export interface IUserService {
   getUserProfile(userId: string): Promise<IUser>;
   updateUserProfile(userId: string, payload: Partial<IUser>): Promise<IUser>;
+  setAccountType(userId: string, type: 'buyer' | 'seller'): Promise<IUser>;
   getAllUsers(): Promise<IUser[]>;
   getWishlist(userId: string): Promise<IUser['wishlist']>;
   addToWishlist(userId: string, productId: any): Promise<IProduct>;
   removeFromWishlist(userId: string, productId: any): Promise<void>;
-
-  //explicit role switcher used by /user/profile/type
-  setAccountType(userId: string, type: 'buyer' | 'seller'): Promise<IUser>;
 }
 
 @injectable()
@@ -36,14 +34,17 @@ export class UserService extends BaseService implements IUserService {
   }
 
   async updateUserProfile(userId: string, payload: Partial<IUser>): Promise<IUser> {
-    // Remove undefined fields & block non-updatable ones
-    const filteredPayload = pickBy(payload, (value, key) => !nonUpdatableFields.includes(key));
+    // Remove undefined values and block fields you never want updated here
+    const filteredPayload = pickBy(
+      payload,
+      (value: unknown, key: string) => value !== undefined && !nonUpdatableFields.includes(key)
+    );
     const updatedUser = await this.User.findByIdAndUpdate(userId, filteredPayload, { new: true });
     if (!updatedUser) throw new AppError('User not found', 404);
     return updatedUser;
   }
 
-  // ✅ NEW: dedicated method to set buyer/seller role and flags
+  // Explicit role switch with consistent flags
   async setAccountType(userId: string, type: 'buyer' | 'seller'): Promise<IUser> {
     const t = (type || '').toLowerCase();
     if (t !== 'buyer' && t !== 'seller') {
@@ -58,14 +59,13 @@ export class UserService extends BaseService implements IUserService {
     const updated = await this.User.findByIdAndUpdate(userId, update, { new: true });
     if (!updated) throw new AppError('User not found', 404);
 
-    // If you later add a separate Seller model, you can create/link it here.
+    // (Optional) If you later create a Seller entity, link/create it here.
     return updated;
   }
 
   async getAllUsers(): Promise<IUser[]> {
     try {
-      const users = await this.User.find().exec();
-      return users;
+      return await this.User.find().exec();
     } catch {
       throw new AppError('Unable to fetch users', 500);
     }
@@ -102,9 +102,7 @@ export class UserService extends BaseService implements IUserService {
     const isInWishlist = user.wishlist.some(
       (item) => item.toString() === productId.toString()
     );
-    if (!isInWishlist) {
-      throw new AppError('Product not found in wishlist', 404);
-    }
+    if (!isInWishlist) throw new AppError('Product not found in wishlist', 404);
 
     user.wishlist = user.wishlist.filter(
       (wishlistItem) => wishlistItem.toString() !== productId.toString()
