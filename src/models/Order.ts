@@ -110,12 +110,12 @@ const shippingAddressSchema: Schema<IShippingAddress> = new Schema({
   },
   city: {
     type: String,
-    required: true,
+    required: false,
     trim: true,
   },
   postalCode: {
     type: String,
-    required: true,
+    required: false,
     trim: true,
   },
   country: {
