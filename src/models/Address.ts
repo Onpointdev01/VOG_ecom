@@ -43,12 +43,10 @@ const AddressSchema: Schema = new Schema<IAddress>(
     },
     city: {
       type: String,
-      required: [true, 'City is required'],
       trim: true,
     },
     postalCode: {
       type: String,
-      required: [true, 'Postal code is required'],
       trim: true,
     },
     country: {
