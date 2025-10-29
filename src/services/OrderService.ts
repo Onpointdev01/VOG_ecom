@@ -409,20 +409,29 @@ export class OrderService extends BaseService {
       // Remove specific cart items by their IDs
       const result = await Cart.findOneAndUpdate(
         { user: userId },
-        { 
-          $pull: { 
-            items: { 
-              _id: { $in: cartItemIds } 
-            } 
-          } 
+        {
+          $pull: {
+            items: {
+              _id: { $in: cartItemIds }
+            }
+          }
         },
         { new: true }
       );
 
       if (result) {
+        // Recalculate total price based on remaining items
+        const newTotal = result.items.reduce((sum, item) => {
+          if (typeof item.price === 'number' && !isNaN(item.price)) {
+            return sum + (item.price * item.quantity);
+          }
+          return sum;
+        }, 0);
+
+        result.totalPrice = newTotal;
         // Trigger pre-save middleware to recalculate total
         await result.save();
-        console.log(`Cleared ${cartItemIds.length} items from cart for user ${userId}`);
+        console.log(`Cleared ${cartItemIds.length} items from cart for user ${userId}. New total: ${newTotal}`);
       } else {
         console.log(`No cart found for user ${userId}`);
       }
