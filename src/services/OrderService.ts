@@ -5,6 +5,7 @@ import { Cart, ICart } from '../models/Cart';
 import { Address, IAddress } from '../models/Address';
 import { PaymentOption, PaymentMethodType } from '../models/PaymentOption';
 import { PaymentService } from './PaymentService';
+import { IShippingZoneService } from './ShippingZoneService';
 import { PaymentMethod } from '../models/Payment';
 import AppError from '../utils/errors/AppError';
 import { TYPES } from '../di';
@@ -20,7 +21,8 @@ export interface CreateOrderRequest {
 @injectable()
 export class OrderService extends BaseService {
   constructor(
-    @inject(TYPES.PaymentService) private paymentService: PaymentService
+    @inject(TYPES.PaymentService) private paymentService: PaymentService,
+    @inject(TYPES.ShippingZoneService) private shippingZoneService: IShippingZoneService
   ) {
     super();
   }
@@ -83,8 +85,9 @@ export class OrderService extends BaseService {
     if (isNaN(totalPrice) || totalPrice < 0) {
       throw new AppError('Unable to calculate order total. Please check your cart items and try again.', 400);
     }
-    
-    const shippingFee = this.calculateShippingFee(paymentMethod, totalPrice);
+
+    // Calculate shipping fee based on province
+    const shippingFee = await this.calculateShippingFee(shippingAddress);
     const finalPrice = totalPrice + shippingFee;
 
     // Store cart item IDs for later clearing
@@ -384,19 +387,25 @@ export class OrderService extends BaseService {
     return order;
   }
 
-  private calculateShippingFee(paymentMethod: PaymentMethodType, totalPrice: number): number {
-    // For cash on delivery, add a small handling fee
-    if (paymentMethod === 'CASH_ON_DELIVERY') {
-      return 5.00; // Fixed COD fee
+  private async calculateShippingFee(shippingAddress: IAddress): Promise<number> {
+    try {
+      // Get shipping fee based on the province/state code
+      const provinceCode = shippingAddress.state;
+
+      if (!provinceCode) {
+        console.warn('No province code found in shipping address, using default fee');
+        return 199.99; // Default shipping fee
+      }
+
+      // Use the shipping zone service to calculate the fee
+      const shippingFee = await this.shippingZoneService.calculateShippingFee(provinceCode);
+
+      return shippingFee;
+    } catch (error) {
+      console.error('Error calculating shipping fee:', error);
+      // Return default fee if calculation fails
+      return 199.99;
     }
-    
-    // Free shipping for orders above certain amount
-    if (totalPrice >= 100) {
-      return 0;
-    }
-    
-    // Standard shipping fee
-    return 10.00;
   }
 
   private async clearCartItems(userId: string, cartItemIds: string[]): Promise<void> {

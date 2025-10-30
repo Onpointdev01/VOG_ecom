@@ -16,6 +16,7 @@ const constants = {
     ORDER: 'Order',
     PAYMENT: 'Payment',
     USER_VIEW: 'UserView',
+    SHIPPING_ZONE: 'ShippingZone',
   },
 };
 export default constants;
