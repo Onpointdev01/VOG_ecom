@@ -1,7 +1,13 @@
 import { Document, Model, model, Schema } from 'mongoose';
 import constants from '../utils/constants';
 
-const { CATEGORY } = constants.mongooseModels;
+const { CATEGORY, ATTRIBUTE } = constants.mongooseModels;
+
+export interface ICategoryAttribute {
+  attribute: Schema.Types.ObjectId;
+  isRequired: boolean;
+  displayOrder: number;
+}
 
 export interface INewCategory extends Document {
   name: string;
@@ -13,6 +19,7 @@ export interface INewCategory extends Document {
   metaTitle?: string;
   metaDescription?: string;
   displayOrder?: number;
+  attributes?: ICategoryAttribute[];  // NEW: Dynamic attributes for this category
 }
 
 const categorySchema: Schema = new Schema<INewCategory>(
@@ -59,6 +66,23 @@ const categorySchema: Schema = new Schema<INewCategory>(
       type: Number,
       default: 0,
     },
+    attributes: [
+      {
+        attribute: {
+          type: Schema.Types.ObjectId,
+          ref: ATTRIBUTE,
+          required: true,
+        },
+        isRequired: {
+          type: Boolean,
+          default: false,
+        },
+        displayOrder: {
+          type: Number,
+          default: 0,
+        },
+      },
+    ],
   },
   { timestamps: true }
 );

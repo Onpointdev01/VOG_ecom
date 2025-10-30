@@ -15,6 +15,8 @@ export const TYPES = {
   Order: Symbol.for('Order'),
   UserView: Symbol.for('UserView'),
   ShippingZone: Symbol.for('ShippingZone'),
+  Attribute: Symbol.for('Attribute'),
+  AttributeValue: Symbol.for('AttributeValue'),
 
   AuthService: Symbol.for('AuthService'),
   AdminService: Symbol.for('AdminService'),
@@ -31,6 +33,8 @@ export const TYPES = {
   OrderService: Symbol.for('OrderService'),
   ViewTrackingService: Symbol.for('ViewTrackingService'),
   ShippingZoneService: Symbol.for('ShippingZoneService'),
+  AttributeService: Symbol.for('AttributeService'),
+  AttributeValueService: Symbol.for('AttributeValueService'),
 
   RequireSignIn: Symbol.for('RequireSignIn'),
   RequireSeller: Symbol.for('RequireSeller'),

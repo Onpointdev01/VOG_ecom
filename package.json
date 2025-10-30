@@ -12,7 +12,8 @@
     "coverage": "nyc yarn run unit-test",
     "integration-test": "echo 'no integration tests yet'",
     "unit-test": "echo 'no unit tests yet' ",
-    "serve:dev": "cross-env NODE_ENV=production  nodemon"
+    "serve:dev": "cross-env NODE_ENV=production  nodemon",
+    "seed:attributes": "ts-node src/utils/seedAttributes.ts"
   },
   "overrides": {
     "eslint": "^9.6.0"

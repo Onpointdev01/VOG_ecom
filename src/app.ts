@@ -42,6 +42,10 @@ import {
   IUserView,
   ShippingZone,
   IShippingZone,
+  Attribute,
+  IAttribute,
+  AttributeValue,
+  IAttributeValue,
 } from './models';
 import TYPES from './di';
 
@@ -74,6 +78,10 @@ import {
   ViewTrackingService,
   IShippingZoneService,
   ShippingZoneService,
+  IAttributeService,
+  AttributeService,
+  IAttributeValueService,
+  AttributeValueService,
 } from './services';
 import { OptionalAuth, RequireAdmin, RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
 
@@ -97,6 +105,8 @@ container.bind<Model<IBidMessages>>(TYPES.BidMessages).toConstantValue(Message);
 container.bind<Model<IOrder>>(TYPES.Order).toConstantValue(Order);
 container.bind<Model<IUserView>>(TYPES.UserView).toConstantValue(UserView);
 container.bind<Model<IShippingZone>>(TYPES.ShippingZone).toConstantValue(ShippingZone);
+container.bind<Model<IAttribute>>(TYPES.Attribute).toConstantValue(Attribute);
+container.bind<Model<IAttributeValue>>(TYPES.AttributeValue).toConstantValue(AttributeValue);
 
 container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
 container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);
@@ -119,6 +129,8 @@ container.bind<IBidMessageService>(TYPES.BidMessageService).to(BidMessageService
 container.bind<OrderService>(TYPES.OrderService).to(OrderService);
 container.bind<IViewTrackingService>(TYPES.ViewTrackingService).to(ViewTrackingService);
 container.bind<IShippingZoneService>(TYPES.ShippingZoneService).to(ShippingZoneService);
+container.bind<IAttributeService>(TYPES.AttributeService).to(AttributeService);
+container.bind<IAttributeValueService>(TYPES.AttributeValueService).to(AttributeValueService);
 
 const server = new InversifyExpressServer(container);
 

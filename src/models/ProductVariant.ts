@@ -1,13 +1,24 @@
 import { Document, Model, model, Schema } from 'mongoose';
 import constants from '../utils/constants';
 
-const { PRODUCT_VARIANT, PRODUCT } = constants.mongooseModels;
+const { PRODUCT_VARIANT, PRODUCT, ATTRIBUTE, ATTRIBUTE_VALUE } = constants.mongooseModels;
+
+export interface IVariantAttribute {
+  attribute: Schema.Types.ObjectId;    // Reference to Attribute (e.g., "Size", "Color")
+  value: Schema.Types.ObjectId;        // Reference to AttributeValue (e.g., "XL", "Red")
+}
 
 export interface IProductVariant extends Document {
   product: Schema.Types.ObjectId;
   sku: string;
-  size: string;
-  color: string;
+
+  // NEW: Dynamic attributes system
+  attributes: IVariantAttribute[];
+
+  // DEPRECATED: Keep for backward compatibility during migration
+  size?: string;
+  color?: string;
+
   price: number;
   originalPrice: number;
   quantityAvailable: number;
@@ -25,22 +36,40 @@ const productVariantSchema = new Schema<IProductVariant>(
       required: true, 
       index: true 
     },
-    sku: { 
-      type: String, 
+    sku: {
+      type: String,
       required: false, // Will be auto-generated if not provided
-      unique: true, 
-      uppercase: true, 
-      trim: true 
+      unique: true,
+      uppercase: true,
+      trim: true
     },
-    size: { 
-      type: String, 
-      required: true, 
-      trim: true 
+
+    // NEW: Dynamic attributes
+    attributes: [
+      {
+        attribute: {
+          type: Schema.Types.ObjectId,
+          ref: ATTRIBUTE,
+          required: true,
+        },
+        value: {
+          type: Schema.Types.ObjectId,
+          ref: ATTRIBUTE_VALUE,
+          required: true,
+        },
+      },
+    ],
+
+    // DEPRECATED: Keep for backward compatibility
+    size: {
+      type: String,
+      required: false,  // Changed to optional
+      trim: true
     },
-    color: { 
-      type: String, 
-      required: true, 
-      trim: true 
+    color: {
+      type: String,
+      required: false,  // Changed to optional
+      trim: true
     },
     price: { 
       type: Number, 
@@ -80,10 +109,10 @@ productVariantSchema.pre('validate', async function (next) {
       }
 
       const baseCode = productDoc.name.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, '') || 'PRD';
-      const colorCode = this.color.substring(0, 2).toUpperCase().replace(/[^A-Z]/g, '') || 'COL';
-      const sizeCode = this.size.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'SIZ';
+      const colorCode = this.color?.substring(0, 2).toUpperCase().replace(/[^A-Z]/g, '') || 'COL';
+      const sizeCode = this.size?.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'SIZ';
       const timestamp = Date.now().toString().slice(-5);
-      
+
       this.sku = `${baseCode}-${colorCode}-${sizeCode}-${timestamp}`;
     } catch (error) {
       return next(error as Error);
@@ -102,10 +131,10 @@ productVariantSchema.pre('save', async function (next) {
       }
 
       const baseCode = productDoc.name.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, '') || 'PRD';
-      const colorCode = this.color.substring(0, 2).toUpperCase().replace(/[^A-Z]/g, '') || 'COL';
-      const sizeCode = this.size.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'SIZ';
+      const colorCode = this.color?.substring(0, 2).toUpperCase().replace(/[^A-Z]/g, '') || 'COL';
+      const sizeCode = this.size?.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'SIZ';
       const timestamp = Date.now().toString().slice(-5);
-      
+
       this.sku = `${baseCode}-${colorCode}-${sizeCode}-${timestamp}`;
     } catch (error) {
       return next(error as Error);

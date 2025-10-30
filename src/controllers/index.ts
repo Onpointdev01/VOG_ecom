@@ -12,3 +12,5 @@ export * from './BidController';
 export * from './NotificationController';
 export * from './OrderController';
 export * from './ShippingZoneController';
+export * from './AttributeController';
+export * from './AttributeValueController';

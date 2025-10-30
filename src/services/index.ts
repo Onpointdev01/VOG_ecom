@@ -14,5 +14,7 @@ export * from './BidMessageService';
 export * from './OrderService';
 export * from './ViewTrackingService';
 export * from './ShippingZoneService';
+export * from './AttributeService';
+export * from './AttributeValueService';
 
 export * from './NewCategoryService';

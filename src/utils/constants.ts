@@ -17,6 +17,8 @@ const constants = {
     PAYMENT: 'Payment',
     USER_VIEW: 'UserView',
     SHIPPING_ZONE: 'ShippingZone',
+    ATTRIBUTE: 'Attribute',
+    ATTRIBUTE_VALUE: 'AttributeValue',
   },
 };
 export default constants;
