@@ -574,15 +574,27 @@ export class CartService extends BaseService implements ICartService {
   }
 
   async removeCartItem(userId: string, itemId: string): Promise<ICart> {
-    const cart = await this.Cart.findOneAndUpdate(
-      { user: userId },
-      { $pull: { items: { _id: itemId } } },
-      { new: true }
-    ).populate('items.product', 'name images price sizes color');
+    // Find the cart first
+    const cart = await this.Cart.findOne({ user: userId });
 
     if (!cart) {
-      throw new AppError('Cart or item not found', 404);
+      throw new AppError('Cart not found', 404);
     }
+
+    // Check if item exists in cart
+    const itemIndex = cart.items.findIndex((item) => item._id.toString() === itemId);
+    if (itemIndex === -1) {
+      throw new AppError('Item not found in cart', 404);
+    }
+
+    // Remove the item from the array
+    cart.items.splice(itemIndex, 1);
+
+    // Save the cart to trigger pre-save hook for totalPrice recalculation
+    await cart.save();
+
+    // Populate and return the updated cart
+    await cart.populate('items.product', 'name images price sizes color');
 
     return cart;
   }
