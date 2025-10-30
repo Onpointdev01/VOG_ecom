@@ -11,3 +11,4 @@ export * from './PaymentController';
 export * from './BidController';
 export * from './NotificationController';
 export * from './OrderController';
+export * from './ShippingZoneController';
