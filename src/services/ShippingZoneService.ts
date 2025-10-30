@@ -73,10 +73,21 @@ export class ShippingZoneService extends BaseService implements IShippingZoneSer
   }
 
   async getShippingZoneByProvinceCode(provinceCode: string): Promise<IShippingZone | null> {
-    return await this.ShippingZone.findOne({
-      provinceCode: provinceCode.toUpperCase(),
+    // Try to find by province code first (case-insensitive)
+    let shippingZone = await this.ShippingZone.findOne({
+      provinceCode: new RegExp(`^${provinceCode}$`, 'i'),
       isActive: true,
     });
+
+    // If not found, try to find by province name (case-insensitive)
+    if (!shippingZone) {
+      shippingZone = await this.ShippingZone.findOne({
+        province: new RegExp(`^${provinceCode}`, 'i'),
+        isActive: true,
+      });
+    }
+
+    return shippingZone;
   }
 
   async updateShippingZone(id: string, data: UpdateShippingZoneDTO): Promise<IShippingZone> {
