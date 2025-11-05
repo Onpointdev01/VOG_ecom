@@ -2,7 +2,7 @@ import { Document, Model, model, PopulatedDoc, Schema } from 'mongoose';
 import constants from '../utils/constants';
 import { ISeller, IProductVariant } from '.';
 
-const { PRODUCT, SELLER, REVIEW, CATEGORY, PRODUCT_VARIANT } = constants.mongooseModels;
+const { PRODUCT, SELLER, REVIEW, CATEGORY, PRODUCT_VARIANT, ATTRIBUTE, ATTRIBUTE_VALUE } = constants.mongooseModels;
 
 export interface IProduct extends Document {
   name: string;
@@ -25,6 +25,10 @@ export interface IProduct extends Document {
   color?: string;
   quantityAvailable?: number;
   images?: string[];
+  attributes?: {
+    attribute: Schema.Types.ObjectId;
+    value: Schema.Types.ObjectId;
+  }[];
 
   // Fields for VARIABLE products (optional for simple)
   variants?: PopulatedDoc<IProductVariant>[];
@@ -54,6 +58,10 @@ const productSchema: Schema<IProduct> = new Schema<IProduct>(
     color: { type: String },
     quantityAvailable: { type: Number, default: 0, min: 0 },
     images: { type: [String] },
+    attributes: [{
+      attribute: { type: Schema.Types.ObjectId, ref: ATTRIBUTE },
+      value: { type: Schema.Types.ObjectId, ref: ATTRIBUTE_VALUE }
+    }],
 
     // Fields for VARIABLE products
     variants: [{ type: Schema.Types.ObjectId, ref: PRODUCT_VARIANT }],
