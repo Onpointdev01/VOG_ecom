@@ -70,17 +70,52 @@ export class ProductService extends BaseService implements IProductService {
     const product = await this.Product.findById(id).lean();
     if (!product) throw new AppError('Product not found', 404);
 
+    // Populate owner/seller data
+    let ownerData = null;
+    if (product.owner) {
+      const seller = await this.Seller.findById(product.owner).lean();
+      if (seller) {
+        ownerData = {
+          id: (seller._id as any).toString(),
+          name: seller.name,
+          rating: seller.rating,
+          logo: seller.logo,
+          official: seller.official,
+        };
+      }
+    }
+
+    // Populate attributes if they exist
+    let populatedAttributes = product.attributes;
+    if (product.attributes && product.attributes.length > 0) {
+      const Attribute = this.Product.db.model('Attribute');
+      const AttributeValue = this.Product.db.model('AttributeValue');
+
+      populatedAttributes = await Promise.all(
+        product.attributes.map(async (attr: any) => {
+          const attribute = await Attribute.findById(attr.attribute).lean();
+          const value = await AttributeValue.findById(attr.value).lean();
+          return {
+            attribute: attribute || attr.attribute,
+            value: value || attr.value,
+          };
+        })
+      );
+    }
+
     // If it's a variable product, populate variants
     if (product.productType === 'variable') {
-      const variants = await this.ProductVariant.find({ 
-        product: id, 
-        isActive: true 
+      const variants = await this.ProductVariant.find({
+        product: id,
+        isActive: true
       }).select('sku size color price originalPrice quantityAvailable images');
 
       return {
         ...product,
         id: product._id.toString(),
         _id: undefined,
+        owner: ownerData,
+        attributes: populatedAttributes,
         variants: variants.map(v => ({
           ...v.toObject(),
           id: (v._id as any).toString(),
@@ -102,6 +137,8 @@ export class ProductService extends BaseService implements IProductService {
       ...product,
       id: (product._id as any).toString(),
       _id: undefined,
+      owner: ownerData,
+      attributes: populatedAttributes,
       variants: [],
       priceRange: null, // Simple products have fixed price
       totalStock: product.quantityAvailable || 0,
