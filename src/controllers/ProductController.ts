@@ -232,7 +232,8 @@ export class ProductController extends BaseController {
     
     // Create bid proposal message - this will appear in the chat
     if (product && product.owner) {
-      const sellerId = product.owner._id || product.owner;
+      // Handle both populated owner object (with id field) and direct ObjectId
+      const sellerId = product.owner.id || product.owner._id || product.owner;
       
       // Validate all required IDs before proceeding
       if (!authenticatedUser || !authenticatedUser._id) {
@@ -292,14 +293,15 @@ export class ProductController extends BaseController {
       return this.sendResponse(res, 404, 'Product not found or has no owner');
     }
 
-    const sellerId = product.owner._id || product.owner;
+    // Handle both populated owner object (with id field) and direct ObjectId
+    const sellerId = product.owner.id || product.owner._id || product.owner;
 
     try {
       // Create initial product inquiry message (user shows interest)
-      const userName = authenticatedUser.firstName && authenticatedUser.lastName 
+      const userName = authenticatedUser.firstName && authenticatedUser.lastName
         ? `${authenticatedUser.firstName} ${authenticatedUser.lastName}`
         : authenticatedUser.name || 'User';
-      
+
       await this.bidMessageService.createProductInquiryMessage(
         authenticatedUser._id.toString(),
         sellerId.toString(),
@@ -319,6 +321,7 @@ export class ProductController extends BaseController {
 
       return this.sendResponse(res, 200, 'Conversation initiated successfully');
     } catch (error) {
+      console.error('Error initiating product inquiry:', error);
       return this.sendResponse(res, 500, 'Failed to initiate conversation');
     }
   }
