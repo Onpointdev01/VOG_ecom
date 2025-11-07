@@ -236,6 +236,37 @@ export class UserController extends BaseController {
     }
   }
 
+  @httpDelete('/address/:id', TYPES.RequireSignIn)
+  public async deleteAddress(
+    @requestParam('id') id: string,
+    @response() res: Response
+  ) {
+    try {
+      await this.addressService.deleteAddress(id);
+      return this.sendResponse(res, 200, 'Address deleted successfully');
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.log(error);
+      return this.sendResponse(res, 404, 'Unable to delete address');
+    }
+  }
+
+  @httpPatch('/address/:id/default', TYPES.RequireSignIn)
+  public async setDefaultAddress(
+    @requestParam('id') id: string,
+    @response() res: Response
+  ) {
+    const userID = res.locals.user;
+    try {
+      const updatedAddress = await this.addressService.setDefaultAddress(userID, id);
+      return this.sendResponse(res, 200, 'Default address updated successfully', updatedAddress);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.log(error);
+      return this.sendResponse(res, 404, 'Unable to set default address');
+    }
+  }
+
   // ────────────────────────────── LAST VIEWED PRODUCTS ───────────────────────────
   @httpGet('/last-views', TYPES.RequireSignIn)
   public async getUserLastViews(

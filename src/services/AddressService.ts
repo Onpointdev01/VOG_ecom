@@ -39,17 +39,45 @@ export class AddressService extends BaseService implements IAddressService {
   }
 
   async addAddress(address: addressDTO): Promise<IAddress> {
+    // Check if user has any existing addresses
+    const existingAddresses = await this.Address.find({ user: address.user });
+
+    // If this is the first address, make it default automatically
+    if (existingAddresses.length === 0) {
+      address.isDefault = true;
+    }
+
+    // If setting as default, clear all other default flags
     if (address.isDefault) {
       await this.Address.updateMany({ user: address.user }, { $set: { isDefault: false } });
     }
+
     const newAddress = await this.Address.create(address);
     return newAddress;
   }
 
   async updateAddress(address: addressDTO, id: string): Promise<IAddress> {
+    // If trying to unset default flag, check if this is the only address
+    const existingAddress = await this.Address.findById(id);
+    if (!existingAddress) throw new AppError('Address not found', 404);
+
+    const userAddresses = await this.Address.find({ user: address.user });
+
+    // If this is the only address, force it to remain default
+    if (userAddresses.length === 1) {
+      address.isDefault = true;
+    }
+
+    // If this was the default address and user is trying to unset it
+    if (existingAddress.isDefault && !address.isDefault && userAddresses.length > 1) {
+      throw new AppError('Cannot unset default address. Please set another address as default first.', 400);
+    }
+
+    // If setting as default, clear all other default flags
     if (address.isDefault) {
       await this.Address.updateMany({ user: address.user }, { $set: { isDefault: false } });
     }
+
     console.log(address);
     const updatedAddress = await this.Address.findByIdAndUpdate(id, address, { new: true });
     if (!updatedAddress) throw new AppError('Address not found', 404);
@@ -57,8 +85,25 @@ export class AddressService extends BaseService implements IAddressService {
   }
 
   async deleteAddress(id: string): Promise<IAddress> {
+    const addressToDelete = await this.Address.findById(id);
+    if (!addressToDelete) throw new AppError('Address not found', 404);
+
+    const userId = addressToDelete.user;
+    const wasDefault = addressToDelete.isDefault;
+
+    // Delete the address
     const result = await this.Address.findByIdAndDelete(id);
     if (!result) throw new AppError('Address not found', 404);
+
+    // If the deleted address was default, set another address as default
+    if (wasDefault) {
+      const remainingAddresses = await this.Address.find({ user: userId });
+      if (remainingAddresses.length > 0) {
+        // Set the first remaining address as default
+        await this.Address.findByIdAndUpdate(remainingAddresses[0]._id, { isDefault: true });
+      }
+    }
+
     return result;
   }
 
