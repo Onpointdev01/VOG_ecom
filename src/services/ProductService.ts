@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { inject, injectable } from 'inversify';
 import { FilterQuery, Model } from 'mongoose';
+import mongoose from 'mongoose';
 import TYPES from '../di';
 import { IProduct } from '../models/Product';
 import AppError from '../utils/errors/AppError';
@@ -31,6 +32,11 @@ export interface IProductService {
   getProductsByCategoryId(
     categoryId: string,
     includeSubcategories: boolean,
+    page: number,
+    limit: number
+  ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}>;
+  getProductsBySellerId(
+    sellerId: string,
     page: number,
     limit: number
   ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}>;
@@ -649,16 +655,16 @@ export class ProductService extends BaseService implements IProductService {
     limit: number
   ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}> {
     const skip = (page - 1) * limit;
-    
+
     // Build category filter
     let categoryFilter: any = { 'categoryData._id': categoryId };
-    
+
     if (includeSubcategories) {
       // Get all subcategories of the given category
       const Category = this.Product.db.model('Category');
       const subcategories = await Category.find({ parent: categoryId });
       const subcategoryIds = subcategories.map(sub => sub._id);
-      
+
       // Include main category and all its subcategories
       categoryFilter = {
         'categoryData._id': { $in: [categoryId, ...subcategoryIds] }
@@ -676,7 +682,7 @@ export class ProductService extends BaseService implements IProductService {
         },
       },
       { $unwind: '$categoryData' },
-      
+
       // Match active products and category filter
       {
         $match: {
@@ -686,7 +692,7 @@ export class ProductService extends BaseService implements IProductService {
           ]
         },
       },
-      
+
       // Lookup owner/seller data
       {
         $lookup: {
@@ -707,10 +713,10 @@ export class ProductService extends BaseService implements IProductService {
           },
         },
       },
-      
+
       // Sort by creation date (newest first)
       { $sort: { createdAt: -1 } },
-      
+
       // Add total count
       {
         $facet: {
@@ -727,6 +733,191 @@ export class ProductService extends BaseService implements IProductService {
 
     const result = await this.Product.aggregate(aggregationPipeline);
     const products = result[0].products || [];
+    const total = result[0].totalCount[0]?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      products,
+      total,
+      totalPages,
+      currentPage: page,
+    };
+  }
+
+  async getProductsBySellerId(
+    sellerId: string,
+    page: number,
+    limit: number
+  ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}> {
+    const skip = (page - 1) * limit;
+
+    // Verify seller exists
+    await this.verifySeller(sellerId);
+
+    const aggregationPipeline: any[] = [
+      // Match products by seller/owner
+      {
+        $match: {
+          owner: new mongoose.Types.ObjectId(sellerId),
+          isActive: true
+        }
+      },
+
+      // Lookup category data
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category',
+          foreignField: '_id',
+          as: 'categoryData',
+        },
+      },
+      {
+        $addFields: {
+          category: {
+            $cond: {
+              if: { $eq: [{ $size: '$categoryData' }, 0] },
+              then: null,
+              else: { $arrayElemAt: ['$categoryData', 0] },
+            },
+          },
+        },
+      },
+
+      // Lookup owner/seller data
+      {
+        $lookup: {
+          from: 'sellers',
+          localField: 'owner',
+          foreignField: '_id',
+          as: 'ownerData',
+        },
+      },
+      {
+        $addFields: {
+          owner: {
+            $cond: {
+              if: { $eq: [{ $size: '$ownerData' }, 0] },
+              then: null,
+              else: { $arrayElemAt: ['$ownerData', 0] },
+            },
+          },
+        },
+      },
+
+      // Lookup variants for variable products
+      {
+        $lookup: {
+          from: 'productvariants',
+          localField: '_id',
+          foreignField: 'product',
+          as: 'variants',
+          pipeline: [
+            { $match: { isActive: true } },
+            { $project: { sku: 1, size: 1, color: 1, price: 1, quantityAvailable: 1, images: 1 } }
+          ]
+        }
+      },
+
+      // Add computed fields
+      {
+        $addFields: {
+          computedPrice: {
+            $cond: {
+              if: { $eq: ['$productType', 'variable'] },
+              then: {
+                $cond: {
+                  if: { $gt: [{ $size: '$variants' }, 0] },
+                  then: { $min: '$variants.price' },
+                  else: '$price'
+                }
+              },
+              else: '$price'
+            }
+          },
+          priceRange: {
+            $cond: {
+              if: { $and: [{ $eq: ['$productType', 'variable'] }, { $gt: [{ $size: '$variants' }, 0] }] },
+              then: {
+                min: { $min: '$variants.price' },
+                max: { $max: '$variants.price' }
+              },
+              else: null
+            }
+          },
+          totalStock: {
+            $cond: {
+              if: { $eq: ['$productType', 'variable'] },
+              then: { $sum: '$variants.quantityAvailable' },
+              else: '$quantityAvailable'
+            }
+          }
+        }
+      },
+
+      // Sort by creation date (newest first)
+      { $sort: { createdAt: -1 } },
+
+      // Add pagination and count
+      {
+        $facet: {
+          products: [
+            { $skip: skip },
+            { $limit: limit }
+          ],
+          totalCount: [
+            { $count: "count" }
+          ]
+        }
+      }
+    ];
+
+    const result = await this.Product.aggregate(aggregationPipeline);
+
+    // Transform products to match expected format
+    const products = (result[0].products || []).map((product: any) => ({
+      id: product._id.toString(),
+      name: product.name,
+      description: product.description,
+      productType: product.productType,
+      price: product.price,
+      originalPrice: product.originalPrice,
+      rating: product.rating,
+      noOfReviews: product.noOfReviews,
+      images: product.images,
+      isActive: product.isActive,
+      isFlash: product.isFlash,
+      brand: product.brand,
+      condition: product.condition,
+      color: product.color,
+      quantityAvailable: product.quantityAvailable,
+      computedPrice: product.computedPrice,
+      priceRange: product.priceRange,
+      totalStock: product.totalStock,
+      attributes: product.attributes,
+      category: product.category ? {
+        id: product.category._id?.toString(),
+        name: product.category.name
+      } : null,
+      owner: product.owner ? {
+        id: product.owner._id?.toString(),
+        name: product.owner.name,
+        rating: product.owner.rating,
+        logo: product.owner.logo,
+        official: product.owner.official
+      } : null,
+      variants: product.variants?.map((variant: any) => ({
+        id: variant._id?.toString(),
+        sku: variant.sku,
+        size: variant.size,
+        color: variant.color,
+        price: variant.price,
+        quantityAvailable: variant.quantityAvailable,
+        images: variant.images
+      })) || [],
+      createdAt: product.createdAt
+    }));
+
     const total = result[0].totalCount[0]?.count || 0;
     const totalPages = Math.ceil(total / limit);
 

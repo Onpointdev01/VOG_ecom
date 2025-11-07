@@ -2,6 +2,8 @@ import { injectable, inject } from 'inversify';
 import { BaseService } from './BaseService';
 import { Order, IOrder } from '../models/Order';
 import { Cart, ICart } from '../models/Cart';
+import { Product } from '../models/Product';
+import { ProductVariant } from '../models/ProductVariant';
 import { Address, IAddress } from '../models/Address';
 import { PaymentOption, PaymentMethodType } from '../models/PaymentOption';
 import { PaymentService } from './PaymentService';
@@ -148,18 +150,21 @@ export class OrderService extends BaseService {
 
     try {
       await order.save();
+
+      // Decrement product quantities after successful order creation
+      await this.decrementProductQuantities(itemsToOrder);
     } catch (error: any) {
       console.error('Order save error:', error);
       console.error('Order data:', JSON.stringify(order.toObject(), null, 2));
-      
+
       // Transform validation errors to user-friendly messages
       if (error.name === 'ValidationError') {
-        const validationErrors = Object.keys(error.errors).map(key => 
+        const validationErrors = Object.keys(error.errors).map(key =>
           `${key}: ${error.errors[key].message}`
         ).join(', ');
-        
+
         console.error('Validation errors:', validationErrors);
-        
+
         if (error.message.includes('totalPrice') || error.message.includes('finalPrice')) {
           throw new AppError('Unable to process order due to pricing issues. Please refresh your cart and try again.', 400);
         }
@@ -447,6 +452,65 @@ export class OrderService extends BaseService {
     } catch (error) {
       console.error('Failed to clear cart items:', error);
       // Don't throw error - cart clearing shouldn't fail the main operation
+    }
+  }
+
+  private async decrementProductQuantities(cartItems: any[]): Promise<void> {
+    try {
+      for (const item of cartItems) {
+        const productId = typeof item.product === 'object' ? item.product._id : item.product;
+        const product = await Product.findById(productId);
+
+        if (!product) {
+          console.warn(`Product not found: ${productId}`);
+          continue;
+        }
+
+        if (product.productType === 'simple') {
+          // Decrement quantity for simple products
+          const currentQty = product.quantityAvailable || 0;
+          const newQty = Math.max(0, currentQty - item.quantity);
+
+          product.quantityAvailable = newQty;
+          await product.save();
+
+          console.log(`Decremented product ${productId} quantity from ${currentQty} to ${newQty}`);
+
+          // Warn if stock is low or out
+          if (newQty === 0) {
+            console.warn(`Product ${productId} is now out of stock`);
+          } else if (newQty < 5) {
+            console.warn(`Product ${productId} is low on stock: ${newQty} remaining`);
+          }
+        } else if (product.productType === 'variable' && item.sku) {
+          // Decrement quantity for specific variant
+          const variant = await ProductVariant.findOne({ sku: item.sku, product: productId });
+
+          if (!variant) {
+            console.warn(`Variant not found for SKU: ${item.sku}`);
+            continue;
+          }
+
+          const currentQty = variant.quantityAvailable;
+          const newQty = Math.max(0, currentQty - item.quantity);
+
+          variant.quantityAvailable = newQty;
+          await variant.save();
+
+          console.log(`Decremented variant ${item.sku} quantity from ${currentQty} to ${newQty}`);
+
+          // Warn if stock is low or out
+          if (newQty === 0) {
+            console.warn(`Variant ${item.sku} is now out of stock`);
+          } else if (newQty < 5) {
+            console.warn(`Variant ${item.sku} is low on stock: ${newQty} remaining`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error decrementing product quantities:', error);
+      // Log error but don't throw - order is already created
+      // We might want to implement a compensating transaction or alert system here
     }
   }
 }

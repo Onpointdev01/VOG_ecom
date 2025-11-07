@@ -145,13 +145,32 @@ export class ProductController extends BaseController {
     const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 20));
 
     const products = await this.productService.getProductsByCategoryId(
-      categoryId, 
-      includeSubcats, 
-      pageNumber, 
+      categoryId,
+      includeSubcats,
+      pageNumber,
       limitNumber
     );
-    
+
     return this.sendResponse(res, 200, 'Category products retrieved successfully', products);
+  }
+
+  @httpGet('/seller/:sellerId')
+  async getProductsBySeller(
+    @response() res: Response,
+    @requestParam('sellerId') sellerId: string,
+    @queryParam('page') page: string = '1',
+    @queryParam('limit') limit: string = '20'
+  ) {
+    const pageNumber = Math.max(1, parseInt(page) || 1);
+    const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 20));
+
+    const products = await this.productService.getProductsBySellerId(
+      sellerId,
+      pageNumber,
+      limitNumber
+    );
+
+    return this.sendResponse(res, 200, 'Seller products retrieved successfully', products);
   }
 
   @httpPut('/:id')

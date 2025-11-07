@@ -16,5 +16,6 @@ export * from './ViewTrackingService';
 export * from './ShippingZoneService';
 export * from './AttributeService';
 export * from './AttributeValueService';
+export * from './SellerService';
 
 export * from './NewCategoryService';

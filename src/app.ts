@@ -82,6 +82,8 @@ import {
   AttributeService,
   IAttributeValueService,
   AttributeValueService,
+  ISellerService,
+  SellerService,
 } from './services';
 import { OptionalAuth, RequireAdmin, RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
 
@@ -131,6 +133,7 @@ container.bind<IViewTrackingService>(TYPES.ViewTrackingService).to(ViewTrackingS
 container.bind<IShippingZoneService>(TYPES.ShippingZoneService).to(ShippingZoneService);
 container.bind<IAttributeService>(TYPES.AttributeService).to(AttributeService);
 container.bind<IAttributeValueService>(TYPES.AttributeValueService).to(AttributeValueService);
+container.bind<ISellerService>(TYPES.SellerService).to(SellerService);
 
 const server = new InversifyExpressServer(container);
 
