@@ -27,12 +27,12 @@ export class AddressService extends BaseService implements IAddressService {
   }
 
   async findDefaultAddress(userId: string): Promise<IAddress | null> {
-    return this.Address.findOne({ user: userId, default: true });
+    return this.Address.findOne({ user: userId, isDefault: true });
   }
 
   async setDefaultAddress(userId: string, addressId: string): Promise<IAddress> {
-    await this.Address.updateMany({ user: userId }, { $set: { default: false } });
-    const updatedAddress = await this.Address.findByIdAndUpdate(addressId, { $set: { default: true } }, { new: true });
+    await this.Address.updateMany({ user: userId }, { $set: { isDefault: false } });
+    const updatedAddress = await this.Address.findByIdAndUpdate(addressId, { $set: { isDefault: true } }, { new: true });
 
     if (!updatedAddress) throw new AppError('Address not found', 404);
     return updatedAddress;
@@ -40,7 +40,7 @@ export class AddressService extends BaseService implements IAddressService {
 
   async addAddress(address: addressDTO): Promise<IAddress> {
     if (address.isDefault) {
-      await this.Address.updateMany({ user: address.user }, { $set: { default: false } });
+      await this.Address.updateMany({ user: address.user }, { $set: { isDefault: false } });
     }
     const newAddress = await this.Address.create(address);
     return newAddress;
@@ -48,7 +48,7 @@ export class AddressService extends BaseService implements IAddressService {
 
   async updateAddress(address: addressDTO, id: string): Promise<IAddress> {
     if (address.isDefault) {
-      await this.Address.updateMany({ user: address.user }, { $set: { default: false } });
+      await this.Address.updateMany({ user: address.user }, { $set: { isDefault: false } });
     }
     console.log(address);
     const updatedAddress = await this.Address.findByIdAndUpdate(id, address, { new: true });
