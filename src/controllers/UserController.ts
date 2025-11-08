@@ -316,4 +316,28 @@ export class UserController extends BaseController {
       return this.sendResponse(res, 400, 'Unable to remove push token');
     }
   }
+
+  // ──────────────────────────── TEST NOTIFICATION ────────────────────────────────
+  @httpPost('/test-notification', TYPES.RequireSignIn)
+  public async sendTestNotification(@response() res: Response) {
+    try {
+      const userId = res.locals.user;
+
+      // Send a test notification
+      await this.notificationService.sendPushNotification(
+        userId,
+        'Test Notification 🎉',
+        'This is a test notification from VOG! Tap to open the app.',
+        {
+          type: 'test',
+          timestamp: new Date().toISOString(),
+        }
+      );
+
+      return this.sendResponse(res, 200, 'Test notification sent successfully');
+    } catch (error) {
+      console.error('Error sending test notification:', error);
+      return this.sendResponse(res, 500, 'Unable to send test notification');
+    }
+  }
 }
