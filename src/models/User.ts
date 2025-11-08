@@ -32,6 +32,7 @@ export interface IUser extends Document {
   socialLogin: ISocialLogin[];
   seller?: PopulatedDoc<ISeller>;
   wishlist: Schema.Types.ObjectId[]; // Array of product IDs for the wishlist
+  pushTokens: string[]; // Array of Expo push tokens for notifications
   createdAt: Date;
   updatedAt: Date;
 }
@@ -136,6 +137,11 @@ const userSchema: Schema = new Schema<IUser>(
       {
         type: Schema.Types.ObjectId,
         ref: PRODUCT, // Reference to the Product model
+      },
+    ],
+    pushTokens: [
+      {
+        type: String,
       },
     ],
   },

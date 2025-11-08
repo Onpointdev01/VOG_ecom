@@ -52,6 +52,7 @@
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.4.5",
+    "expo-server-sdk": "^4.0.0",
     "express": "^4.19.2",
     "google-auth-library": "^9.13.0",
     "inversify": "^6.0.2",

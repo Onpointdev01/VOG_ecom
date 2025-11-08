@@ -16,6 +16,7 @@ import { Response } from 'express';
 import { BaseController } from './BaseController';
 import TYPES from '../di';
 import { IAddressService, IUserService, IViewTrackingService } from '../services';
+import { NotificationService } from '../services/NotificationService';
 import { IUser } from '../models/User';
 import { addressDTO } from '../utils/dtos';
 import { mapUserProfile } from '../utils/helpers';
@@ -25,7 +26,8 @@ export class UserController extends BaseController {
   constructor(
     @inject(TYPES.UserService) private userService: IUserService,
     @inject(TYPES.AddressService) private addressService: IAddressService,
-    @inject(TYPES.ViewTrackingService) private viewTrackingService: IViewTrackingService
+    @inject(TYPES.ViewTrackingService) private viewTrackingService: IViewTrackingService,
+    @inject(TYPES.NotificationService) private notificationService: NotificationService
   ) {
     super();
   }
@@ -281,6 +283,37 @@ export class UserController extends BaseController {
     } catch (error) {
       console.error('Error fetching last viewed products:', error);
       return this.sendResponse(res, 404, 'Unable to fetch last viewed products');
+    }
+  }
+
+  // ──────────────────────────── PUSH NOTIFICATIONS ───────────────────────────────
+  @httpPost('/push-token', TYPES.RequireSignIn)
+  public async savePushToken(
+    @requestBody() { token }: { token: string },
+    @response() res: Response
+  ) {
+    try {
+      const userId = res.locals.user;
+      await this.notificationService.savePushToken(userId, token);
+      return this.sendResponse(res, 200, 'Push token saved successfully');
+    } catch (error) {
+      console.error('Error saving push token:', error);
+      return this.sendResponse(res, 400, 'Unable to save push token');
+    }
+  }
+
+  @httpDelete('/push-token', TYPES.RequireSignIn)
+  public async removePushToken(
+    @requestBody() { token }: { token: string },
+    @response() res: Response
+  ) {
+    try {
+      const userId = res.locals.user;
+      await this.notificationService.removePushToken(userId, token);
+      return this.sendResponse(res, 200, 'Push token removed successfully');
+    } catch (error) {
+      console.error('Error removing push token:', error);
+      return this.sendResponse(res, 400, 'Unable to remove push token');
     }
   }
 }
