@@ -693,18 +693,21 @@ export class ProductService extends BaseService implements IProductService {
   ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}> {
     const skip = (page - 1) * limit;
 
+    // Convert categoryId to ObjectId for proper matching
+    const categoryObjectId = new mongoose.Types.ObjectId(categoryId);
+
     // Build category filter
-    let categoryFilter: any = { 'categoryData._id': categoryId };
+    let categoryFilter: any = { 'categoryData._id': categoryObjectId };
 
     if (includeSubcategories) {
       // Get all subcategories of the given category
       const Category = this.Product.db.model('Category');
-      const subcategories = await Category.find({ parent: categoryId });
+      const subcategories = await Category.find({ parent: categoryObjectId });
       const subcategoryIds = subcategories.map(sub => sub._id);
 
       // Include main category and all its subcategories
       categoryFilter = {
-        'categoryData._id': { $in: [categoryId, ...subcategoryIds] }
+        'categoryData._id': { $in: [categoryObjectId, ...subcategoryIds] }
       };
     }
 
