@@ -14,6 +14,7 @@ import { Response } from 'express';
 import TYPES from '../di';
 import { AdminService, CreateAdminRequest } from '../services/AdminService';
 import { IProductBidService, IBidMessageService } from '../services';
+import { OrderService } from '../services/OrderService';
 import { BaseController } from './BaseController';
 import AppError from '../utils/errors/AppError';
 
@@ -38,7 +39,8 @@ export class AdminController extends BaseController {
   constructor(
     @inject(TYPES.AdminService) private adminService: AdminService,
     @inject(TYPES.ProductBidService) private productBidService: IProductBidService,
-    @inject(TYPES.BidMessageService) private bidMessageService: IBidMessageService
+    @inject(TYPES.BidMessageService) private bidMessageService: IBidMessageService,
+    @inject(TYPES.OrderService) private orderService: OrderService
   ) {
     super();
   }
@@ -551,13 +553,10 @@ export class AdminController extends BaseController {
   ) {
     const { orderStatus } = payload;
 
-    const validStatuses = ['PENDING', 'CONFIRMED', 'OUT_FOR_DELIVERY', 'COMPLETE', 'CANCELLED'];
-    if (!validStatuses.includes(orderStatus)) {
-      throw new AppError('Invalid order status', 400);
-    }
+    // Use OrderService instead of AdminService to ensure notifications are sent
+    // OrderService handles validation, status transitions, cart clearing, and push notifications
+    const order = await this.orderService.updateOrderStatus(orderId, orderStatus);
 
-    const order = await this.adminService.updateOrderStatus(orderId, orderStatus);
-    
     return this.sendResponse(res, 200, 'Order status updated successfully', order);
   }
 

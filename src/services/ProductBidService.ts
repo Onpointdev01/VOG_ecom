@@ -3,6 +3,7 @@ import TYPES from '../di';
 import { IBid, IProduct, IUser } from '../models';
 import { Model } from 'mongoose';
 import AppError from '../utils/errors/AppError';
+import { NotificationService } from './NotificationService';
 
 export interface IProductBidService {
   validateBidSubmission(
@@ -38,7 +39,8 @@ export class ProductBidService implements IProductBidService {
   constructor(
     @inject(TYPES.User) private User: Model<IUser>,
     @inject(TYPES.Product) private Product: Model<IProduct>,
-    @inject(TYPES.Bid) private Bid: Model<IBid>
+    @inject(TYPES.Bid) private Bid: Model<IBid>,
+    @inject(TYPES.NotificationService) private notificationService: NotificationService
   ) {}
 
   async validateBidSubmission(
@@ -139,7 +141,7 @@ export class ProductBidService implements IProductBidService {
    * Handle bid acceptance by seller
    */
   async acceptBid(bidId: string, sellerId: string): Promise<IBid> {
-    const bid = await this.Bid.findById(bidId);
+    const bid = await this.Bid.findById(bidId).populate('product', 'name');
 
     if (!bid) {
       throw new AppError('Bid not found', 404);
@@ -154,14 +156,32 @@ export class ProductBidService implements IProductBidService {
     bid.status = 'ACCEPTED';
     bid.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
 
-    return await bid.save();
+    const savedBid = await bid.save();
+
+    // Send push notification to buyer
+    if (bid.buyer) {
+      try {
+        const productName = (bid.product as any)?.name || 'Product';
+        await this.notificationService.sendBidAcceptedNotification(
+          bid.buyer.toString(),
+          productName,
+          bid.product.toString(),
+          bid.bidPrice
+        );
+      } catch (error) {
+        console.error('Failed to send bid accepted notification:', error);
+        // Don't throw - notification failure shouldn't fail the bid acceptance
+      }
+    }
+
+    return savedBid;
   }
 
   /**
    * Handle bid rejection by seller
    */
   async rejectBid(bidId: string, sellerId: string): Promise<IBid> {
-    const bid = await this.Bid.findById(bidId);
+    const bid = await this.Bid.findById(bidId).populate('product', 'name');
 
     if (!bid) {
       throw new AppError('Bid not found', 404);
@@ -176,7 +196,24 @@ export class ProductBidService implements IProductBidService {
     bid.status = 'REJECTED';
     bid.cooldownUntil = new Date(Date.now() + 12 * 60 * 60 * 1000); // 12 hours cooldown
 
-    return await bid.save();
+    const savedBid = await bid.save();
+
+    // Send push notification to buyer
+    if (bid.buyer) {
+      try {
+        const productName = (bid.product as any)?.name || 'Product';
+        await this.notificationService.sendBidRejectedNotification(
+          bid.buyer.toString(),
+          productName,
+          bid.product.toString()
+        );
+      } catch (error) {
+        console.error('Failed to send bid rejected notification:', error);
+        // Don't throw - notification failure shouldn't fail the bid rejection
+      }
+    }
+
+    return savedBid;
   }
 
   /**

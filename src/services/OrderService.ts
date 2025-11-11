@@ -8,6 +8,7 @@ import { Address, IAddress } from '../models/Address';
 import { PaymentOption, PaymentMethodType } from '../models/PaymentOption';
 import { PaymentService } from './PaymentService';
 import { IShippingZoneService } from './ShippingZoneService';
+import { NotificationService } from './NotificationService';
 import { PaymentMethod } from '../models/Payment';
 import AppError from '../utils/errors/AppError';
 import { TYPES } from '../di';
@@ -24,7 +25,8 @@ export interface CreateOrderRequest {
 export class OrderService extends BaseService {
   constructor(
     @inject(TYPES.PaymentService) private paymentService: PaymentService,
-    @inject(TYPES.ShippingZoneService) private shippingZoneService: IShippingZoneService
+    @inject(TYPES.ShippingZoneService) private shippingZoneService: IShippingZoneService,
+    @inject(TYPES.NotificationService) private notificationService: NotificationService
   ) {
     super();
   }
@@ -276,7 +278,7 @@ export class OrderService extends BaseService {
 
   async updateOrderStatus(orderId: string, orderStatus: string): Promise<IOrder> {
     const order = await this.verifyDoc(orderId, Order);
-    
+
     const validStatuses = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
     if (!validStatuses.includes(orderStatus)) {
       throw new AppError('Invalid order status', 400);
@@ -292,6 +294,19 @@ export class OrderService extends BaseService {
     // Clear cart when COD order is confirmed
     if (orderStatus === 'CONFIRMED' && order.paymentMethod === 'CASH_ON_DELIVERY' && previousStatus === 'PENDING') {
       await this.clearCartItems(order.user.toString(), order.cartItemIds || []);
+    }
+
+    // Send push notification for status change
+    try {
+      await this.notificationService.sendOrderStatusNotification(
+        order.user.toString(),
+        orderId,
+        orderStatus,
+        order.orderNumber
+      );
+    } catch (error) {
+      console.error('Failed to send order status notification:', error);
+      // Don't throw - notification failure shouldn't fail the order update
     }
 
     return order;
