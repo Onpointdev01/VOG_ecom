@@ -549,14 +549,13 @@ export class AdminController extends BaseController {
   public async updateOrderStatus(
     @response() res: Response,
     @requestParam('orderId') orderId: string,
-    @requestBody() payload: { orderStatus: string; skipValidation?: boolean }
+    @requestBody() payload: { orderStatus: string }
   ) {
-    const { orderStatus, skipValidation } = payload;
+    const { orderStatus } = payload;
 
     // Use OrderService instead of AdminService to ensure notifications are sent
-    // OrderService handles validation, status transitions, cart clearing, and push notifications
-    // Admin can skip validation to correct order states (e.g., OUT_FOR_DELIVERY -> CONFIRMED)
-    const order = await this.orderService.updateOrderStatus(orderId, orderStatus, skipValidation || false);
+    // OrderService handles cart clearing and push notifications
+    const order = await this.orderService.updateOrderStatus(orderId, orderStatus);
 
     return this.sendResponse(res, 200, 'Order status updated successfully', order);
   }
