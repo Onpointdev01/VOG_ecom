@@ -169,14 +169,24 @@ export class NotificationService {
     orderNumber?: string
   ): Promise<ExpoPushTicket[]> {
     const statusMessages: Record<string, string> = {
+      PENDING: 'Your order has been received',
+      CONFIRMED: 'Your order has been confirmed',
+      PROCESSING: 'Your order is being prepared',
+      SHIPPED: 'Your order has been shipped',
+      OUT_FOR_DELIVERY: 'Your order is out for delivery',
+      DELIVERED: 'Your order has been delivered',
+      COMPLETE: 'Your order is complete',
+      CANCELLED: 'Your order has been cancelled',
+      // Lowercase variants for backwards compatibility
       pending: 'Your order has been received',
-      processing: 'Your order is being processed',
+      confirmed: 'Your order has been confirmed',
+      processing: 'Your order is being prepared',
       shipped: 'Your order has been shipped',
       delivered: 'Your order has been delivered',
       cancelled: 'Your order has been cancelled',
     };
 
-    const message = statusMessages[status] || `Your order status: ${status}`;
+    const message = statusMessages[status] || `Your order status has been updated`;
     const displayOrderNumber = orderNumber || orderId.substring(0, 8);
 
     return this.sendPushNotification(
