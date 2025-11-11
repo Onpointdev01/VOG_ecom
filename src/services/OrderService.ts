@@ -276,7 +276,7 @@ export class OrderService extends BaseService {
     };
   }
 
-  async updateOrderStatus(orderId: string, orderStatus: string): Promise<IOrder> {
+  async updateOrderStatus(orderId: string, orderStatus: string, skipValidation: boolean = false): Promise<IOrder> {
     const order = await this.verifyDoc(orderId, Order);
 
     const validStatuses = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
@@ -284,8 +284,10 @@ export class OrderService extends BaseService {
       throw new AppError('Invalid order status', 400);
     }
 
-    // Validate status transitions
-    this.validateStatusTransition(order.orderStatus, orderStatus);
+    // Validate status transitions (skip for admin overrides)
+    if (!skipValidation) {
+      this.validateStatusTransition(order.orderStatus, orderStatus);
+    }
 
     const previousStatus = order.orderStatus;
     order.orderStatus = orderStatus as any;
