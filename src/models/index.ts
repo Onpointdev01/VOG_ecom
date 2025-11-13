@@ -17,5 +17,6 @@ export * from './Brand';
 export * from './ShippingZone';
 export * from './Attribute';
 export * from './AttributeValue';
+export * from './Notification';
 
 export * from './newCategory'; // This exports Category and ICategory

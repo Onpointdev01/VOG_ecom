@@ -46,7 +46,9 @@ import {
   IAttribute,
   AttributeValue,
   IAttributeValue,
+  INotification,
 } from './models';
+import Notification from './models/Notification';
 import TYPES from './di';
 
 import {
@@ -110,6 +112,7 @@ container.bind<Model<IUserView>>(TYPES.UserView).toConstantValue(UserView);
 container.bind<Model<IShippingZone>>(TYPES.ShippingZone).toConstantValue(ShippingZone);
 container.bind<Model<IAttribute>>(TYPES.Attribute).toConstantValue(Attribute);
 container.bind<Model<IAttributeValue>>(TYPES.AttributeValue).toConstantValue(AttributeValue);
+container.bind<Model<INotification>>(TYPES.Notification).toConstantValue(Notification);
 
 container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
 container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);

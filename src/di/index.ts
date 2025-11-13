@@ -17,6 +17,7 @@ export const TYPES = {
   ShippingZone: Symbol.for('ShippingZone'),
   Attribute: Symbol.for('Attribute'),
   AttributeValue: Symbol.for('AttributeValue'),
+  Notification: Symbol.for('Notification'),
 
   AuthService: Symbol.for('AuthService'),
   AdminService: Symbol.for('AdminService'),

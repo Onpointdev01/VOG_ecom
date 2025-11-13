@@ -1,6 +1,6 @@
 import { injectable, inject } from 'inversify';
 import { Model } from 'mongoose';
-import { IUser } from '../models/User';
+import { IUser, INotification } from '../models';
 import TYPES from '../di';
 import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
 
@@ -9,13 +9,43 @@ export class NotificationService {
   private expo: Expo;
 
   constructor(
-    @inject(TYPES.User) private User: Model<IUser>
+    @inject(TYPES.User) private User: Model<IUser>,
+    @inject(TYPES.Notification) private Notification: Model<INotification>
   ) {
     this.expo = new Expo();
   }
 
   /**
+   * Create an in-app notification
+   */
+  private async createInAppNotification(
+    userId: string,
+    type: 'order' | 'bid' | 'product' | 'account' | 'promotional',
+    title: string,
+    message: string,
+    data: any = {},
+    link?: string
+  ): Promise<void> {
+    try {
+      await this.Notification.create({
+        user: userId,
+        type,
+        title,
+        message,
+        body: message, // For compatibility
+        data,
+        link,
+        isRead: false,
+      });
+      console.log(`Created in-app notification for user ${userId}`);
+    } catch (error) {
+      console.error('Error creating in-app notification:', error);
+    }
+  }
+
+  /**
    * Send push notification to a specific user
+   * Also creates an in-app notification
    */
   async sendPushNotification(
     userId: string,
@@ -24,6 +54,21 @@ export class NotificationService {
     data: any = {}
   ): Promise<ExpoPushTicket[]> {
     try {
+      // Determine notification type from data
+      const type = data.type?.includes('order') ? 'order' :
+                   data.type?.includes('bid') ? 'bid' :
+                   data.type?.includes('product') || data.type?.includes('price') || data.type?.includes('flash') ? 'product' :
+                   data.type?.includes('cart') ? 'promotional' :
+                   'account';
+
+      // Create in-app notification
+      const link = data.orderId ? `/(app)/orders/${data.orderId}` :
+                   data.productId ? `/(app)/product/${data.productId}` :
+                   undefined;
+
+      await this.createInAppNotification(userId, type, title, body, data, link);
+
+      // Send push notification
       const user = await this.User.findById(userId);
       if (!user || !user.pushTokens || user.pushTokens.length === 0) {
         console.log(`No push tokens found for user: ${userId}`);
