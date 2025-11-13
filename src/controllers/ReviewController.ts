@@ -8,8 +8,9 @@ import {
   requestParam,
   requestBody,
   response,
+  request,
 } from 'inversify-express-utils';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
@@ -23,8 +24,21 @@ export class ReviewController extends BaseController {
   }
 
   @httpPost('/', TYPES.RequireSignIn)
-  async createReview(@response() res: Response, @requestBody() payload: Partial<IReview>) {
-    const newReview = await this.reviewService.createReview(payload);
+  async createReview(
+    @request() req: Request,
+    @response() res: Response,
+    @requestBody() payload: Partial<IReview>
+  ) {
+    // Extract user ID from authenticated request (res.locals.user is set by RequireSignIn middleware)
+    const authenticatedUserId = res.locals.user || req.user?._id?.toString();
+
+    // Always use authenticated user ID to prevent users from submitting reviews on behalf of others
+    const reviewPayload = {
+      ...payload,
+      user: authenticatedUserId,
+    };
+
+    const newReview = await this.reviewService.createReview(reviewPayload);
     return this.sendResponse(res, 201, 'Review created successfully', newReview);
   }
 
