@@ -167,8 +167,9 @@ export class UserController extends BaseController {
     try {
       const wishlist = await this.userService.getWishlist(res.locals.user);
       return this.sendResponse(res, 200, 'Wishlist fetched successfully', wishlist);
-    } catch {
-      return this.sendResponse(res, 404, 'Unable to fetch wishlist');
+    } catch (error) {
+      console.error('Error fetching wishlist:', error);
+      return this.sendResponse(res, 500, 'Unable to fetch wishlist');
     }
   }
 
@@ -180,8 +181,11 @@ export class UserController extends BaseController {
     try {
       const product = await this.userService.addToWishlist(res.locals.user, productId);
       return this.sendResponse(res, 200, 'Item added to wishlist successfully', product);
-    } catch {
-      return this.sendResponse(res, 404, 'Unable to add item to wishlist');
+    } catch (error) {
+      console.error('Error adding to wishlist:', error);
+      const message = error instanceof Error ? error.message : 'Unable to add item to wishlist';
+      const status = error instanceof Error && error.message.includes('not found') ? 404 : 500;
+      return this.sendResponse(res, status, message);
     }
   }
 
@@ -192,9 +196,12 @@ export class UserController extends BaseController {
   ) {
     try {
       await this.userService.removeFromWishlist(res.locals.user, productId);
-      return this.sendResponse(res, 204, '');
-    } catch {
-      return this.sendResponse(res, 404, 'Unable to remove item from wishlist');
+      return this.sendResponse(res, 200, 'Item removed from wishlist successfully');
+    } catch (error) {
+      console.error('Error removing from wishlist:', error);
+      const message = error instanceof Error ? error.message : 'Unable to remove item from wishlist';
+      const status = error instanceof Error && error.message.includes('not found') ? 404 : 500;
+      return this.sendResponse(res, status, message);
     }
   }
 
