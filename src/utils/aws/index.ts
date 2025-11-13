@@ -68,7 +68,7 @@ const upload = multer({
         let key = `${timestamp}-${fileName}`;
 
         //Create sub folders in S3 bucket based on field name and purpose
-        if (file.fieldname === 'profileImageUrl') {
+        if (file.fieldname === 'profileImageUrl' || file.fieldname === 'profilePicture') {
           key = `profile-images/${key}`;
         } else if (file.fieldname === 'images' || file.fieldname === 'image') {
           key = `product-images/${key}`;

@@ -11,6 +11,8 @@ import { nonUpdatableFields } from '../utils/helpers';
 export interface IUserService {
   getUserProfile(userId: string): Promise<IUser>;
   updateUserProfile(userId: string, payload: Partial<IUser>): Promise<IUser>;
+  updateProfilePicture(userId: string, imageUrl: string): Promise<IUser>;
+  removeProfilePicture(userId: string): Promise<IUser>;
   setAccountType(userId: string, type: 'buyer' | 'seller'): Promise<IUser>;
   getAllUsers(): Promise<IUser[]>;
   getWishlist(userId: string): Promise<IUser['wishlist']>;
@@ -40,6 +42,35 @@ export class UserService extends BaseService implements IUserService {
       (value: unknown, key: string) => value !== undefined && !nonUpdatableFields.includes(key)
     );
     const updatedUser = await this.User.findByIdAndUpdate(userId, filteredPayload, { new: true });
+    if (!updatedUser) throw new AppError('User not found', 404);
+    return updatedUser;
+  }
+
+  async updateProfilePicture(userId: string, imageUrl: string): Promise<IUser> {
+    const updatedUser = await this.User.findByIdAndUpdate(
+      userId,
+      { profileImageUrl: imageUrl },
+      { new: true }
+    );
+    if (!updatedUser) throw new AppError('User not found', 404);
+    return updatedUser;
+  }
+
+  async removeProfilePicture(userId: string): Promise<IUser> {
+    const user = await this.User.findById(userId);
+    if (!user) throw new AppError('User not found', 404);
+
+    // Generate default avatar using ui-avatars.com
+    const firstName = user.firstName || '';
+    const lastName = user.lastName || '';
+    const name = `${firstName}+${lastName}`;
+    const defaultAvatar = `https://ui-avatars.com/api/?background=random&name=${name}`;
+
+    const updatedUser = await this.User.findByIdAndUpdate(
+      userId,
+      { profileImageUrl: defaultAvatar },
+      { new: true }
+    );
     if (!updatedUser) throw new AppError('User not found', 404);
     return updatedUser;
   }

@@ -10,8 +10,9 @@ import {
   httpDelete,
   httpPatch,
   queryParam,
+  request,
 } from 'inversify-express-utils';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
@@ -20,6 +21,7 @@ import { NotificationService } from '../services/NotificationService';
 import { IUser } from '../models/User';
 import { addressDTO } from '../utils/dtos';
 import { mapUserProfile } from '../utils/helpers';
+import upload from '../utils/aws';
 
 @controller('/api/v1/user')
 export class UserController extends BaseController {
@@ -53,6 +55,50 @@ export class UserController extends BaseController {
       return this.sendResponse(res, 200, 'User profile updated successfully', filteredProfile);
     } catch {
       return this.sendResponse(res, 404, 'Unable to update user profile');
+    }
+  }
+
+  // ──────────────────────────────── PROFILE PICTURE ──────────────────────────────
+  @httpPut('/profile', TYPES.RequireSignIn, upload.single('profilePicture'))
+  public async uploadProfilePicture(
+    @request() req: Request,
+    @response() res: Response
+  ) {
+    try {
+      const userId = res.locals.user;
+      const file = req.file as Express.MulterS3.File;
+
+      if (!file) {
+        return this.sendResponse(res, 400, 'No file uploaded');
+      }
+
+      // Get the S3 URL from the uploaded file
+      const imageUrl = file.location;
+
+      // Update user profile with new image URL
+      const updatedProfile = await this.userService.updateProfilePicture(userId, imageUrl);
+      const filteredProfile = mapUserProfile(updatedProfile);
+
+      return this.sendResponse(res, 200, 'Profile picture uploaded successfully', filteredProfile);
+    } catch (error) {
+      console.error('Error uploading profile picture:', error);
+      const message = error instanceof Error ? error.message : 'Unable to upload profile picture';
+      return this.sendResponse(res, 500, message);
+    }
+  }
+
+  @httpDelete('/profile-picture', TYPES.RequireSignIn)
+  public async removeProfilePicture(@response() res: Response) {
+    try {
+      const userId = res.locals.user;
+      const updatedProfile = await this.userService.removeProfilePicture(userId);
+      const filteredProfile = mapUserProfile(updatedProfile);
+
+      return this.sendResponse(res, 200, 'Profile picture removed successfully', filteredProfile);
+    } catch (error) {
+      console.error('Error removing profile picture:', error);
+      const message = error instanceof Error ? error.message : 'Unable to remove profile picture';
+      return this.sendResponse(res, 500, message);
     }
   }
 
