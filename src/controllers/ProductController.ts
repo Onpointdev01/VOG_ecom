@@ -91,9 +91,10 @@ export class ProductController extends BaseController {
 
   @httpGet('/', joiMiddleware(getAllProductsSchema, 'query'), TYPES.OptionalAuth)
   async getAllProducts(@request() req: Request, @response() res: Response, @queryParam() query: getAllProductsQuery) {
-    const { 
-      isFlash, 
-      category, 
+    const {
+      isFlash,
+      isRecommended,
+      category,
       search,
       sortBy,
       sortOrder,
@@ -104,10 +105,13 @@ export class ProductController extends BaseController {
       page,
       limit
     } = query;
-    
+
     const filter: FilterQuery<IProduct> = {};
     if (isFlash) {
       filter.isFlash = isFlash === '1';
+    }
+    if (isRecommended) {
+      filter.isRecommended = isRecommended === '1';
     }
     if (condition) {
       filter.condition = condition;

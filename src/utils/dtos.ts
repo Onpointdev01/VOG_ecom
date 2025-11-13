@@ -87,6 +87,7 @@ export interface getAllProductsResponse {
 
 export interface getAllProductsQuery {
   isFlash?: string | boolean;
+  isRecommended?: string | boolean;
   category?: string;
   search?: string;
   sortBy?: string;
