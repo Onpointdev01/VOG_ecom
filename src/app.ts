@@ -180,7 +180,7 @@ server.setConfig((app) => {
     : [];
   
   // Always include localhost development ports (3000, 3001, 3002) for local development
-  const defaultLocalhostPorts = ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002'];
+  const defaultLocalhostPorts = ['https://stcaeladmin.vercel.app/', 'st-cael-seller.vercel.app', 'st-cael-website.vercel.app'];
   const allowedOrigins = Array.from(new Set([...envOrigins, ...defaultLocalhostPorts])); // Remove duplicates
 
   console.log('🔒 CORS Configuration:', {
