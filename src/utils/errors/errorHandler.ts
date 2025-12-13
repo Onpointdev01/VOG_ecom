@@ -49,8 +49,13 @@ const errorMiddleWare = async (error: AppError, req: Request, res: Response, nex
     error.statusCode = 500;
   }
 
-  if (NODE_ENV !== DEVELOPMENT && error.statusCode >= 500) {
+  // Always show error message in development
+  // In production, only hide error details for non-operational 500+ errors
+  if (NODE_ENV !== DEVELOPMENT && error.statusCode >= 500 && !error.isOperational) {
     body.message = 'Something went very wrong';
+  } else {
+    // In development or for operational errors, show the actual error message
+    body.message = error.message || 'An error occurred';
   }
 
   res.status(error.statusCode).json(body);

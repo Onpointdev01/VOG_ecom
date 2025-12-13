@@ -64,7 +64,9 @@ if (require.main === module) {
   (async () => {
     try {
       // Connect to database
-      await mongoose.connect(env.MONGO_URL as string);
+      await mongoose.connect(env.MONGO_URL as string, {
+        serverSelectionTimeoutMS: 5000, // fail fast if DNS fails
+      });
       console.log('📦 Connected to database');
 
       // Run seed

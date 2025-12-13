@@ -18,5 +18,9 @@ export * from './ShippingZone';
 export * from './Attribute';
 export * from './AttributeValue';
 export * from './Notification';
+export * from './TokenBlacklist';
+export * from './Payout';
+export * from './AuditLog';
+export * from './BidOffer';
 
 export * from './newCategory'; // This exports Category and ICategory

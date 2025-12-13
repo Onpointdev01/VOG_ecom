@@ -109,35 +109,30 @@ export class UserService extends BaseService implements IUserService {
   }
 
   async addToWishlist(userId: string, productId: any): Promise<IProduct> {
-    const user = await this.User.findById(userId);
-    if (!user) throw new AppError('User not found', 404);
-
-    const isAlreadyInWishlist = user.wishlist.some(
-      (item) => item.toString() === productId.toString()
-    );
-    if (!isAlreadyInWishlist) {
-      user.wishlist.push(productId);
-      await user.save();
-    }
-
     const product = await this.Product.findById(productId);
     if (!product) throw new AppError('Product not found', 404);
+
+    // Use updateOne with $addToSet to avoid full document validation
+    await this.User.updateOne(
+      { _id: userId },
+      { $addToSet: { wishlist: productId } }
+    );
 
     return product;
   }
 
   async removeFromWishlist(userId: string, productId: any): Promise<void> {
-    const user = await this.User.findById(userId);
-    if (!user) throw new AppError('User not found', 404);
-
-    const isInWishlist = user.wishlist.some(
-      (item) => item.toString() === productId.toString()
+    // Use updateOne with $pull to avoid full document validation
+    const result = await this.User.updateOne(
+      { _id: userId, wishlist: productId },
+      { $pull: { wishlist: productId } }
     );
-    if (!isInWishlist) throw new AppError('Product not found in wishlist', 404);
 
-    user.wishlist = user.wishlist.filter(
-      (wishlistItem) => wishlistItem.toString() !== productId.toString()
-    );
-    await user.save();
+    if (result.matchedCount === 0) {
+      // Check if user exists or product not in wishlist
+      const user = await this.User.findById(userId);
+      if (!user) throw new AppError('User not found', 404);
+      throw new AppError('Product not found in wishlist', 404);
+    }
   }
 }

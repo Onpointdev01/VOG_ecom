@@ -16,7 +16,7 @@ import { Model } from 'mongoose';
 import { BaseController } from './BaseController';
 import TYPES from '../di';
 import { IBidMessageService } from '../services';
-import { IUser, INotification } from '../models';
+import { IUser, IAdmin, INotification } from '../models';
 
 @controller('/api/v1/notifications')
 export class NotificationController extends BaseController {
@@ -28,21 +28,38 @@ export class NotificationController extends BaseController {
   }
 
   /**
-   * Get all notifications for the authenticated user
+   * Get all notifications for the authenticated user or admin
    */
-  @httpGet('/', TYPES.RequireSignIn)
+  @httpGet('/', TYPES.RequireAuth)
   async getNotifications(
     @response() res: Response,
     @request() req: Request
   ) {
     try {
-      const user = req.user as IUser;
+      // Check if it's an admin request
+      const admin = (req as any).admin as IAdmin;
+      if (admin) {
+        console.log(`📬 Fetching notifications for admin ${admin._id}`);
+        const notifications = await this.Notification.find({ adminId: admin._id })
+          .sort({ createdAt: -1 })
+          .limit(100)
+          .lean();
+        console.log(`✅ Found ${notifications.length} notifications for admin`);
+        return this.sendResponse(res, 200, 'Notifications retrieved successfully', notifications);
+      }
 
+      // Otherwise, it's a user request
+      const user = req.user as IUser;
+      if (!user) {
+        return this.sendResponse(res, 401, 'Authentication required', null);
+      }
+
+      console.log(`📬 Fetching notifications for user ${user._id}`);
       const notifications = await this.Notification.find({ user: user._id })
         .sort({ createdAt: -1 })
         .limit(100) // Limit to last 100 notifications
         .lean();
-
+      console.log(`✅ Found ${notifications.length} notifications for user`);
       return this.sendResponse(res, 200, 'Notifications retrieved successfully', notifications);
     } catch (error) {
       console.error('Error fetching notifications:', error);
@@ -53,20 +70,32 @@ export class NotificationController extends BaseController {
   /**
    * Mark a single notification as read
    */
-  @httpPatch('/:id/read', TYPES.RequireSignIn)
+  @httpPatch('/:id/read', TYPES.RequireAuth)
   async markAsRead(
     @response() res: Response,
     @request() req: Request,
     @requestParam('id') notificationId: string
   ) {
     try {
+      const admin = (req as any).admin as IAdmin;
       const user = req.user as IUser;
 
-      const notification = await this.Notification.findOneAndUpdate(
-        { _id: notificationId, user: user._id },
-        { isRead: true },
-        { new: true }
-      );
+      let notification;
+      if (admin) {
+        notification = await this.Notification.findOneAndUpdate(
+          { _id: notificationId, adminId: admin._id },
+          { isRead: true },
+          { new: true }
+        );
+      } else if (user) {
+        notification = await this.Notification.findOneAndUpdate(
+          { _id: notificationId, user: user._id },
+          { isRead: true },
+          { new: true }
+        );
+      } else {
+        return this.sendResponse(res, 401, 'Authentication required', null);
+      }
 
       if (!notification) {
         return this.sendResponse(res, 404, 'Notification not found', null);
@@ -80,20 +109,30 @@ export class NotificationController extends BaseController {
   }
 
   /**
-   * Mark all notifications as read for the user
+   * Mark all notifications as read for the user or admin
    */
-  @httpPatch('/read-all', TYPES.RequireSignIn)
+  @httpPatch('/read-all', TYPES.RequireAuth)
   async markAllAsRead(
     @response() res: Response,
     @request() req: Request
   ) {
     try {
+      const admin = (req as any).admin as IAdmin;
       const user = req.user as IUser;
 
-      await this.Notification.updateMany(
-        { user: user._id, isRead: false },
-        { isRead: true }
-      );
+      if (admin) {
+        await this.Notification.updateMany(
+          { adminId: admin._id, isRead: false },
+          { isRead: true }
+        );
+      } else if (user) {
+        await this.Notification.updateMany(
+          { user: user._id, isRead: false },
+          { isRead: true }
+        );
+      } else {
+        return this.sendResponse(res, 401, 'Authentication required', null);
+      }
 
       return this.sendResponse(res, 200, 'All notifications marked as read', null);
     } catch (error) {
@@ -105,19 +144,30 @@ export class NotificationController extends BaseController {
   /**
    * Delete a single notification
    */
-  @httpDelete('/:id', TYPES.RequireSignIn)
+  @httpDelete('/:id', TYPES.RequireAuth)
   async deleteNotification(
     @response() res: Response,
     @request() req: Request,
     @requestParam('id') notificationId: string
   ) {
     try {
+      const admin = (req as any).admin as IAdmin;
       const user = req.user as IUser;
 
-      const notification = await this.Notification.findOneAndDelete({
-        _id: notificationId,
-        user: user._id,
-      });
+      let notification;
+      if (admin) {
+        notification = await this.Notification.findOneAndDelete({
+          _id: notificationId,
+          adminId: admin._id,
+        });
+      } else if (user) {
+        notification = await this.Notification.findOneAndDelete({
+          _id: notificationId,
+          user: user._id,
+        });
+      } else {
+        return this.sendResponse(res, 401, 'Authentication required', null);
+      }
 
       if (!notification) {
         return this.sendResponse(res, 404, 'Notification not found', null);

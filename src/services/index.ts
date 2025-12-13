@@ -17,5 +17,8 @@ export * from './ShippingZoneService';
 export * from './AttributeService';
 export * from './AttributeValueService';
 export * from './SellerService';
+export * from './PayoutService';
+export * from './SKUService';
+export * from './TranslationService';
 
 export * from './NewCategoryService';

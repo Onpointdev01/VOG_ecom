@@ -8,9 +8,14 @@ export interface IBidMessages extends Document {
   recipient: Schema.Types.ObjectId;
   product: Schema.Types.ObjectId;
   bid?: Schema.Types.ObjectId;
-  type: 'BID_PROPOSAL' | 'BID_ACCEPTED' | 'BID_REJECTED' | 'SYSTEM' | 'PRODUCT_INQUIRY';
+  type: 'BID_PROPOSAL' | 'BID_ACCEPTED' | 'BID_REJECTED' | 'SYSTEM' | 'PRODUCT_INQUIRY' | 'COUNTER_OFFER';
   message: string;
+  attachments?: string[]; // Array of attachment URLs
+  is_deleted: boolean;
+  deleted_by?: Schema.Types.ObjectId; // User who deleted (admin or owner)
+  deleted_at?: Date;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 const BidMessagesSchema: Schema<IBidMessages> = new Schema<IBidMessages>(
@@ -36,12 +41,30 @@ const BidMessagesSchema: Schema<IBidMessages> = new Schema<IBidMessages>(
     },
     type: {
       type: String,
-      enum: ['BID_PROPOSAL', 'BID_ACCEPTED', 'BID_REJECTED', 'SYSTEM', 'PRODUCT_INQUIRY'],
+      enum: ['BID_PROPOSAL', 'BID_ACCEPTED', 'BID_REJECTED', 'SYSTEM', 'PRODUCT_INQUIRY', 'COUNTER_OFFER'],
       required: true,
     },
     message: {
       type: String,
       required: true,
+    },
+    attachments: {
+      type: [String],
+      default: [],
+    },
+    is_deleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deleted_by: {
+      type: Schema.Types.ObjectId,
+      ref: USER,
+      default: null,
+    },
+    deleted_at: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true }

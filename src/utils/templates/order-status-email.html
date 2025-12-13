@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Order Status Update</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f4f4f4;
+        color: #333;
+      }
+      .container {
+        max-width: 600px;
+        margin: 20px auto;
+        padding: 20px;
+        background: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 20px;
+        padding: 20px;
+        background: linear-gradient(135deg, #00b517 0%, #00a015 100%);
+        border-radius: 8px;
+        color: white;
+      }
+      .header h1 {
+        margin: 0;
+        font-size: 28px;
+      }
+      .content {
+        font-size: 16px;
+        line-height: 1.6;
+        margin-bottom: 20px;
+      }
+      .order-info {
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-left: 4px solid #00b517;
+        margin: 20px 0;
+        border-radius: 4px;
+      }
+      .status-info {
+        background-color: #d4edda;
+        padding: 15px;
+        border-left: 4px solid #28a745;
+        margin: 20px 0;
+        border-radius: 4px;
+      }
+      .status-cancelled {
+        background-color: #f8d7da;
+        border-left-color: #dc3545;
+      }
+      .button-container {
+        text-align: center;
+        margin: 30px 0;
+      }
+      .button {
+        display: inline-block;
+        background-color: #00b517;
+        color: #ffffff;
+        padding: 15px 30px;
+        border-radius: 5px;
+        text-decoration: none;
+        font-weight: bold;
+        font-size: 18px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        transition: background-color 0.3s;
+      }
+      .button:hover {
+        background-color: #00a015;
+      }
+      .footer {
+        text-align: center;
+        font-size: 14px;
+        color: #888;
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 1px solid #eee;
+      }
+      .footer a {
+        color: #00b517;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>{{statusIcon}} Order Update</h1>
+      </div>
+      <div class="content">
+        <p>Hi {{firstName}},</p>
+        <p>{{statusMessage}}</p>
+        
+        <div class="order-info">
+          <strong>Order Number:</strong> #{{orderNumber}}<br>
+          <strong>Status:</strong> {{status}}
+        </div>
+        
+        <div class="status-info {{statusClass}}">
+          <p><strong>{{statusTitle}}</strong></p>
+          <p>{{statusDescription}}</p>
+        </div>
+        
+        <div class="button-container">
+          <a href="{{orderLink}}" class="button">View Order Details</a>
+        </div>
+        
+        <p>Thank you for shopping with St-Caël.</p>
+      </div>
+      <div class="footer">
+        <p>&copy; {{year}} St-Caël. All rights reserved.</p>
+        <p>
+          <a href="{{frontendUrl}}/Profile?tab=orders">View All Orders</a> |
+          <a href="{{frontendUrl}}">Visit St-Caël</a>
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
+

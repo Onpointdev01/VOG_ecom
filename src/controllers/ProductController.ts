@@ -17,7 +17,7 @@ import { FilterQuery } from 'mongoose';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
-import { IProductBidService, IProductService, IReviewService, IViewTrackingService, IBidMessageService } from '../services';
+import { IProductBidService, IProductService, IReviewService, IViewTrackingService, IBidMessageService, ITranslationService } from '../services';
 import { IProduct } from '../models';
 import { createProductDTO, createReviewDTO, getAllProductsQuery } from '../utils/dtos';
 import { getAllProductsSchema } from '../validators';
@@ -29,9 +29,106 @@ export class ProductController extends BaseController {
     @inject(TYPES.ProductBidService) private productBidService: IProductBidService,
     @inject(TYPES.ReviewService) private reviewService: IReviewService,
     @inject(TYPES.ViewTrackingService) private viewTrackingService: IViewTrackingService,
-    @inject(TYPES.BidMessageService) private bidMessageService: IBidMessageService
+    @inject(TYPES.BidMessageService) private bidMessageService: IBidMessageService,
+    @inject(TYPES.TranslationService) private translationService: ITranslationService
   ) {
     super();
+  }
+
+  /**
+   * Get target language from Accept-Language header
+   * Defaults to 'fr' if not specified
+   */
+  private getTargetLanguage(req: Request): string {
+    const acceptLanguage = req.headers['accept-language'];
+    if (acceptLanguage) {
+      // Parse Accept-Language header (e.g., "fr-FR,fr;q=0.9,en;q=0.8")
+      const languages = acceptLanguage.split(',').map(lang => {
+        const parts = lang.split(';');
+        return parts[0].trim().toLowerCase().split('-')[0]; // Get language code (fr, en, etc.)
+      });
+      // Return first language if it's 'fr' or 'en', otherwise default to 'fr'
+      const lang = languages[0];
+      return (lang === 'fr' || lang === 'en') ? lang : 'fr';
+    }
+    return 'fr'; // Default to French
+  }
+
+  /**
+   * Translate product data using Microsoft Translator API
+   */
+  private async translateProductData(product: any, targetLanguage: string): Promise<any> {
+    // If target language is French (default), no translation needed
+    if (targetLanguage === 'fr') {
+      return product;
+    }
+
+    try {
+      // Collect all text fields that need translation
+      const textsToTranslate: string[] = [];
+      const textFields: string[] = [];
+
+      if (product.name) {
+        textsToTranslate.push(product.name);
+        textFields.push('name');
+      }
+      if (product.description) {
+        textsToTranslate.push(product.description);
+        textFields.push('description');
+      }
+      if (product.brand) {
+        textsToTranslate.push(product.brand);
+        textFields.push('brand');
+      }
+      if (product.category?.name) {
+        textsToTranslate.push(product.category.name);
+        textFields.push('category.name');
+      }
+      if (product.owner?.name) {
+        textsToTranslate.push(product.owner.name);
+        textFields.push('owner.name');
+      }
+
+      // Translate all texts in batch
+      if (textsToTranslate.length > 0) {
+        const translations = await this.translationService.translateBatch(textsToTranslate, targetLanguage, 'fr');
+
+        // Apply translations to product
+        let translationIndex = 0;
+        if (product.name) {
+          product.name = translations[translationIndex++];
+        }
+        if (product.description) {
+          product.description = translations[translationIndex++];
+        }
+        if (product.brand) {
+          product.brand = translations[translationIndex++];
+        }
+        if (product.category?.name) {
+          product.category.name = translations[translationIndex++];
+        }
+        if (product.owner?.name) {
+          product.owner.name = translations[translationIndex++];
+        }
+      }
+    } catch (error) {
+      console.error('Error translating product:', error);
+      // Return original product if translation fails
+    }
+
+    return product;
+  }
+
+  /**
+   * Translate array of products
+   */
+  private async translateProducts(products: any[], targetLanguage: string): Promise<any[]> {
+    if (targetLanguage === 'fr') {
+      return products;
+    }
+
+    // Translate all products in parallel
+    return Promise.all(products.map(product => this.translateProductData(product, targetLanguage)));
   }
 
   @httpPost('/', TYPES.RequireSignIn, TYPES.RequireSeller)
@@ -73,7 +170,7 @@ export class ProductController extends BaseController {
   }
 
   @httpGet('/:id', TYPES.OptionalAuth)
-  async getProductById(@response() res: Response, @requestParam('id') id: string) {
+  async getProductById(@request() req: Request, @response() res: Response, @requestParam('id') id: string) {
     const product = await this.productService.getProductById(id);
     
     // Track product view if user is authenticated
@@ -86,7 +183,11 @@ export class ProductController extends BaseController {
       }
     }
     
-    return this.sendResponse(res, 200, 'Product retrieved successfully', product);
+    // Translate product based on Accept-Language header
+    const targetLanguage = this.getTargetLanguage(req);
+    const translatedProduct = await this.translateProductData(product, targetLanguage);
+    
+    return this.sendResponse(res, 200, 'Product retrieved successfully', translatedProduct);
   }
 
   @httpGet('/', joiMiddleware(getAllProductsSchema, 'query'), TYPES.OptionalAuth)
@@ -96,6 +197,7 @@ export class ProductController extends BaseController {
       isRecommended,
       category,
       search,
+      q, // Also accept 'q' for search query (for compatibility)
       sortBy,
       sortOrder,
       minPrice,
@@ -105,6 +207,14 @@ export class ProductController extends BaseController {
       page,
       limit
     } = query;
+    
+    // Use 'search' or 'q' parameter (q takes precedence if both are provided)
+    const searchQuery = q || search;
+    
+    // Debug logging
+    if (searchQuery) {
+      console.log('[ProductController] Search query received:', searchQuery);
+    }
 
     const filter: FilterQuery<IProduct> = {};
     if (isFlash) {
@@ -125,19 +235,43 @@ export class ProductController extends BaseController {
       if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
     }
     
+    // Map frontend sort values to backend sort values
+    let backendSortBy = sortBy || 'createdAt';
+    let backendSortOrder = sortOrder || 'desc';
+    
+    // Handle frontend sort options
+    if (sortBy === 'price_asc') {
+      backendSortBy = 'price';
+      backendSortOrder = 'asc';
+    } else if (sortBy === 'price_desc') {
+      backendSortBy = 'price';
+      backendSortOrder = 'desc';
+    } else if (sortBy === 'popular') {
+      backendSortBy = 'popularity';
+    } else if (sortBy === 'newest') {
+      backendSortBy = 'createdAt';
+      backendSortOrder = 'desc';
+    }
+    
     const options = {
-      sortBy: sortBy || 'createdAt',
-      sortOrder: sortOrder || 'desc',
+      sortBy: backendSortBy,
+      sortOrder: backendSortOrder,
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 20
     };
 
-    const products = await this.productService.getAllProducts(filter, category, search, res.locals.user, options);
-    return this.sendResponse(res, 200, 'Products retrieved successfully', products);
+    const products = await this.productService.getAllProducts(filter, category, searchQuery, res.locals.user, options);
+    
+    // Translate products based on Accept-Language header
+    const targetLanguage = this.getTargetLanguage(req);
+    const translatedProducts = await this.translateProducts(products, targetLanguage);
+    
+    return this.sendResponse(res, 200, 'Products retrieved successfully', translatedProducts);
   }
 
   @httpGet('/category/:categoryId')
   async getProductsByCategory(
+    @request() req: Request,
     @response() res: Response,
     @requestParam('categoryId') categoryId: string,
     @queryParam('includeSubcategories') includeSubcategories: string = 'false',
@@ -148,18 +282,26 @@ export class ProductController extends BaseController {
     const pageNumber = Math.max(1, parseInt(page) || 1);
     const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 20));
 
-    const products = await this.productService.getProductsByCategoryId(
+    const result = await this.productService.getProductsByCategoryId(
       categoryId,
       includeSubcats,
       pageNumber,
       limitNumber
     );
 
-    return this.sendResponse(res, 200, 'Category products retrieved successfully', products);
+    // Translate products based on Accept-Language header
+    const targetLanguage = this.getTargetLanguage(req);
+    const translatedProducts = await this.translateProducts(result.products, targetLanguage);
+
+    return this.sendResponse(res, 200, 'Category products retrieved successfully', {
+      ...result,
+      products: translatedProducts
+    });
   }
 
   @httpGet('/seller/:sellerId')
   async getProductsBySeller(
+    @request() req: Request,
     @response() res: Response,
     @requestParam('sellerId') sellerId: string,
     @queryParam('page') page: string = '1',
@@ -168,13 +310,20 @@ export class ProductController extends BaseController {
     const pageNumber = Math.max(1, parseInt(page) || 1);
     const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 20));
 
-    const products = await this.productService.getProductsBySellerId(
+    const result = await this.productService.getProductsBySellerId(
       sellerId,
       pageNumber,
       limitNumber
     );
 
-    return this.sendResponse(res, 200, 'Seller products retrieved successfully', products);
+    // Translate products based on Accept-Language header
+    const targetLanguage = this.getTargetLanguage(req);
+    const translatedProducts = await this.translateProducts(result.products, targetLanguage);
+
+    return this.sendResponse(res, 200, 'Seller products retrieved successfully', {
+      ...result,
+      products: translatedProducts
+    });
   }
 
   @httpPut('/:id')

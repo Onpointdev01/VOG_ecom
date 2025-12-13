@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bid Accepted!</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f4f4f4;
+        color: #333;
+      }
+      .container {
+        max-width: 600px;
+        margin: 20px auto;
+        padding: 20px;
+        background: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 20px;
+        padding: 20px;
+        background: linear-gradient(135deg, #00b517 0%, #00a015 100%);
+        border-radius: 8px;
+        color: white;
+      }
+      .header h1 {
+        margin: 0;
+        font-size: 28px;
+      }
+      .content {
+        font-size: 16px;
+        line-height: 1.6;
+        margin-bottom: 20px;
+      }
+      .highlight {
+        background-color: #fff3cd;
+        padding: 15px;
+        border-left: 4px solid #ffc107;
+        margin: 20px 0;
+        border-radius: 4px;
+      }
+      .price-info {
+        background-color: #d4edda;
+        padding: 15px;
+        border-left: 4px solid #28a745;
+        margin: 20px 0;
+        border-radius: 4px;
+      }
+      .button-container {
+        text-align: center;
+        margin: 30px 0;
+      }
+      .button {
+        display: inline-block;
+        background-color: #00b517;
+        color: #ffffff;
+        padding: 15px 30px;
+        border-radius: 5px;
+        text-decoration: none;
+        font-weight: bold;
+        font-size: 18px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        transition: background-color 0.3s;
+      }
+      .button:hover {
+        background-color: #00a015;
+      }
+      .footer {
+        text-align: center;
+        font-size: 14px;
+        color: #888;
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 1px solid #eee;
+      }
+      .footer a {
+        color: #00b517;
+        text-decoration: none;
+      }
+      .expiry-notice {
+        font-size: 14px;
+        color: #dc3545;
+        font-weight: bold;
+        margin-top: 15px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🎉 Bid Accepted!</h1>
+      </div>
+      <div class="content">
+        <p>Hi {{firstName}},</p>
+        <p>Great news! Your bid has been accepted!</p>
+        
+        <div class="highlight">
+          <strong>Product:</strong> {{productName}}<br>
+          <strong>Your Accepted Bid:</strong> {{bidAmount}}
+        </div>
+        
+        <div class="price-info">
+          <p><strong>Special Price:</strong> {{productPrice}}</p>
+          <p>This is your accepted bid price. Click the button below to add this product to your cart at this special price!</p>
+        </div>
+        
+        <div class="button-container">
+          <a href="{{addToCartLink}}" class="button">Add to Cart Now</a>
+        </div>
+        
+        <p class="expiry-notice">⚠️ This offer expires in 24 hours. Don't miss out!</p>
+        
+        <p>Thank you for being a part of St-Caël.</p>
+      </div>
+      <div class="footer">
+        <p>&copy; {{year}} St-Caël. All rights reserved.</p>
+        <p>
+          <a href="{{frontendUrl}}/profile">View My Bids</a> |
+          <a href="{{frontendUrl}}">Visit St-Caël</a>
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
+

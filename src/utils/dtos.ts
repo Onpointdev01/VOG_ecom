@@ -9,6 +9,7 @@ export interface SignUpUserDTO extends LoginDTO {
   nationality: string;
   phoneNumber: string;
   currentLocation: string;
+  role?: 'user' | 'seller'; // Optional, defaults to 'user', cannot be 'admin'
 }
 
 export interface SignUpSellerDTO {
@@ -90,6 +91,7 @@ export interface getAllProductsQuery {
   isRecommended?: string | boolean;
   category?: string;
   search?: string;
+  q?: string; // Frontend parameter (alias for search)
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
   minPrice?: string;

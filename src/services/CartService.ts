@@ -286,7 +286,21 @@ export class CartService extends BaseService implements ICartService {
     bidId: string
   ): Promise<ICart> {
     await this.verifyUser(userId);
-    const product = await this.verifyProduct(productId);
+    
+    // Ensure productId is a valid string ObjectId
+    let cleanProductId: string;
+    if (typeof productId === 'string') {
+      cleanProductId = productId.trim();
+    } else if (productId && typeof productId === 'object' && (productId as any).toString) {
+      cleanProductId = (productId as any).toString().trim();
+    } else {
+      cleanProductId = String(productId || '').trim();
+    }
+    
+    // Log for debugging
+    console.log('addBidToCart - Received productId:', productId, 'Cleaned:', cleanProductId);
+    
+    const product = await this.verifyProduct(cleanProductId);
 
     // Verify the bid exists and is accepted
     const bid = await this.Bid.findById(bidId);
@@ -299,6 +313,54 @@ export class CartService extends BaseService implements ICartService {
     if (bid.status !== 'ACCEPTED' || bidBuyerId !== userId) {
       throw new AppError('Invalid or unauthorized bid', 400);
     }
+    
+    // Log bid price to ensure we're using the correct price
+    console.log(`[addBidToCart] Using bid price: ${bid.bidPrice} for bid ${bidId}`);
+    console.log(`[addBidToCart] Received bidPrice parameter: ${bidPrice}`);
+    
+    // Use the bid's bidPrice, not the parameter (in case they differ)
+    const finalBidPrice = bid.bidPrice || bidPrice;
+    
+    if (!finalBidPrice || finalBidPrice <= 0) {
+      throw new AppError('Invalid bid price', 400);
+    }
+    
+    // Ensure we use the productId from the bid (always use the bid's product ID)
+    // This handles cases where productId might be populated or in different format
+    let finalProductId = cleanProductId;
+    if (bid.product) {
+      let bidProductId: string;
+      
+      // Extract productId from bid.product in various formats
+      if (typeof bid.product === 'object') {
+        if ((bid.product as any)._id) {
+          bidProductId = (bid.product as any)._id.toString();
+        } else if ((bid.product as any).id) {
+          bidProductId = (bid.product as any).id.toString();
+        } else if ((bid.product as any).toString) {
+          bidProductId = (bid.product as any).toString();
+        } else {
+          bidProductId = String(bid.product);
+        }
+      } else if (typeof bid.product === 'string') {
+        bidProductId = bid.product;
+      } else {
+        bidProductId = String(bid.product);
+      }
+      
+      // Validate and use bid's product ID
+      if (bidProductId && bidProductId.length === 24 && /^[0-9a-fA-F]{24}$/.test(bidProductId)) {
+        if (mongoose.isValidObjectId(bidProductId)) {
+          finalProductId = bidProductId;
+        }
+      }
+    }
+    
+    // Final validation of finalProductId
+    if (!finalProductId || finalProductId.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(finalProductId)) {
+      console.error('Invalid finalProductId:', finalProductId, 'cleanProductId:', cleanProductId);
+      throw new AppError(`Invalid product ID format: ${finalProductId}`, 400);
+    }
 
     // Validate size and color based on product type
     if (product.productType === 'simple') {
@@ -308,7 +370,7 @@ export class CartService extends BaseService implements ICartService {
     } else if (product.productType === 'variable') {
       // For variable products, check if variant exists
       const variant = await this.ProductVariant.findOne({
-        product: productId,
+        product: finalProductId,
         size,
         color,
         isActive: true
@@ -323,22 +385,22 @@ export class CartService extends BaseService implements ICartService {
     if (existingCart) {
       // Check if this exact bid product is already in cart
       const existingItem = existingCart.items.find(
-        (item) => item.product.toString() === productId && 
-                  (item as any).bidId === bidId // Track the specific bid
+        (item) => item.product.toString() === finalProductId && 
+                  (item as any).bidId?.toString() === bidId // Track the specific bid
       );
 
       if (existingItem) {
         throw new AppError('This bid item is already in your cart', 400);
       }
 
-      // Add new bid item to cart
+      // Add new bid item to cart with bid price
       existingCart.items.push({
-        product: productId as any,
+        product: finalProductId as any,
         quantity: 1, // Bid items are always quantity 1
         size,
         color,
-        price: bidPrice,
-        _id: productId as any,
+        price: finalBidPrice, // Use bid price, not product price
+        _id: finalProductId as any,
         // Add bid reference for tracking
         ...(bidId && { bidId })
       } as any);
@@ -352,11 +414,11 @@ export class CartService extends BaseService implements ICartService {
       user: userId,
       items: [
         {
-          product: productId,
+          product: finalProductId,
           quantity: 1,
           size,
           color,
-          price: bidPrice,
+          price: finalBidPrice, // Use bid price, not product price
           // Add bid reference
           ...(bidId && { bidId })
         } as any,
@@ -617,10 +679,29 @@ export class CartService extends BaseService implements ICartService {
   }
 
   private async verifyProduct(productId: string): Promise<IProduct> {
-    if (!mongoose.isValidObjectId(productId)) {
-      throw new AppError('Invalid product ID format', 400);
+    // Clean and validate productId
+    let cleanId: string;
+    
+    if (typeof productId === 'string') {
+      cleanId = productId.trim();
+    } else if (productId && typeof productId === 'object' && (productId as any).toString) {
+      cleanId = (productId as any).toString().trim();
+    } else {
+      cleanId = String(productId || '').trim();
     }
-    const product = await this.Product.findById(productId);
+    
+    // Validate ObjectId format (24 hex characters)
+    if (!cleanId || cleanId.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(cleanId)) {
+      console.error('Invalid productId in verifyProduct:', cleanId, 'Original:', productId);
+      throw new AppError(`Invalid product ID format: ${cleanId}`, 400);
+    }
+    
+    if (!mongoose.isValidObjectId(cleanId)) {
+      console.error('mongoose.isValidObjectId failed for:', cleanId);
+      throw new AppError(`Invalid product ID format: ${cleanId}`, 400);
+    }
+    
+    const product = await this.Product.findById(cleanId);
     if (!product) {
       throw new AppError('Product not found', 404);
     }

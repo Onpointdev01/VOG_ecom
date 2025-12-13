@@ -134,6 +134,70 @@ export class RequireAdmin extends BaseMiddleware {
 }
 
 @injectable()
+export class RequireAuth extends BaseMiddleware {
+  constructor(
+    @inject(TYPES.AuthService) private authService: IAuthService,
+    @inject(TYPES.AdminService) private adminService: IAdminService
+  ) {
+    super();
+  }
+
+  handler(
+    req: Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>,
+    res: Response<any, Record<string, any>>,
+    next: NextFunction
+  ): void {
+    try {
+      const authHeader: string = req.headers['authorization'] || '';
+      if (!authHeader) {
+        return next(new AppError('No token provided', 401));
+      }
+
+      const token: string = authHeader.replace('Bearer ', '');
+      
+      // Verify JWT token
+      jwt.verify(token, env.JWT_SECRET, async (err: any, decoded: any) => {
+        if (err) {
+          if (err instanceof TokenExpiredError) {
+            return next(new AppError('Token has expired. Please log in again.', 401));
+          }
+          return next(new AppError('Invalid token provided', 403));
+        }
+
+        const id = decoded.id.toString();
+        const userType = decoded.userType;
+
+        if (!id) {
+          return next(new AppError('Invalid token provided', 403));
+        }
+
+        // Check if it's an admin token
+        if (userType === 'admin') {
+          const admin = await this.adminService.checkAdminStatus(id);
+          if (!admin) {
+            return next(new AppError('Admin not found or inactive', 403));
+          }
+          req.admin = admin as IAdmin;
+          res.locals.admin = id;
+          return next();
+        }
+
+        // Otherwise, it's a user token
+        const user = await this.authService.checkBannedOrDeleted(id);
+        if (!user) {
+          return next(new AppError('User not found or is banned', 403));
+        }
+        req.user = user as IUser;
+        res.locals.user = id;
+        next();
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+}
+
+@injectable()
 export class OptionalAuth extends BaseMiddleware {
   constructor(@inject(TYPES.AuthService) private authService: IAuthService) {
     super();
@@ -150,10 +214,14 @@ export class OptionalAuth extends BaseMiddleware {
         // Verify JWT token
         jwt.verify(token, env.JWT_SECRET, async (err: any, decoded: any) => {
           if (err) {
+            // For OptionalAuth, if token is invalid/expired, just ignore it and continue
+            // Don't return error - this allows public access even with invalid token
             if (err instanceof TokenExpiredError) {
-              return next(new AppError('Token has expired. Please log in again.', 401));
+              // Token expired - just continue without user context
+              return next();
             }
-            return next(new AppError('Invalid token provided', 403));
+            // Invalid token format - just continue without user context
+            return next();
           }
 
           const userId = decoded.id.toString();
