@@ -15,7 +15,6 @@ import {
 } from '../utils/dtos';
 import logger from '../utils/logger';
 import AppError from '../utils/errors/AppError';
-import { setRefreshTokenCookie, clearRefreshTokenCookie, getRefreshToken } from '../utils/helpers/cookieHelper';
 import { authRateLimiter, passwordResetRateLimiter } from '../middlewares/rateLimiter';
 
 /**
@@ -135,13 +134,10 @@ export class AuthController extends BaseController {
     logger.info(`Login attempt for email: ${email}`);
     const result = await this.authService.login(email, password);
     
-    // Set httpOnly cookie for refresh token
-    setRefreshTokenCookie(res, result.refreshToken);
-    
-    // Return only access token in response (refresh token in cookie)
     return this.sendResponse(res, 200, 'Successfully logged in', {
       user: result.user,
       token: result.token,
+      refreshToken: result.refreshToken,
     });
   }
 
@@ -153,13 +149,10 @@ export class AuthController extends BaseController {
     logger.info(`Social login attempt for provider: ${provider}`);
     const result = await this.authService.socialLogin(idToken, provider);
     
-    // Set httpOnly cookie for refresh token
-    setRefreshTokenCookie(res, result.refreshToken);
-    
-    // Return only access token in response
     return this.sendResponse(res, 200, 'Successfully logged in', {
       user: result.user,
       token: result.token,
+      refreshToken: result.refreshToken,
     });
   }
 
@@ -220,18 +213,14 @@ export class AuthController extends BaseController {
   //refresh token
   @httpPost('/refresh-token')
   async refreshToken(@response() res: Response, @request() req: Request) {
-    // Get refresh token from cookie, body, or header (backward compatibility)
-    const refreshToken = getRefreshToken(req);
+    const { refreshToken } = req.body;
     if (!refreshToken) throw new AppError('Refresh token is required', 400);
 
     const result = await this.authService.refreshToken(refreshToken);
     
-    // Set new refresh token in httpOnly cookie
-    setRefreshTokenCookie(res, result.refreshToken);
-    
-    // Return only access token
     return this.sendResponse(res, 200, 'Token refreshed successfully', {
       token: result.token,
+      refreshToken: result.refreshToken,
     });
   }
 
@@ -239,14 +228,11 @@ export class AuthController extends BaseController {
   @httpPost('/logout')
   async logout(@response() res: Response, @request() req: Request) {
     const userId = (req as any).user?.id || (req as any).user?._id;
-    const refreshToken = getRefreshToken(req);
+    const { refreshToken } = req.body;
     
     if (userId && refreshToken) {
       await this.authService.logout(userId.toString(), refreshToken);
     }
-    
-    // Clear refresh token cookie
-    clearRefreshTokenCookie(res);
     
     return this.sendResponse(res, 200, 'Logged out successfully');
   }

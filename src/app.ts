@@ -4,7 +4,6 @@ import { Container } from 'inversify';
 import { InversifyExpressServer } from 'inversify-express-utils';
 import cors from 'cors';
 import morgan from 'morgan';
-import cookieParser from 'cookie-parser';
 import { Model } from 'mongoose';
 
 import { env } from './config';
@@ -171,55 +170,10 @@ const server = new InversifyExpressServer(container);
 server.setConfig((app) => {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
-  app.use(cookieParser()); // Enable cookie parsing for refresh tokens
 
-  // CORS configuration: When credentials are enabled, origin cannot be '*'
-  // Must specify exact origins or use a function to dynamically allow origins
-  const envOrigins = process.env.FRONTEND_URL 
-    ? process.env.FRONTEND_URL.split(',').map(url => url.trim())
-    : [];
-  
-  // Always include production Vercel domains
-  const defaultLocalhostPorts = [
-    'https://stcaeladmin.vercel.app',
-    'https://st-cael-seller.vercel.app',
-    'https://st-cael-website.vercel.app'
-  ];
-  const allowedOrigins = Array.from(new Set([...envOrigins, ...defaultLocalhostPorts])); // Remove duplicates
-
-  console.log('🔒 CORS Configuration:', {
-    allowedOrigins,
-    nodeEnv: NODE_ENV,
-    credentials: true
-  });
-
-  // CORS middleware - MUST be before other routes
+  // Simple CORS configuration - allow all origins (no cookies/credentials needed)
   app.use(cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, Postman, or curl)
-      if (!origin) {
-        console.log('✅ CORS: Allowing request with no origin');
-        return callback(null, true);
-      }
-      
-      console.log(`🔍 CORS: Checking origin: ${origin}`);
-      
-      // Check if origin is in allowed list
-      if (allowedOrigins.includes(origin)) {
-        console.log(`✅ CORS: Origin ${origin} is in allowed list`);
-        callback(null, true);
-      } else {
-        // Allow any localhost origin (for local development in both dev and production mode)
-        if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-          console.log(`✅ CORS: Allowing localhost origin: ${origin}`);
-          callback(null, true);
-        } else {
-          console.log(`❌ CORS: Rejecting origin: ${origin}`);
-          callback(new Error(`Not allowed by CORS: ${origin}`));
-        }
-      }
-    },
-    credentials: true, // Allow cookies to be sent
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
     allowedHeaders: [
       'Content-Type', 
@@ -227,52 +181,10 @@ server.setConfig((app) => {
       'X-Requested-With',
       'Accept',
       'Origin',
-      'Access-Control-Request-Method',
-      'Access-Control-Request-Headers'
     ],
-    exposedHeaders: ['Content-Type', 'Authorization'],
-    preflightContinue: false,
-    optionsSuccessStatus: 204, // Some legacy browsers (IE11, various SmartTVs) choke on 204
   }));
 
-  // Explicitly handle OPTIONS requests for all routes (preflight)
-  // Use the same CORS configuration
-  const corsOptions = {
-    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no origin (like mobile apps, Postman, or curl)
-      if (!origin) {
-        return callback(null, true);
-      }
-      
-      // Check if origin is in allowed list
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        // Allow any localhost origin (for local development in both dev and production mode)
-        if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-          callback(null, true);
-        } else {
-          callback(new Error(`Not allowed by CORS: ${origin}`));
-        }
-      }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
-    allowedHeaders: [
-      'Content-Type', 
-      'Authorization', 
-      'X-Requested-With',
-      'Accept',
-      'Origin',
-      'Access-Control-Request-Method',
-      'Access-Control-Request-Headers'
-    ],
-    exposedHeaders: ['Content-Type', 'Authorization'],
-    preflightContinue: false,
-    optionsSuccessStatus: 204,
-  };
-  
-  app.options('*', cors(corsOptions));
+  app.options('*', cors());
   if (NODE_ENV === 'development') {
     app.use(morgan('dev'));
   }
