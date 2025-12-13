@@ -179,8 +179,12 @@ server.setConfig((app) => {
     ? process.env.FRONTEND_URL.split(',').map(url => url.trim())
     : [];
   
-  // Always include localhost development ports (3000, 3001, 3002) for local development
-  const defaultLocalhostPorts = ['https://stcaeladmin.vercel.app/', 'st-cael-seller.vercel.app', 'st-cael-website.vercel.app'];
+  // Always include production Vercel domains
+  const defaultLocalhostPorts = [
+    'https://stcaeladmin.vercel.app',
+    'https://st-cael-seller.vercel.app',
+    'https://st-cael-website.vercel.app'
+  ];
   const allowedOrigins = Array.from(new Set([...envOrigins, ...defaultLocalhostPorts])); // Remove duplicates
 
   console.log('🔒 CORS Configuration:', {
