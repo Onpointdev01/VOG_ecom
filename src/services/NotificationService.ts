@@ -127,7 +127,7 @@ export class NotificationService {
       // Send email notification if enabled (for important notifications like orders, bids, and payments)
       if (sendEmail && (type === 'order' || type === 'bid' || type === 'payment')) {
         try {
-          await this.sendEmailNotification(userId, title, message, link);
+        await this.sendEmailNotification(userId, title, message, link);
           console.log(`📧 Email notification sent successfully to user ${userId} for ${type} notification`);
         } catch (error: any) {
           console.error(`❌ Failed to send email notification to user ${userId}:`, error?.message || error);
@@ -138,20 +138,20 @@ export class NotificationService {
       // Emit WebSocket notification (if WebSocketService is available and channel is websocket/in-app)
       if (this.webSocketService && (channel === 'websocket' || channel === 'in-app')) {
         try {
-          this.webSocketService.emitNotificationToUser(userId, {
-            _id: notification._id,
-            type,
-            title,
-            message,
-            body: message,
-            data,
-            payload: payload || data,
-            link,
-            channel,
-            isRead: false,
-            createdAt: notification.createdAt,
-            updatedAt: notification.updatedAt,
-          });
+        this.webSocketService.emitNotificationToUser(userId, {
+          _id: notification._id,
+          type,
+          title,
+          message,
+          body: message,
+          data,
+          payload: payload || data,
+          link,
+          channel,
+          isRead: false,
+          createdAt: notification.createdAt,
+          updatedAt: notification.updatedAt,
+        });
           console.log(`📬 WebSocket notification emitted successfully to user ${userId}`);
         } catch (error: any) {
           console.error(`❌ Failed to emit WebSocket notification to user ${userId}:`, error?.message || error);
@@ -793,14 +793,14 @@ export class NotificationService {
           const notification = await this.Notification.create({
             adminId: adminId,
             type: type === 'order' || type === 'bid' || type === 'product' ? type : 'admin_message',
-            title,
-            message,
-            body: message,
-            data,
+        title,
+        message,
+        body: message,
+        data,
             payload: data,
-            link,
+        link,
             channel: 'in-app',
-            isRead: false,
+        isRead: false,
           });
           
           console.log(`✅ Created admin notification in database for admin ${adminId}: ${title}`);
@@ -857,10 +857,10 @@ export class NotificationService {
           }
 
           // Emit via WebSocket to this admin
-          if (this.webSocketService) {
+      if (this.webSocketService) {
             // Emit both 'notification' and 'admin_notification' for compatibility
             this.webSocketService.emitToAdmins('notification', adminNotification);
-            this.webSocketService.emitToAdmins('admin_notification', adminNotification);
+        this.webSocketService.emitToAdmins('admin_notification', adminNotification);
             console.log(`📬 Admin notification emitted via WebSocket for admin ${adminId}`);
           }
 
@@ -1153,15 +1153,15 @@ export class NotificationService {
         await this.createInAppNotification(
           sellerUserId,
           'order',
-          'Order Status Updated',
-          `Order #${orderNumber} status changed from ${oldStatus} to ${newStatus}${customerName ? ` (Customer: ${customerName})` : ''}`,
-          {
-            type: 'order_status_changed',
-            orderId,
-            orderNumber,
-            oldStatus,
-            newStatus,
-          },
+      'Order Status Updated',
+      `Order #${orderNumber} status changed from ${oldStatus} to ${newStatus}${customerName ? ` (Customer: ${customerName})` : ''}`,
+      {
+        type: 'order_status_changed',
+        orderId,
+        orderNumber,
+        oldStatus,
+        newStatus,
+      },
           `/seller/orders/${orderId}`,
           'in-app',
           {
