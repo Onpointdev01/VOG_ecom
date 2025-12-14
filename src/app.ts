@@ -168,31 +168,39 @@ container.bind<ITranslationService>(TYPES.TranslationService).to(TranslationServ
 const server = new InversifyExpressServer(container);
 
 server.setConfig((app) => {
-  // ========== CORS CONFIGURATION (MUST BE FIRST) ==========
-  // Simple CORS - allow all origins (no cookies/credentials used)
-  // This is production-safe because we use Bearer tokens, not cookies
+  // ============================
+  // 1️⃣ GLOBAL CORS CONFIGURATION
+  // ============================
+  // Allow any origin (no cookies/credentials used)
   const corsOptions: cors.CorsOptions = {
-    origin: '*', // Allow any origin
+    origin: '*', // allow all frontend origins safely
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    optionsSuccessStatus: 204, // Return 204 for OPTIONS preflight
+    optionsSuccessStatus: 204, // preflight response
   };
 
-  // Apply CORS middleware BEFORE any routes
+  // Apply global CORS middleware BEFORE any routes
   app.use(cors(corsOptions));
 
-  // Explicit OPTIONS handler for all routes (preflight requests)
+  // Explicit OPTIONS handler for all routes (preflight)
   app.options('*', cors(corsOptions));
 
-  // ========== OTHER MIDDLEWARE ==========
+  // ============================
+  // 2️⃣ BODY PARSING
+  // ============================
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  // ============================
+  // 3️⃣ DEVELOPMENT LOGGING
+  // ============================
   if (NODE_ENV === 'development') {
     app.use(morgan('dev'));
   }
 
-  // Setup Swagger documentation (only in development)
+  // ============================
+  // 4️⃣ SWAGGER DOCUMENTATION
+  // ============================
   if (NODE_ENV === 'development' || process.env.ENABLE_SWAGGER === 'true') {
     try {
       const { setupSwagger } = require('./swagger/swagger');
@@ -201,18 +209,23 @@ server.setConfig((app) => {
       console.warn('Swagger setup failed (optional):', error);
     }
   }
-});
 
-server.setErrorConfig((app) => {
-  // Add multer error handler FIRST to catch multer-specific errors
+  // ============================
+  // 5️⃣ OPTIONAL ERROR HANDLERS
+  // ============================
+  // Multer-specific errors
   app.use(multerErrorHandler);
-  
-  // Add error middleware BEFORE the catch-all 404 handler
-  // This ensures errors from controllers/middlewares are handled properly
+
+  // Global error handler
   app.use(errorMiddleWare);
-  
-  // Catch-all 404 handler - must be last
+
+  // Catch-all 404 handler
+  // Must be LAST, but allow OPTIONS to pass through
   app.all('*', (req: Request, res: Response) => {
+    if (req.method === 'OPTIONS') {
+      // Respond to preflight without hitting 404
+      return res.sendStatus(204);
+    }
     console.log(`[404] Route not found: ${req.method} ${req.url}`);
     res.status(404).json({
       status: 'error',
@@ -220,6 +233,7 @@ server.setErrorConfig((app) => {
     });
   });
 });
+
 
 const app = server.build();
 export { container };
