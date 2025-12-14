@@ -4,6 +4,8 @@ import { Container } from 'inversify';
 import { InversifyExpressServer } from 'inversify-express-utils';
 import cors from 'cors';
 import morgan from 'morgan';
+import helmet from 'helmet';
+import compression from 'compression';
 import { Model } from 'mongoose';
 
 import { env } from './config';
@@ -169,45 +171,39 @@ const server = new InversifyExpressServer(container);
 
 server.setConfig((app) => {
   // ============================
-  // 1️⃣ GLOBAL CORS CONFIGURATION
+  // 1️⃣ SECURITY HEADERS (Helmet)
   // ============================
-  const allowedOrigins = [
-    'https://market.st-cael.org',
-    'https://admin.st-cael.org',
-    'https://seller.st-cael.org',
-    'https://st-cael.org',
-  ];
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: false, // Disable CSP for API
+  }));
 
+  // ============================
+  // 2️⃣ COMPRESSION (Gzip for speed)
+  // ============================
+  app.use(compression());
+
+  // ============================
+  // 3️⃣ CORS - Allow all origins (no cookies/credentials)
+  // ============================
   const corsOptions: cors.CorsOptions = {
-    origin: (origin, callback) => {
-      // Allow requests with no origin (Postman or server-to-server)
-      if (!origin) return callback(null, true);
-
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true, // allow cookies & Authorization header
     optionsSuccessStatus: 204,
   };
 
   app.use(cors(corsOptions));
-
-  // Explicit preflight handler
   app.options('*', cors(corsOptions));
 
   // ============================
-  // 2️⃣ BODY PARSING
+  // 4️⃣ BODY PARSING
   // ============================
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   // ============================
-  // 3️⃣ DEVELOPMENT LOGGING
+  // 5️⃣ LOGGING (Development only)
   // ============================
   if (NODE_ENV === 'development') {
     app.use(morgan('dev'));
