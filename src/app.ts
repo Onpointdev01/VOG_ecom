@@ -192,7 +192,7 @@ server.setConfig((app) => {
     allowedHeaders: ['Content-Type', 'Authorization'],
     optionsSuccessStatus: 204,
   };
-
+  
   app.use(cors(corsOptions));
   app.options('*', cors(corsOptions));
 
@@ -226,7 +226,7 @@ server.setConfig((app) => {
   // ============================
   app.use(multerErrorHandler);
   app.use(errorMiddleWare);
-
+  
   // Catch-all 404
   app.all('*', (req: Request, res: Response) => {
     if (req.method === 'OPTIONS') return res.sendStatus(204);
