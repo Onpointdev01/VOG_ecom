@@ -12,6 +12,7 @@ import { env } from './config';
 import './controllers';
 import errorMiddleWare from './utils/errors/errorHandler';
 import multerErrorHandler from './middlewares/multerErrorHandler';
+
 import {
   Address,
   IAddress,
@@ -55,6 +56,7 @@ import {
   IAuditLog,
   IBidOffer,
 } from './models';
+
 import Notification from './models/Notification';
 import { TokenBlacklist } from './models/TokenBlacklist';
 import { Payout } from './models/Payout';
@@ -104,14 +106,23 @@ import {
   ITranslationService,
   TranslationService,
 } from './services';
+
 import { NotificationService } from './services/NotificationService';
 import { WebSocketService } from './services/WebSocketService';
-import { OptionalAuth, RequireAdmin, RequireSeller, RequireSignIn, RequireAuth } from './middlewares/AuthMiddleware';
+import {
+  OptionalAuth,
+  RequireAdmin,
+  RequireSeller,
+  RequireSignIn,
+  RequireAuth,
+} from './middlewares/AuthMiddleware';
 
 const { NODE_ENV } = env;
 const container = new Container();
 
-// Bind all models to the container
+/* ===========================
+   MODEL BINDINGS
+=========================== */
 container.bind<Model<IUser>>(TYPES.User).toConstantValue(User);
 container.bind<Model<IAdmin>>(TYPES.Admin).toConstantValue(Admin);
 container.bind<Model<ICategory>>(TYPES.Category).toConstantValue(Category);
@@ -136,13 +147,18 @@ container.bind<Model<IPayout>>(TYPES.Payout).toConstantValue(Payout);
 container.bind<Model<IAuditLog>>(TYPES.AuditLog).toConstantValue(AuditLog);
 container.bind<Model<IBidOffer>>(TYPES.BidOffer).toConstantValue(BidOffer);
 
+/* ===========================
+   MIDDLEWARE BINDINGS
+=========================== */
 container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
 container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);
 container.bind<RequireAdmin>(TYPES.RequireAdmin).to(RequireAdmin);
 container.bind<RequireAuth>(TYPES.RequireAuth).to(RequireAuth);
 container.bind<OptionalAuth>(TYPES.OptionalAuth).to(OptionalAuth);
 
-// Bind all services to the container
+/* ===========================
+   SERVICE BINDINGS
+=========================== */
 container.bind<IAuthService>(TYPES.AuthService).to(AuthService);
 container.bind<IAdminService>(TYPES.AdminService).to(AdminService);
 container.bind<ICategoryService>(TYPES.CategoryService).to(CategoryService);
@@ -167,91 +183,66 @@ container.bind<IPayoutService>(TYPES.PayoutService).to(PayoutService);
 container.bind<ISKUService>(TYPES.SKUService).to(SKUService);
 container.bind<ITranslationService>(TYPES.TranslationService).to(TranslationService);
 
+/* ===========================
+   SERVER SETUP
+=========================== */
 const server = new InversifyExpressServer(container);
 
 server.setConfig((app) => {
-  // ============================
-  // 1️⃣ CORS - MUST BE FIRST to handle preflight requests
-  // ============================
+  /* 1️⃣ CORS (NO COOKIES) */
   const corsOptions: cors.CorsOptions = {
-    origin: '*', // Allow all origins
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     exposedHeaders: ['Content-Range', 'X-Content-Range'],
-    credentials: false, // No cookies/credentials
+    credentials: false,
     optionsSuccessStatus: 204,
     preflightContinue: false,
   };
 
-  // Apply CORS before any other middleware
   app.use(cors(corsOptions));
-
-  // Handle all OPTIONS requests explicitly
   app.options('*', cors(corsOptions));
 
-  // ============================
-  // 2️⃣ SECURITY HEADERS (Helmet) - After CORS
-  // ============================
-  app.use(helmet({
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
-    crossOriginEmbedderPolicy: false,
-    contentSecurityPolicy: false, // Disable CSP for API
-  }));
+  /* 2️⃣ SECURITY */
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+      crossOriginEmbedderPolicy: false,
+      contentSecurityPolicy: false,
+    })
+  );
 
-  // ============================
-  // 3️⃣ COMPRESSION (Gzip for speed)
-  // ============================
+  /* 3️⃣ COMPRESSION */
   app.use(compression());
 
-  // ============================
-  // 3️⃣ CORS - Allow all origins (no cookies/credentials)
-  // ============================
-  const corsOptions: cors.CorsOptions = {
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    optionsSuccessStatus: 204,
-  };
-  
-  app.use(cors(corsOptions));
-  app.options('*', cors(corsOptions));
-
-  // 4️⃣ BODY PARSING
-  // ============================
+  /* 4️⃣ BODY PARSING */
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-  // ============================
-  // 5️⃣ LOGGING (Development only)
-  // ============================
+  /* 5️⃣ LOGGING */
   if (NODE_ENV === 'development') {
     app.use(morgan('dev'));
   }
 
-  // ============================
-  // 4️⃣ SWAGGER DOCUMENTATION
-  // ============================
+  /* 6️⃣ SWAGGER */
   if (NODE_ENV === 'development' || process.env.ENABLE_SWAGGER === 'true') {
     try {
       const { setupSwagger } = require('./swagger/swagger');
       setupSwagger(app);
-    } catch (error) {
-      console.warn('Swagger setup failed (optional):', error);
+    } catch (err) {
+      console.warn('Swagger setup failed:', err);
     }
   }
 
-  // ============================
-  // 5️⃣ OPTIONAL ERROR HANDLERS
-  // ============================
+  /* 7️⃣ ERROR HANDLERS */
   app.use(multerErrorHandler);
   app.use(errorMiddleWare);
-  
-  // Catch-all 404
+
+  /* 8️⃣ 404 */
   app.all('*', (req: Request, res: Response) => {
     if (req.method === 'OPTIONS') return res.sendStatus(204);
 
-    console.log(`[404] Route not found: ${req.method} ${req.url}`);
     res.status(404).json({
       status: 'error',
       message: 'This endpoint does not exist on this server',
@@ -259,7 +250,7 @@ server.setConfig((app) => {
   });
 });
 
-
 const app = server.build();
+
 export { container };
 export default app;

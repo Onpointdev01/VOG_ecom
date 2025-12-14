@@ -314,7 +314,14 @@ export class AuthService extends BaseService implements IAuthService {
     // Fetch user again with seller populated to ensure we have the seller reference
     const userWithSeller = await this.User.findById(user._id).populate('seller');
     
-    const trimedUser: Partial<IUser> = {
+    // Determine user type based on role and seller profile
+    const hasSeller = !!userWithSeller?.seller;
+    const userRole = user.role || 'user';
+    
+    // Type is 'seller' if user has a seller profile, otherwise use their role
+    const userType = hasSeller ? 'seller' : userRole;
+
+    const trimedUser: Partial<IUser> & { type?: string; seller?: string } = {
       id: user._id,
       email: user.email,
       firstName: user.firstName,
@@ -324,20 +331,17 @@ export class AuthService extends BaseService implements IAuthService {
       currentLocation: user.currentLocation,
       banned: user.banned,
       verified: user.verified,
-      role: user.role,
+      role: userRole,
+      type: userType, // 'user' | 'seller' | 'admin'
     };
 
-    // Include seller ID if it exists (either as ObjectId or populated object)
-    if (userWithSeller?.seller) {
+    // Include seller ID if it exists
+    if (hasSeller) {
       const seller = userWithSeller.seller as any;
-      // Get the ID whether it's an ObjectId or a populated object
       const sellerId = seller._id || seller.id || seller;
       if (sellerId) {
-        (trimedUser as any).seller = sellerId.toString();
-        console.log(`✅ Login: Seller ID found and included: ${sellerId.toString()}`);
+        trimedUser.seller = sellerId.toString();
       }
-    } else {
-      console.log(`⚠️ Login: No seller found for user ${user._id}`);
     }
 
     return { user: trimedUser, token: token, refreshToken: refreshToken };
@@ -407,8 +411,14 @@ export class AuthService extends BaseService implements IAuthService {
         userWithEmail.socialLogin.push({ provider: provider, providerId: socialId });
         await userWithEmail.save();
 
-        const trimedUser: Partial<IUser> = {
-          _id: userWithEmail._id,
+        // Check if user has seller profile
+        const userWithSeller = await this.User.findById(userWithEmail._id).populate('seller');
+        const hasSeller = !!userWithSeller?.seller;
+        const userRole = userWithEmail.role || 'user';
+        const userType = hasSeller ? 'seller' : userRole;
+
+        const trimedUser: Partial<IUser> & { type?: string; seller?: string } = {
+          id: userWithEmail._id,
           email: userWithEmail.email,
           firstName: userWithEmail.firstName,
           lastName: userWithEmail.lastName,
@@ -417,11 +427,19 @@ export class AuthService extends BaseService implements IAuthService {
           currentLocation: userWithEmail.currentLocation,
           banned: userWithEmail.banned,
           verified: userWithEmail.verified,
+          role: userRole,
+          type: userType,
         };
+
+        if (hasSeller) {
+          const seller = userWithSeller.seller as any;
+          trimedUser.seller = (seller._id || seller.id || seller).toString();
+        }
+
         return {
           user: trimedUser,
-          token: generateAccessToken(userWithEmail._id as string),
-          refreshToken: generateRefreshToken(userWithEmail._id as string),
+          token: generateAccessToken(userWithEmail._id as string, userRole),
+          refreshToken: generateRefreshToken(userWithEmail._id as string, userRole),
         };
       } else {
         // Register new user if not found
@@ -437,9 +455,16 @@ export class AuthService extends BaseService implements IAuthService {
       }
     }
 
-    const token = await generateAccessToken(user._id as string);
-    const refreshToken = await generateRefreshToken(user._id as string);
-    const trimedUser: Partial<IUser> = {
+    // Check if user has seller profile
+    const userWithSeller = await this.User.findById(user._id).populate('seller');
+    const hasSeller = !!userWithSeller?.seller;
+    const userRole = user.role || 'user';
+    const userType = hasSeller ? 'seller' : userRole;
+
+    const token = await generateAccessToken(user._id as string, userRole);
+    const refreshToken = await generateRefreshToken(user._id as string, userRole);
+    
+    const trimedUser: Partial<IUser> & { type?: string; seller?: string } = {
       id: user._id,
       email: user.email,
       firstName: user.firstName,
@@ -449,9 +474,18 @@ export class AuthService extends BaseService implements IAuthService {
       currentLocation: user.currentLocation,
       banned: user.banned,
       verified: user.verified,
+      role: userRole,
+      type: userType,
     };
+
+    if (hasSeller) {
+      const seller = userWithSeller.seller as any;
+      trimedUser.seller = (seller._id || seller.id || seller).toString();
+    }
+
     return { user: trimedUser, token: token, refreshToken: refreshToken };
   }
+
   async forgotPassword(email: string): Promise<void> {
     const user = await this.User.findOne({ email });
     if (!user) {
