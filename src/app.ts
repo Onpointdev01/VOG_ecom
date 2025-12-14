@@ -171,18 +171,33 @@ server.setConfig((app) => {
   // ============================
   // 1️⃣ GLOBAL CORS CONFIGURATION
   // ============================
-  // Allow any origin (no cookies/credentials used)
+  const allowedOrigins = [
+    'https://market.st-cael.org',
+    'https://admin.st-cael.org',
+    'https://seller.st-cael.org',
+    'https://st-cael.org',
+  ];
+
   const corsOptions: cors.CorsOptions = {
-    origin: '*', // allow all frontend origins safely
+    origin: (origin, callback) => {
+      // Allow requests with no origin (Postman or server-to-server)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    optionsSuccessStatus: 204, // preflight response
+    credentials: true, // allow cookies & Authorization header
+    optionsSuccessStatus: 204,
   };
 
-  // Apply global CORS middleware BEFORE any routes
   app.use(cors(corsOptions));
 
-  // Explicit OPTIONS handler for all routes (preflight)
+  // Explicit preflight handler
   app.options('*', cors(corsOptions));
 
   // ============================
@@ -213,19 +228,13 @@ server.setConfig((app) => {
   // ============================
   // 5️⃣ OPTIONAL ERROR HANDLERS
   // ============================
-  // Multer-specific errors
   app.use(multerErrorHandler);
-
-  // Global error handler
   app.use(errorMiddleWare);
 
-  // Catch-all 404 handler
-  // Must be LAST, but allow OPTIONS to pass through
+  // Catch-all 404
   app.all('*', (req: Request, res: Response) => {
-    if (req.method === 'OPTIONS') {
-      // Respond to preflight without hitting 404
-      return res.sendStatus(204);
-    }
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+
     console.log(`[404] Route not found: ${req.method} ${req.url}`);
     res.status(404).json({
       status: 'error',
