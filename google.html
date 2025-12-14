@@ -1,30 +1,36 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Google Sign-In with Identity Services</title>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-  </head>
-  <body>
-    <h2>Google Sign-In</h2>
 
-    <!-- Google Sign-In button will be inserted here -->
-    <div id="g_id_onload" data-client_id="<put google client id here>" data-callback="handleCredentialResponse"></div>
-    <div class="g_id_signin" data-type="standard"></div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Google Sign-In with Identity Services</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
 
-    <!-- Display the ID Token -->
-    <p><strong>ID Token:</strong> <span id="idTokenDisplay">Not logged in</span></p>
+<body>
+  <h2>Google Sign-In</h2>
 
-    <script>
-      function handleCredentialResponse(response) {
-        // Handle the ID token
-        const id_token = response.credential;
-        console.log('ID Token:', id_token);
-        document.getElementById('idTokenDisplay').innerText = id_token;
+  <!-- Google Sign-In button will be inserted here -->
+  <div id="g_id_onload" data-client_id="253094084760-np533giqhr976f7ujr5b46d2inqolksf.apps.googleusercontent.com"
+    data-callback="handleCredentialResponse"></div>
+  <div class="g_id_signin" data-type="standard"></div>
 
-        // You can send this token to your server for verification
-      }
-    </script>
-  </body>
+  <!-- Display the ID Token -->
+  <p>
+    <strong>ID Token:</strong> <span id="idTokenDisplay">Not logged in</span>
+  </p>
+
+  <script>
+    function handleCredentialResponse(response) {
+      // Handle the ID token
+      const id_token = response.credential;
+      console.log("ID Token:", id_token);
+      document.getElementById("idTokenDisplay").innerText = id_token;
+
+      // You can send this token to your server for verification
+    }
+  </script>
+</body>
+
 </html>
