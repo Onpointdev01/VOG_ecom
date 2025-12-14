@@ -168,23 +168,26 @@ container.bind<ITranslationService>(TYPES.TranslationService).to(TranslationServ
 const server = new InversifyExpressServer(container);
 
 server.setConfig((app) => {
+  // ========== CORS CONFIGURATION (MUST BE FIRST) ==========
+  // Simple CORS - allow all origins (no cookies/credentials used)
+  // This is production-safe because we use Bearer tokens, not cookies
+  const corsOptions: cors.CorsOptions = {
+    origin: '*', // Allow any origin
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    optionsSuccessStatus: 204, // Return 204 for OPTIONS preflight
+  };
+
+  // Apply CORS middleware BEFORE any routes
+  app.use(cors(corsOptions));
+
+  // Explicit OPTIONS handler for all routes (preflight requests)
+  app.options('*', cors(corsOptions));
+
+  // ========== OTHER MIDDLEWARE ==========
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Simple CORS configuration - allow all origins (no cookies/credentials needed)
-  app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
-    allowedHeaders: [
-      'Content-Type', 
-      'Authorization', 
-      'X-Requested-With',
-      'Accept',
-      'Origin',
-    ],
-  }));
-
-  app.options('*', cors());
   if (NODE_ENV === 'development') {
     app.use(morgan('dev'));
   }

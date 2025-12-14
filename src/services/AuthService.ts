@@ -652,12 +652,12 @@ export class AuthService extends BaseService implements IAuthService {
       // Determine frontend URL based on user role
       let frontendUrl: string;
       if (role === 'seller') {
-        // Use seller frontend URL if configured, otherwise default to port 3002
-        frontendUrl = process.env.SELLER_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3002';
-        console.log(`🔍 Seller detected - Using SELLER_FRONTEND_URL: ${process.env.SELLER_FRONTEND_URL || 'not set, using FRONTEND_URL or default'}`);
+        // Use seller frontend URL if configured, otherwise default to production
+        frontendUrl = process.env.SELLER_FRONTEND_URL || 'https://seller.st-cael.org';
+        console.log(`🔍 Seller detected - Using SELLER_FRONTEND_URL: ${process.env.SELLER_FRONTEND_URL || 'not set, using default'}`);
       } else {
         // Use regular frontend URL for regular users
-        frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+        frontendUrl = process.env.FRONTEND_URL || 'https://market.st-cael.org';
         console.log(`🔍 Regular user detected - Using FRONTEND_URL: ${process.env.FRONTEND_URL || 'not set, using default'}`);
       }
       
@@ -697,11 +697,11 @@ export class AuthService extends BaseService implements IAuthService {
       // Determine frontend URL based on user role
       let frontendUrl: string;
       if (role === 'seller') {
-        // Use seller frontend URL if configured, otherwise default to port 3002
-        frontendUrl = process.env.SELLER_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3002';
+        // Use seller frontend URL if configured, otherwise default to production
+        frontendUrl = process.env.SELLER_FRONTEND_URL || 'https://seller.st-cael.org';
       } else {
         // Use regular frontend URL for regular users
-        frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+        frontendUrl = process.env.FRONTEND_URL || 'https://market.st-cael.org';
       }
       
       const resetLink = `${frontendUrl}/reset-password?token=${token}`;

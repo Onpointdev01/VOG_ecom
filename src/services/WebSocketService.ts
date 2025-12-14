@@ -21,29 +21,11 @@ export class WebSocketService {
    * Initialize Socket.IO server with Redis adapter for scaling
    */
   async initialize(server: HttpServer): Promise<void> {
-    // CORS configuration for WebSocket: Must specify exact origins when credentials are enabled
-    const envOrigins = process.env.FRONTEND_URL 
-      ? process.env.FRONTEND_URL.split(',').map(url => url.trim())
-      : [];
-    
-    // Always include localhost development ports (3000, 3001, 3002) for local development
-    const defaultLocalhostPorts = ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002'];
-    const allowedOrigins = Array.from(new Set([...envOrigins, ...defaultLocalhostPorts])); // Remove duplicates
-
+    // Simple CORS - allow all origins (no cookies/credentials used)
     this.io = new SocketIOServer(server, {
       cors: {
-        origin: (origin, callback) => {
-          if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-          } else if (origin?.startsWith('http://localhost:') || origin?.startsWith('http://127.0.0.1:')) {
-            // Allow any localhost origin (for local development in both dev and production mode)
-            callback(null, true);
-          } else {
-            callback(new Error('Not allowed by CORS'));
-          }
-        },
+        origin: '*',
         methods: ['GET', 'POST'],
-        credentials: true,
       },
       transports: ['websocket', 'polling'],
     });

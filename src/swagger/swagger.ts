@@ -16,7 +16,7 @@ const options: swaggerJsdoc.Options = {
     },
     servers: [
       {
-        url: process.env.API_URL || 'http://localhost:6000',
+        url: process.env.API_URL || 'https://dev.st-cael.org',
         description: 'Development server',
       },
       {

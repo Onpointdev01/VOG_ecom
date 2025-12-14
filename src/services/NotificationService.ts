@@ -54,7 +54,7 @@ export class NotificationService {
       }
 
       // Build full URL if link is provided
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+      const frontendUrl = process.env.FRONTEND_URL || 'https://market.st-cael.org';
       const fullLink = link ? `${frontendUrl}${link}` : undefined;
 
       // Build link button HTML
@@ -274,7 +274,7 @@ export class NotificationService {
     bidId?: string
   ): Promise<ExpoPushTicket[]> {
     // Generate add-to-cart link for email
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://market.st-cael.org';
     const addToCartLink = bidId 
       ? `${frontendUrl}/bid/${bidId}/add-to-cart`
       : `${frontendUrl}/product/${productId}`;
@@ -515,7 +515,7 @@ export class NotificationService {
     };
 
     // Generate order link for email
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://market.st-cael.org';
     const orderLink = `${frontendUrl}/Profile?tab=orders`;
     
     // Send email notification with order details
@@ -823,7 +823,7 @@ export class NotificationService {
           // Send email to admin if enabled
           if (shouldSendEmail && admin.email) {
             try {
-              const frontendUrl = process.env.ADMIN_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
+              const frontendUrl = process.env.ADMIN_FRONTEND_URL || process.env.FRONTEND_URL || 'https://st-cael.org';
               const fullLink = link ? `${frontendUrl}${link}` : undefined;
               const linkButton = fullLink
                 ? `<div class="button-container">
