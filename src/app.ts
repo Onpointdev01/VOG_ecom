@@ -171,15 +171,36 @@ const server = new InversifyExpressServer(container);
 
 server.setConfig((app) => {
   // ============================
-  // 1️⃣ SECURITY HEADERS (Helmet)
+  // 1️⃣ CORS - MUST BE FIRST to handle preflight requests
+  // ============================
+  const corsOptions: cors.CorsOptions = {
+    origin: '*', // Allow all origins
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    exposedHeaders: ['Content-Range', 'X-Content-Range'],
+    credentials: false, // No cookies/credentials
+    optionsSuccessStatus: 204,
+    preflightContinue: false,
+  };
+
+  // Apply CORS before any other middleware
+  app.use(cors(corsOptions));
+
+  // Handle all OPTIONS requests explicitly
+  app.options('*', cors(corsOptions));
+
+  // ============================
+  // 2️⃣ SECURITY HEADERS (Helmet) - After CORS
   // ============================
   app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+    crossOriginEmbedderPolicy: false,
     contentSecurityPolicy: false, // Disable CSP for API
   }));
 
   // ============================
-  // 2️⃣ COMPRESSION (Gzip for speed)
+  // 3️⃣ COMPRESSION (Gzip for speed)
   // ============================
   app.use(compression());
 
@@ -196,7 +217,6 @@ server.setConfig((app) => {
   app.use(cors(corsOptions));
   app.options('*', cors(corsOptions));
 
-  // ============================
   // 4️⃣ BODY PARSING
   // ============================
   app.use(express.json({ limit: '10mb' }));
