@@ -1,6 +1,7 @@
 export interface LoginDTO {
   email: string;
   password: string;
+  type?: 'user' | 'seller' | 'admin'; // Optional: specify login type for access control
 }
 
 export interface SignUpUserDTO extends LoginDTO {

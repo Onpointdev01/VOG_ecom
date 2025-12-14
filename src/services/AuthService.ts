@@ -17,7 +17,7 @@ import { ISeller } from '../models/Seller';
 export interface IAuthService {
   signupUser(payload: SignUpUserDTO): Promise<Partial<IUser>>;
   signupSeller(payload: SignUpSellerDTO): Promise<Partial<ISeller>>;
-  login(email: string, password: string): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
+  login(email: string, password: string, type?: 'user' | 'seller' | 'admin'): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
   socialLogin(
     idToken: string,
     provider: string
@@ -253,12 +253,13 @@ export class AuthService extends BaseService implements IAuthService {
 
   login = async (
     email: string,
-    password: string
+    password: string,
+    type?: 'user' | 'seller' | 'admin'
   ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }> => {
     // Normalize email (lowercase and trim)
     const normalizedEmail = email.trim().toLowerCase();
     
-    const user: IUser | null = await this.User.findOne({ email: normalizedEmail }, '+password');
+    const user: IUser | null = await this.User.findOne({ email: normalizedEmail }, '+password').populate('seller');
     if (!user) {
       throw new AppError('Invalid email or password', 400);
     }
@@ -266,6 +267,17 @@ export class AuthService extends BaseService implements IAuthService {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       throw new AppError('Invalid email or password', 400);
+    }
+
+    // Type-based access control
+    if (type === 'seller') {
+      // For seller portal login, user must have a seller profile
+      if (!user.seller) {
+        throw new AppError('No seller account found. Please create a seller account first.', 403);
+      }
+    } else if (type === 'admin') {
+      // Admin login should use /admin/signin endpoint
+      throw new AppError('Please use the admin login portal.', 403);
     }
 
     // Check if email is verified - if not, send verification email and throw error

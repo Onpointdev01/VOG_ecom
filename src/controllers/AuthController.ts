@@ -130,9 +130,9 @@ export class AuthController extends BaseController {
   //login (with rate limiting)
   @httpPost('/login', authRateLimiter)
   async login(@response() res: Response, @requestBody() payload: LoginDTO) {
-    const { email, password } = payload;
-    logger.info(`Login attempt for email: ${email}`);
-    const result = await this.authService.login(email, password);
+    const { email, password, type } = payload;
+    logger.info(`Login attempt for email: ${email}, type: ${type || 'user'}`);
+    const result = await this.authService.login(email, password, type);
     
     return this.sendResponse(res, 200, 'Successfully logged in', {
       user: result.user,
