@@ -68,13 +68,20 @@ const startServer = async () => {
   // Create HTTP server
   const httpServer = createServer(app);
 
+  // ========================================
+  // WEBSOCKET DISABLED - UNCOMMENT TO ENABLE
+  // ========================================
   // Initialize WebSocket service (async for Redis connection)
-  const webSocketService = container.get<WebSocketService>(TYPES.WebSocketService);
-  await webSocketService.initialize(httpServer);
+  // const webSocketService = container.get<WebSocketService>(TYPES.WebSocketService);
+  // await webSocketService.initialize(httpServer);
 
   // Inject WebSocketService into NotificationService
+  // const notificationService = container.get<NotificationService>(TYPES.NotificationService);
+  // notificationService.setWebSocketService(webSocketService);
+
+  // Get NotificationService without WebSocket
   const notificationService = container.get<NotificationService>(TYPES.NotificationService);
-  notificationService.setWebSocketService(webSocketService);
+  console.log('⚠️ WebSocket disabled - notifications will use push/email only');
 
   // Inject NotificationService into PayoutService
   const payoutService = container.get<IPayoutService>(TYPES.PayoutService);
@@ -86,8 +93,8 @@ const startServer = async () => {
     (productService as any).setNotificationService(notificationService);
   }
 
-  // Store WebSocketService globally for easy access (optional, for backward compatibility)
-  (global as any).webSocketService = webSocketService;
+  // WebSocket disabled - no global assignment needed
+  // (global as any).webSocketService = webSocketService;
 
   const port = PORT ? parseInt(PORT, 10) : 6000;
   httpServer.listen(port, '0.0.0.0', () => {
@@ -98,7 +105,7 @@ const startServer = async () => {
                 🌐 Listening on 0.0.0.0 (all interfaces)
                 ################################################
                 SERVER IN ${process.env.NODE_ENV as string} MODE
-                🔌 WebSocket server initialized
+                ⚠️  WebSocket DISABLED - using push/email only
               `);
     }
   });
