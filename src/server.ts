@@ -69,19 +69,15 @@ const startServer = async () => {
   const httpServer = createServer(app);
 
   // ========================================
-  // WEBSOCKET DISABLED - UNCOMMENT TO ENABLE
+  // WEBSOCKET ENABLED
   // ========================================
   // Initialize WebSocket service (async for Redis connection)
-  // const webSocketService = container.get<WebSocketService>(TYPES.WebSocketService);
-  // await webSocketService.initialize(httpServer);
+  const webSocketService = container.get<WebSocketService>(TYPES.WebSocketService);
+  await webSocketService.initialize(httpServer);
 
   // Inject WebSocketService into NotificationService
-  // const notificationService = container.get<NotificationService>(TYPES.NotificationService);
-  // notificationService.setWebSocketService(webSocketService);
-
-  // Get NotificationService without WebSocket
   const notificationService = container.get<NotificationService>(TYPES.NotificationService);
-  console.log('⚠️ WebSocket disabled - notifications will use push/email only');
+  notificationService.setWebSocketService(webSocketService);
 
   // Inject NotificationService into PayoutService
   const payoutService = container.get<IPayoutService>(TYPES.PayoutService);
@@ -93,8 +89,8 @@ const startServer = async () => {
     (productService as any).setNotificationService(notificationService);
   }
 
-  // WebSocket disabled - no global assignment needed
-  // (global as any).webSocketService = webSocketService;
+  // Make WebSocket service globally available
+  (global as any).webSocketService = webSocketService;
 
   const port = PORT ? parseInt(PORT, 10) : 6000;
   httpServer.listen(port, '0.0.0.0', () => {
@@ -105,7 +101,7 @@ const startServer = async () => {
                 🌐 Listening on 0.0.0.0 (all interfaces)
                 ################################################
                 SERVER IN ${process.env.NODE_ENV as string} MODE
-                ⚠️  WebSocket DISABLED - using push/email only
+                ✅ WebSocket ENABLED - real-time notifications active
               `);
     }
   });

@@ -9,7 +9,6 @@ import compression from 'compression';
 import { Model } from 'mongoose';
 
 import { env } from './config';
-import './controllers';
 import errorMiddleWare from './utils/errors/errorHandler';
 import multerErrorHandler from './middlewares/multerErrorHandler';
 
@@ -184,6 +183,12 @@ container.bind<ISKUService>(TYPES.SKUService).to(SKUService);
 container.bind<ITranslationService>(TYPES.TranslationService).to(TranslationService);
 
 /* ===========================
+   IMPORT CONTROLLERS (AFTER CONTAINER IS CREATED)
+   Using require() not import because import is hoisted!
+=========================== */
+require('./controllers');
+
+/* ===========================
    SERVER SETUP
 =========================== */
 const server = new InversifyExpressServer(container);
@@ -234,12 +239,11 @@ server.setConfig((app) => {
       console.warn('Swagger setup failed:', err);
     }
   }
+});
 
-  /* 7️⃣ ERROR HANDLERS */
-  app.use(multerErrorHandler);
-  app.use(errorMiddleWare);
-
-  /* 8️⃣ 404 */
+// Error handlers and 404 must run AFTER controller routes are registered
+server.setErrorConfig((app) => {
+  /* 7️⃣ 404 - Must come before error handlers */
   app.all('*', (req: Request, res: Response) => {
     if (req.method === 'OPTIONS') return res.sendStatus(204);
 
@@ -248,6 +252,10 @@ server.setConfig((app) => {
       message: 'This endpoint does not exist on this server',
     });
   });
+
+  /* 8️⃣ ERROR HANDLERS */
+  app.use(multerErrorHandler);
+  app.use(errorMiddleWare);
 });
 
 const app = server.build();
