@@ -126,14 +126,32 @@ export class AuthService extends BaseService implements IAuthService {
       // Send verification email with role-specific URL
       const userRole = role || 'user';
       console.log(`📧 Preparing to send verification email for user with role: ${userRole}`);
+      let emailSent = false;
+      let emailError: any = null;
       try {
         await this.sendVerificationEmail(normalizedEmail, firstName, verifyCode, userRole);
-      } catch (emailError) {
-        console.error('Failed to send verification email:', emailError);
-        // Don't fail signup if email fails, but log it
+        console.log(`✅ Verification email sent successfully to: ${normalizedEmail}`);
+        emailSent = true;
+      } catch (err: any) {
+        emailError = err;
+        console.error('❌ Failed to send verification email during signup:', err);
+        console.error('Error details:', {
+          email: normalizedEmail,
+          message: err?.message,
+          response: err?.response?.data || err?.response,
+        });
+        // Don't fail signup if email fails - user can resend later
       }
 
-      return { id: newUser._id, email: normalizedEmail, firstName, lastName };
+      // Return user data with email status
+      return { 
+        id: newUser._id, 
+        email: normalizedEmail, 
+        firstName, 
+        lastName,
+        emailSent,
+        emailError: emailSent ? null : (emailError?.message || 'Email service unavailable')
+      };
     } catch (error: any) {
       // Handle MongoDB validation errors
       if (error.name === 'ValidationError') {

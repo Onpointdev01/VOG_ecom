@@ -73,7 +73,11 @@ export class AuthController extends BaseController {
   @httpPost('/signup')
   async signUpUser(@response() res: Response, @requestBody() payload: SignUpUserDTO) {
     const newUser = await this.authService.signupUser(payload);
-    return this.sendResponse(res, 201, 'created user successfully', newUser);
+    // If email wasn't sent, include warning in message
+    const message = newUser.emailSent 
+      ? 'created user successfully' 
+      : 'Account created successfully, but we couldn\'t send the verification email. Please use the "Resend Verification" option.';
+    return this.sendResponse(res, 201, message, newUser);
   }
 
   //signup seller
