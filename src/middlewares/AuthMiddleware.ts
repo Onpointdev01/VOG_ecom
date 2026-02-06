@@ -42,13 +42,15 @@ export class RequireSignIn extends BaseMiddleware {
 
         if (!userId) return next(new AppError('Invalid token provided', 403));
 
-        //save user object in body if user isn't banned/deleted
-        const user = await this.authService.checkBannedOrDeleted(userId);
-
-        req.user = user as IUser;
-        res.locals.user = userId;
-
-        next();
+        try {
+          //save user object in body if user isn't banned/deleted
+          const user = await this.authService.checkBannedOrDeleted(userId);
+          req.user = user as IUser;
+          res.locals.user = userId;
+          next();
+        } catch (e) {
+          next(e);
+        }
       });
     } catch (err) {
       next(err);
@@ -160,16 +162,15 @@ export class OptionalAuth extends BaseMiddleware {
 
           if (!userId) return next(new AppError('Invalid token provided', 403));
 
-          // Retrieve user details and attach to request object
-          const user = await this.authService.checkBannedOrDeleted(userId);
-
-          if (!user) {
-            return next(new AppError('User not found or is banned', 403));
+          try {
+            const user = await this.authService.checkBannedOrDeleted(userId);
+            req.user = user as IUser;
+            res.locals.user = user as IUser;
+            return next();
+          } catch (e) {
+            // OptionalAuth: user not found or banned – continue without attaching user
+            return next();
           }
-
-          req.user = user as IUser; // Attach user to req object for later use in controller
-          res.locals.user = user as IUser; // Store user ID in res.locals to make it available in controllers
-          return next(); // Make sure to call next() only after everything is set
         });
 
         // If token is verified correctly, return and do not continue further

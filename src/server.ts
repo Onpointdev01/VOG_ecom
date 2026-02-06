@@ -10,6 +10,11 @@ dotenv.config();
 
 const { PORT } = process.env;
 
+// Prevent unhandled promise rejections from crashing the process (e.g. auth middleware)
+process.on('unhandledRejection', (reason: unknown) => {
+  logger.error('Unhandled Rejection:', reason);
+});
+
 const startServer = async () => {
   await connectToDB();
 

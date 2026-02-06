@@ -86,6 +86,8 @@ import {
   AttributeValueService,
   ISellerService,
   SellerService,
+  IBoutiqueService,
+  BoutiqueService,
 } from './services';
 import { NotificationService } from './services/NotificationService';
 import { OptionalAuth, RequireAdmin, RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
@@ -138,6 +140,7 @@ container.bind<IShippingZoneService>(TYPES.ShippingZoneService).to(ShippingZoneS
 container.bind<IAttributeService>(TYPES.AttributeService).to(AttributeService);
 container.bind<IAttributeValueService>(TYPES.AttributeValueService).to(AttributeValueService);
 container.bind<ISellerService>(TYPES.SellerService).to(SellerService);
+container.bind<IBoutiqueService>(TYPES.BoutiqueService).to(BoutiqueService);
 container.bind<NotificationService>(TYPES.NotificationService).to(NotificationService);
 
 const server = new InversifyExpressServer(container);

@@ -37,6 +37,7 @@ export const TYPES = {
   AttributeService: Symbol.for('AttributeService'),
   AttributeValueService: Symbol.for('AttributeValueService'),
   SellerService: Symbol.for('SellerService'),
+  BoutiqueService: Symbol.for('BoutiqueService'),
   NotificationService: Symbol.for('NotificationService'),
 
   RequireSignIn: Symbol.for('RequireSignIn'),

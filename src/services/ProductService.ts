@@ -40,6 +40,18 @@ export interface IProductService {
     page: number,
     limit: number
   ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}>;
+  getProductsByBoutiqueId(
+    boutiqueId: string,
+    page: number,
+    limit: number,
+    filters?: {
+      category?: string;
+      min_price?: number;
+      max_price?: number;
+      in_stock?: boolean;
+      sort?: 'price_asc' | 'price_desc' | 'newest' | 'best_selling';
+    }
+  ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}>;
   updateProduct(id: string, payload: Partial<IProduct>): Promise<IProduct>;
   deleteProduct(id: string): Promise<void>;
   reviewProduct(review: createReviewDTO): Promise<IReview>;
@@ -960,6 +972,200 @@ export class ProductService extends BaseService implements IProductService {
 
     const total = result[0].totalCount[0]?.count || 0;
     const totalPages = Math.ceil(total / limit);
+
+    return {
+      products,
+      total,
+      totalPages,
+      currentPage: page,
+    };
+  }
+
+  /**
+   * Products by boutique (seller) with optional filters and sort.
+   * Reuses same aggregation shape as getProductsBySellerId; no duplicated business logic.
+   */
+  async getProductsByBoutiqueId(
+    boutiqueId: string,
+    page: number,
+    limit: number,
+    filters?: {
+      category?: string;
+      min_price?: number;
+      max_price?: number;
+      in_stock?: boolean;
+      sort?: 'price_asc' | 'price_desc' | 'newest' | 'best_selling';
+    }
+  ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}> {
+    const skip = (page - 1) * limit;
+    await this.verifySeller(boutiqueId);
+
+    const pipeline: any[] = [
+      { $match: { owner: new mongoose.Types.ObjectId(boutiqueId), isActive: true } },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category',
+          foreignField: '_id',
+          as: 'categoryData',
+        },
+      },
+      { $unwind: { path: '$categoryData', preserveNullAndEmptyArrays: true } },
+    ];
+
+    if (filters?.category) {
+      const cat = filters.category.trim();
+      const isObjectId = mongoose.Types.ObjectId.isValid(cat) && String(new mongoose.Types.ObjectId(cat)) === cat;
+      pipeline.push({
+        $match: isObjectId
+          ? { 'category': new mongoose.Types.ObjectId(cat) }
+          : { 'categoryData.name': { $regex: cat, $options: 'i' } },
+      });
+    }
+
+    pipeline.push(
+      {
+        $lookup: {
+          from: 'sellers',
+          localField: 'owner',
+          foreignField: '_id',
+          as: 'ownerData',
+        },
+      },
+      {
+        $addFields: {
+          owner: {
+            $cond: {
+              if: { $eq: [{ $size: '$ownerData' }, 0] },
+              then: null,
+              else: { $arrayElemAt: ['$ownerData', 0] },
+            },
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: 'productvariants',
+          localField: '_id',
+          foreignField: 'product',
+          as: 'variants',
+          pipeline: [
+            { $match: { isActive: true } },
+            { $project: { sku: 1, size: 1, color: 1, price: 1, quantityAvailable: 1, images: 1 } },
+          ],
+        },
+      },
+      {
+        $addFields: {
+          computedPrice: {
+            $cond: {
+              if: { $eq: ['$productType', 'variable'] },
+              then: {
+                $cond: {
+                  if: { $gt: [{ $size: '$variants' }, 0] },
+                  then: { $min: '$variants.price' },
+                  else: '$price',
+                },
+              },
+              else: '$price',
+            },
+          },
+          priceRange: {
+            $cond: {
+              if: { $and: [{ $eq: ['$productType', 'variable'] }, { $gt: [{ $size: '$variants' }, 0] }] },
+              then: { min: { $min: '$variants.price' }, max: { $max: '$variants.price' } },
+              else: null,
+            },
+          },
+          totalStock: {
+            $cond: {
+              if: { $eq: ['$productType', 'variable'] },
+              then: { $sum: '$variants.quantityAvailable' },
+              else: '$quantityAvailable',
+            },
+          },
+        },
+      }
+    );
+
+    if (filters?.min_price != null && !isNaN(filters.min_price)) {
+      pipeline.push({ $match: { computedPrice: { $gte: Number(filters.min_price) } } });
+    }
+    if (filters?.max_price != null && !isNaN(filters.max_price)) {
+      pipeline.push({ $match: { computedPrice: { $lte: Number(filters.max_price) } } });
+    }
+    if (filters?.in_stock === true) {
+      pipeline.push({ $match: { $expr: { $gt: ['$totalStock', 0] } } });
+    }
+
+    const sortOption = filters?.sort || 'newest';
+    const sortStage: Record<string, 1 | -1> =
+      sortOption === 'price_asc'
+        ? { computedPrice: 1, createdAt: -1 }
+        : sortOption === 'price_desc'
+          ? { computedPrice: -1, createdAt: -1 }
+          : sortOption === 'best_selling'
+            ? { noOfReviews: -1, createdAt: -1 }
+            : { createdAt: -1 };
+    pipeline.push({ $sort: sortStage });
+
+    pipeline.push({
+      $facet: {
+        products: [{ $skip: skip }, { $limit: limit }],
+        totalCount: [{ $count: 'count' }],
+      },
+    });
+
+    const result = await this.Product.aggregate(pipeline);
+    const products = (result[0].products || []).map((product: any) => ({
+      id: product._id.toString(),
+      name: product.name,
+      description: product.description,
+      productType: product.productType,
+      price: product.price,
+      originalPrice: product.originalPrice,
+      rating: product.rating,
+      noOfReviews: product.noOfReviews,
+      images: product.images,
+      isActive: product.isActive,
+      isFlash: product.isFlash,
+      brand: product.brand,
+      condition: product.condition,
+      color: product.color,
+      quantityAvailable: product.quantityAvailable,
+      computedPrice: product.computedPrice,
+      priceRange: product.priceRange,
+      totalStock: product.totalStock,
+      attributes: product.attributes,
+      category: product.categoryData
+        ? { id: product.categoryData._id?.toString(), name: product.categoryData.name }
+        : product.category
+          ? { id: product.category?.toString(), name: '' }
+          : null,
+      owner: product.owner
+        ? {
+            id: product.owner._id?.toString(),
+            name: product.owner.name,
+            rating: product.owner.rating,
+            logo: product.owner.logo,
+            official: product.owner.official,
+          }
+        : null,
+      variants:
+        product.variants?.map((variant: any) => ({
+          id: variant._id?.toString(),
+          sku: variant.sku,
+          size: variant.size,
+          color: variant.color,
+          price: variant.price,
+          quantityAvailable: variant.quantityAvailable,
+          images: variant.images,
+        })) || [],
+      createdAt: product.createdAt,
+    }));
+
+    const total = result[0].totalCount[0]?.count || 0;
+    const totalPages = Math.ceil(total / limit) || 1;
 
     return {
       products,

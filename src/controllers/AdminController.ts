@@ -545,6 +545,12 @@ export class AdminController extends BaseController {
     return this.sendResponse(res, 200, 'Orders retrieved successfully', orders);
   }
 
+  @httpGet('/orders/stats', TYPES.RequireAdmin)
+  public async getOrderStats(@response() res: Response) {
+    const stats = await this.adminService.getOrderStats();
+    return this.sendResponse(res, 200, 'Order stats retrieved successfully', stats);
+  }
+
   @httpPut('/orders/:orderId/status', TYPES.RequireAdmin)
   public async updateOrderStatus(
     @response() res: Response,
