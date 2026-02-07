@@ -45,7 +45,6 @@ export interface IAdminService {
   
   // Order Management
   getAllOrders(filters: any, page: number, limit: number): Promise<{ orders: IOrder[]; total: number; totalPages: number; currentPage: number }>;
-  getOrderStats(): Promise<{ total: number; pending: number; confirmed: number; outForDelivery: number; complete: number; cancelled: number }>;
   updateOrderStatus(orderId: string, orderStatus: string): Promise<IOrder>;
   updateOrderPaymentStatus(orderId: string, paymentStatus: string): Promise<IOrder>;
   getOrderDetails(orderId: string): Promise<IOrder>;
@@ -520,74 +519,25 @@ export class AdminService extends BaseService implements IAdminService {
   // Order Management Methods
   async getAllOrders(filters: any, page: number, limit: number): Promise<{ orders: IOrder[]; total: number; totalPages: number; currentPage: number }> {
     const skip = (page - 1) * limit;
-
+    
     const orders = await Order.find(filters)
       .populate('user', 'firstName lastName email')
-      .populate({
-        path: 'items.product',
-        select: 'name price images owner',
-        populate: {
-          path: 'owner',
-          model: Seller,
-          select: 'name logo user',
-          populate: {
-            path: 'user',
-            model: User,
-            select: 'email',
-          },
-        },
-      })
+      .populate('items.product', 'name price images')
       .populate('payments', 'transactionId paymentMethod status amount providerTransactionId createdAt')
       .populate('activePayment', 'transactionId paymentMethod status amount providerTransactionId createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit)
-      .lean();
+      .limit(limit);
 
     const total = await Order.countDocuments(filters);
     const totalPages = Math.ceil(total / limit);
 
-    const ordersWithSellerShop = (orders as any[]).map((order) => {
-      const owner = order.items?.[0]?.product?.owner;
-      const seller = owner
-        ? {
-            seller_id: owner._id?.toString?.() || owner.id,
-            seller_name: owner.name ?? null,
-            seller_email: owner.user?.email ?? null,
-            shop_id: owner._id?.toString?.() || owner.id,
-            shop_name: owner.name ?? null,
-            shop_logo: owner.logo ?? null,
-          }
-        : {
-            seller_id: null,
-            seller_name: null,
-            seller_email: null,
-            shop_id: null,
-            shop_name: null,
-            shop_logo: null,
-          };
-      return { ...order, ...seller };
-    });
-
     return {
-      orders: ordersWithSellerShop as IOrder[],
+      orders: orders as IOrder[],
       total,
       totalPages,
       currentPage: page,
     };
-  }
-
-  async getOrderStats(): Promise<{ total: number; pending: number; confirmed: number; outForDelivery: number; complete: number; cancelled: number }> {
-    const [total, ...counts] = await Promise.all([
-      Order.countDocuments(),
-      Order.countDocuments({ orderStatus: 'PENDING' }),
-      Order.countDocuments({ orderStatus: 'CONFIRMED' }),
-      Order.countDocuments({ orderStatus: 'OUT_FOR_DELIVERY' }),
-      Order.countDocuments({ orderStatus: 'COMPLETE' }),
-      Order.countDocuments({ orderStatus: 'CANCELLED' }),
-    ]);
-    const [pending, confirmed, outForDelivery, complete, cancelled] = counts;
-    return { total, pending, confirmed, outForDelivery, complete, cancelled };
   }
 
   async updateOrderStatus(orderId: string, orderStatus: string): Promise<IOrder> {
@@ -611,48 +561,15 @@ export class AdminService extends BaseService implements IAdminService {
   async getOrderDetails(orderId: string): Promise<IOrder> {
     const order = await Order.findById(orderId)
       .populate('user', 'firstName lastName email phoneNumber')
-      .populate({
-        path: 'items.product',
-        select: 'name price images brand description owner',
-        populate: {
-          path: 'owner',
-          model: Seller,
-          select: 'name logo user',
-          populate: {
-            path: 'user',
-            model: User,
-            select: 'email',
-          },
-        },
-      })
+      .populate('items.product', 'name price images brand description')
       .populate('payments', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt')
-      .populate('activePayment', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt')
-      .lean();
+      .populate('activePayment', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt');
 
     if (!order) {
       throw new AppError('Order not found', 404);
     }
 
-    const owner = (order as any).items?.[0]?.product?.owner;
-    const seller = owner
-      ? {
-          seller_id: owner._id?.toString?.() || owner.id,
-          seller_name: owner.name ?? null,
-          seller_email: owner.user?.email ?? null,
-          shop_id: owner._id?.toString?.() || owner.id,
-          shop_name: owner.name ?? null,
-          shop_logo: owner.logo ?? null,
-        }
-      : {
-          seller_id: null,
-          seller_name: null,
-          seller_email: null,
-          shop_id: null,
-          shop_name: null,
-          shop_logo: null,
-        };
-
-    return { ...order, ...seller } as IOrder;
+    return order as IOrder;
   }
 
   // =====================================

@@ -15,4 +15,3 @@ export * from './ShippingZoneController';
 export * from './AttributeController';
 export * from './AttributeValueController';
 export * from './SellerController';
-export * from './BoutiqueController';
