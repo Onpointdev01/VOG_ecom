@@ -630,14 +630,8 @@ export class AdminService extends BaseService implements IAdminService {
           populate: {
             path: 'owner',
             model: 'Seller',
-            select: 'name logo user',
+            select: 'name logo',
             options: { strictPopulate: false },
-            populate: {
-              path: 'user',
-              model: 'User',
-              select: 'firstName lastName',
-              options: { strictPopulate: false },
-            },
           },
         })
         .populate({
@@ -655,67 +649,20 @@ export class AdminService extends BaseService implements IAdminService {
         .limit(limit)
         .lean();
 
-      let ordersWithSellerInfo = (orders as any[]).map((order) => {
+      const ordersWithSellerInfo = (orders as any[]).map((order) => {
         const firstItem = order.items && order.items[0];
         const product = firstItem?.product;
         const owner = product?.owner;
         const sellerId = owner?._id?.toString?.() ?? owner?.id ?? (typeof owner === 'string' ? owner : null);
-        const ownerUser = owner?.user;
-        const sellerName = ownerUser
-          ? [ownerUser.firstName, ownerUser.lastName].filter(Boolean).join(' ').trim() || null
-          : null;
-        const shopName = owner?.name ?? null;
+        const sellerName = owner?.name ?? null;
         const sellerLogo = owner?.logo ?? null;
         return {
           ...order,
           ...(sellerId && { seller_id: sellerId }),
-          ...(sellerName && { seller_name: sellerName }),
-          ...(shopName && { shop_name: shopName }),
+          ...(sellerName && { seller_name: sellerName, shop_name: sellerName }),
           ...(sellerLogo && { shop_logo: sellerLogo }),
         };
       });
-
-      // Fallback: if any order has no seller name (populate may have failed or owner not in select), fetch Seller with user by product owner
-      const ordersMissingSeller = ordersWithSellerInfo.filter((o: any) => !o.seller_name && !o.shop_name && o.items?.[0]?.product?._id);
-      if (ordersMissingSeller.length > 0) {
-        const productIds = ordersMissingSeller.map((o: any) => o.items[0].product._id);
-        const productsWithOwner = await Product.find({ _id: { $in: productIds } })
-          .select('owner')
-          .populate({
-            path: 'owner',
-            model: Seller,
-            select: 'name logo user',
-            options: { strictPopulate: false },
-            populate: { path: 'user', model: User, select: 'firstName lastName', options: { strictPopulate: false } },
-          })
-          .lean();
-        const productToSeller = new Map<string, { id: string; sellerName: string; shopName: string; logo: string | null }>();
-        for (const p of productsWithOwner as any[]) {
-          const owner = p?.owner;
-          if (!owner) continue;
-          const id = owner._id?.toString?.() ?? owner.id ?? (typeof owner === 'string' ? owner : null);
-          const ownerUser = owner?.user;
-          const sellerName = ownerUser
-            ? [ownerUser.firstName, ownerUser.lastName].filter(Boolean).join(' ').trim() || ''
-            : '';
-          const shopName = owner?.name ?? '';
-          const logo = owner?.logo ?? null;
-          if (id) productToSeller.set(p._id.toString(), { id, sellerName, shopName, logo: logo || null });
-        }
-        ordersWithSellerInfo = ordersWithSellerInfo.map((o: any) => {
-          if (o.seller_name || o.shop_name) return o;
-          const firstProductId = o.items?.[0]?.product?._id?.toString?.();
-          const seller = firstProductId ? productToSeller.get(firstProductId) : null;
-          if (!seller) return o;
-          return {
-            ...o,
-            seller_id: seller.id,
-            ...(seller.sellerName && { seller_name: seller.sellerName }),
-            ...(seller.shopName && { shop_name: seller.shopName }),
-            ...(seller.logo && { shop_logo: seller.logo }),
-          };
-        });
-      }
 
       const ordersWithUsers = ordersWithSellerInfo.filter(order => {
         if (!order.user) {
@@ -803,14 +750,8 @@ export class AdminService extends BaseService implements IAdminService {
           populate: {
             path: 'owner',
             model: 'Seller',
-            select: 'name logo user',
+            select: 'name logo',
             options: { strictPopulate: false },
-            populate: {
-              path: 'user',
-              model: 'User',
-              select: 'firstName lastName',
-              options: { strictPopulate: false },
-            },
           },
         })
         .populate({
@@ -888,21 +829,18 @@ export class AdminService extends BaseService implements IAdminService {
       }
 
       // Attach seller/shop info from first item's product owner (for admin UI)
-      // seller_name = owner's (User) name; shop_name = Seller's business name
       const firstItem = orderData.items && orderData.items[0];
       const product = firstItem?.product;
       const owner = product?.owner;
       if (owner) {
         const sid = owner._id?.toString?.() ?? owner.id ?? (typeof owner === 'string' ? owner : null);
-        const ownerUser = owner?.user;
-        const sellerName = ownerUser
-          ? [ownerUser.firstName, ownerUser.lastName].filter(Boolean).join(' ').trim() || null
-          : null;
-        const shopName = owner?.name ?? null;
-        const slogo = owner?.logo ?? null;
+        const sname = owner.name ?? null;
+        const slogo = owner.logo ?? null;
         if (sid) orderData.seller_id = sid;
-        if (sellerName) orderData.seller_name = sellerName;
-        if (shopName) orderData.shop_name = shopName;
+        if (sname) {
+          orderData.seller_name = sname;
+          orderData.shop_name = sname;
+        }
         if (slogo) orderData.shop_logo = slogo;
       }
 
