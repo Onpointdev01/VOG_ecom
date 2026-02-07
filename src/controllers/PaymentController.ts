@@ -6,12 +6,27 @@ import { PaymentService } from '../services/PaymentService';
 import { TYPES } from '../di';
 import AppError from '../utils/errors/AppError';
 
-@controller('/admin/payments', TYPES.RequireAdmin)
+@controller('/api/v1/admin/payments', TYPES.RequireAdmin)
 export class PaymentController extends BaseController {
   constructor(
     @inject(TYPES.PaymentService) private paymentService: PaymentService
   ) {
     super();
+  }
+
+  @httpGet('/stats')
+  async getPaymentStats(req: Request, res: Response) {
+    try {
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+
+      const stats = await this.paymentService.getPaymentStats(startDate, endDate);
+
+      return this.sendResponse(res, 200, 'Payment statistics retrieved successfully', stats);
+    } catch (error) {
+      console.error('Error fetching payment stats:', error);
+      return this.sendResponse(res, 500, 'Failed to fetch payment statistics');
+    }
   }
 
   @httpGet('/')
@@ -86,21 +101,6 @@ export class PaymentController extends BaseController {
     } catch (error) {
       console.error('Error fetching payment:', error);
       return this.sendResponse(res, 500, 'Failed to fetch payment');
-    }
-  }
-
-  @httpGet('/stats')
-  async getPaymentStats(req: Request, res: Response) {
-    try {
-      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
-      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
-
-      const stats = await this.paymentService.getPaymentStats(startDate, endDate);
-
-      return this.sendResponse(res, 200, 'Payment statistics retrieved successfully', stats);
-    } catch (error) {
-      console.error('Error fetching payment stats:', error);
-      return this.sendResponse(res, 500, 'Failed to fetch payment statistics');
     }
   }
 

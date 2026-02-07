@@ -67,6 +67,8 @@ const userSchema: Schema = new Schema<IUser>(
     email: {
       type: String,
       unique: true,
+      lowercase: true, // Automatically convert to lowercase
+      trim: true, // Automatically trim whitespace
       validate: [validator.isEmail, 'Email is invalid'],
       required: [true, 'Email address is required'],
     },

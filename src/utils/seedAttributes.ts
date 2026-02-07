@@ -14,7 +14,9 @@ const seedAttributes = async () => {
     console.log('🌱 Starting attribute seeding...');
 
     // Connect to database
-    await mongoose.connect(MONGO_URL);
+    await mongoose.connect(MONGO_URL, {
+      serverSelectionTimeoutMS: 5000, // fail fast if DNS fails
+    });
     console.log('✅ Connected to MongoDB');
 
     // 1. Create Size Attribute for Clothing

@@ -7,16 +7,18 @@ import {
   httpDelete,
   requestBody,
   requestParam,
+  request,
   response,
   queryParam,
 } from 'inversify-express-utils';
-import { Response } from 'express';
+import { Response, Request } from 'express';
 import TYPES from '../di';
 import { AdminService, CreateAdminRequest } from '../services/AdminService';
 import { IProductBidService, IBidMessageService } from '../services';
 import { OrderService } from '../services/OrderService';
 import { BaseController } from './BaseController';
 import AppError from '../utils/errors/AppError';
+import { Product } from '../models';
 
 export interface SignInAdminDTO {
   email: string;
@@ -43,6 +45,20 @@ export class AdminController extends BaseController {
     @inject(TYPES.OrderService) private orderService: OrderService
   ) {
     super();
+  }
+
+  /**
+   * Fix complete orders payment status (admin utility)
+   * POST /api/v1/admin/orders/fix-payment-status
+   */
+  @httpPost('/orders/fix-payment-status', TYPES.RequireAdmin)
+  public async fixCompleteOrdersPaymentStatus(@response() res: Response) {
+    try {
+      const result = await this.orderService.fixCompleteOrdersPaymentStatus();
+      return this.sendResponse(res, 200, `Fixed ${result.updated} orders`, result);
+    } catch (error: any) {
+      throw new AppError(error.message || 'Failed to fix orders', error.statusCode || 500);
+    }
   }
 
   @httpPost('/signup')
@@ -502,6 +518,22 @@ export class AdminController extends BaseController {
   }
 
   // Order Management Endpoints
+  @httpGet('/orders/stats', TYPES.RequireAdmin)
+  public async getOrderStats(@response() res: Response) {
+    try {
+      const stats = await this.adminService.getOrderStats();
+      return this.sendResponse(res, 200, 'Order statistics retrieved successfully', stats);
+    } catch (error: any) {
+      console.error('Error fetching order stats:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      return this.sendResponse(res, 500, error.message || 'Failed to fetch order statistics');
+    }
+  }
+
   @httpGet('/orders', TYPES.RequireAdmin)
   public async getAllOrders(
     @response() res: Response,
@@ -513,36 +545,46 @@ export class AdminController extends BaseController {
     @queryParam('dateFrom') dateFrom?: string,
     @queryParam('dateTo') dateTo?: string
   ) {
-    const pageNumber = Math.max(1, parseInt(page) || 1);
-    const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 10));
-    
-    const filters: any = {};
-    
-    if (status) {
-      filters.orderStatus = status;
-    }
-    
-    if (paymentStatus) {
-      filters.paymentStatus = paymentStatus;
-    }
-    
-    if (search) {
-      filters.$or = [
-        { orderNumber: { $regex: search, $options: 'i' } },
-        { 'shippingAddress.fullName': { $regex: search, $options: 'i' } },
-        { 'shippingAddress.phoneNumber': { $regex: search, $options: 'i' } }
-      ];
-    }
-    
-    if (dateFrom || dateTo) {
-      filters.createdAt = {};
-      if (dateFrom) filters.createdAt.$gte = new Date(dateFrom);
-      if (dateTo) filters.createdAt.$lte = new Date(dateTo);
-    }
+    try {
+      const pageNumber = Math.max(1, parseInt(page) || 1);
+      const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 10));
+      
+      const filters: any = {};
+      
+      if (status) {
+        filters.orderStatus = status;
+      }
+      
+      if (paymentStatus) {
+        filters.paymentStatus = paymentStatus;
+      }
+      
+      if (search) {
+        filters.$or = [
+          { orderNumber: { $regex: search, $options: 'i' } },
+          { 'shippingAddress.fullName': { $regex: search, $options: 'i' } },
+          { 'shippingAddress.phoneNumber': { $regex: search, $options: 'i' } }
+        ];
+      }
+      
+      if (dateFrom || dateTo) {
+        filters.createdAt = {};
+        if (dateFrom) filters.createdAt.$gte = new Date(dateFrom);
+        if (dateTo) filters.createdAt.$lte = new Date(dateTo);
+      }
 
-    const orders = await this.adminService.getAllOrders(filters, pageNumber, limitNumber);
-    
-    return this.sendResponse(res, 200, 'Orders retrieved successfully', orders);
+      const orders = await this.adminService.getAllOrders(filters, pageNumber, limitNumber);
+      
+      return this.sendResponse(res, 200, 'Orders retrieved successfully', orders);
+    } catch (error: any) {
+      console.error('Error in getAllOrders controller:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      throw error; // Re-throw to let error handler process it
+    }
   }
 
   @httpGet('/orders/stats', TYPES.RequireAdmin)
@@ -554,14 +596,21 @@ export class AdminController extends BaseController {
   @httpPut('/orders/:orderId/status', TYPES.RequireAdmin)
   public async updateOrderStatus(
     @response() res: Response,
+    @request() req: Request,
     @requestParam('orderId') orderId: string,
     @requestBody() payload: { orderStatus: string }
   ) {
     const { orderStatus } = payload;
+    const admin = (req as any).admin;
 
     // Use OrderService instead of AdminService to ensure notifications are sent
     // OrderService handles cart clearing and push notifications
-    const order = await this.orderService.updateOrderStatus(orderId, orderStatus);
+    // Pass adminId to exclude this admin from receiving notifications
+    const order = await this.orderService.updateOrderStatus(
+      orderId, 
+      orderStatus,
+      { adminId: admin?._id?.toString() || admin?.id }
+    );
 
     return this.sendResponse(res, 200, 'Order status updated successfully', order);
   }
@@ -586,8 +635,16 @@ export class AdminController extends BaseController {
 
   @httpGet('/orders/:orderId', TYPES.RequireAdmin)
   public async getOrderDetails(@response() res: Response, @requestParam('orderId') orderId: string) {
-    const order = await this.adminService.getOrderDetails(orderId);
-    return this.sendResponse(res, 200, 'Order details retrieved successfully', order);
+    try {
+      if (!orderId || orderId === 'undefined') {
+        return this.sendResponse(res, 400, 'Order ID is required');
+      }
+      const order = await this.adminService.getOrderDetails(orderId);
+      return this.sendResponse(res, 200, 'Order details retrieved successfully', order);
+    } catch (error: any) {
+      console.error('Error in getOrderDetails controller:', error);
+      throw error;
+    }
   }
 
   // =====================================
@@ -659,22 +716,61 @@ export class AdminController extends BaseController {
   @httpPut('/bids/:bidId/accept', TYPES.RequireAdmin)
   public async acceptBid(
     @response() res: Response,
-    @requestParam('bidId') bidId: string
+    @requestParam('bidId') bidId: string,
+    @requestBody() payload: { reason?: string }
   ) {
-    const bid = await this.productBidService.forceAcceptBid(bidId);
+    const { reason } = payload || {};
     
-    // Send notification to buyer - same as seller acceptance
-    if (bid.seller && bid.buyer) {
-      await this.bidMessageService.createBidAcceptedMessage(
-        bid.seller.toString(),
-        bid.buyer.toString(),
-        bid.product.toString(),
-        bidId,
-        `Your bid of $${bid.bidPrice} has been accepted by admin!`
-      );
+    const bid = await this.productBidService.forceAcceptBid(bidId, reason);
+    
+    // Create BID_ACCEPTED message in chat
+    if (bid.buyer && bid.product) {
+      try {
+        const buyerId = typeof bid.buyer === 'object' && (bid.buyer as any)._id 
+          ? (bid.buyer as any)._id.toString() 
+          : bid.buyer.toString();
+        
+        const productId = typeof bid.product === 'object' && (bid.product as any)._id 
+          ? (bid.product as any)._id.toString() 
+          : bid.product.toString();
+        
+        // Get product owner (seller) - need to fetch product to get owner
+        const product = await Product.findById(productId).populate('owner', '_id');
+        const sellerUserId = product?.owner?._id?.toString() || product?.owner?.toString() || res.locals.admin;
+        
+        const productName = typeof bid.product === 'object' && (bid.product as any).name
+          ? (bid.product as any).name
+          : 'Product';
+        
+        const message = reason 
+          ? `Your bid of $${bid.bidPrice} has been accepted! Reason: ${reason}`
+          : `Your bid of $${bid.bidPrice} has been accepted!`;
+        
+        // IMPORTANT: sender = seller/admin (who accepts), recipient = buyer (who receives the acceptance)
+        // Use seller's user ID if available, otherwise use admin ID
+        await this.bidMessageService.createBidAcceptedMessage(
+          sellerUserId, // sender: seller's user ID or admin ID
+          buyerId, // recipient: buyer
+          productId,
+          bidId,
+          message
+        );
+        
+        console.log(`✅ Created BID_ACCEPTED message for bid ${bidId}: sender=${sellerUserId}, recipient=${buyerId}, productId=${productId}`);
+      } catch (error) {
+        console.error('❌ Failed to create bid accepted message:', error);
+        // Don't fail the request if message creation fails
+      }
     }
     
-    return this.sendResponse(res, 200, 'Bid accepted successfully', bid);
+    // Generate add-to-cart link for the buyer
+    const addToCartLink = `/api/v1/bids/${bidId}/add-to-cart`;
+    
+    return this.sendResponse(res, 200, 'Bid accepted successfully', {
+      bid: bid,
+      addToCartLink,
+      expiresAt: bid.expiresAt
+    });
   }
 
   @httpPut('/bids/:bidId/force-accept', TYPES.RequireAdmin)
@@ -683,22 +779,99 @@ export class AdminController extends BaseController {
     @requestParam('bidId') bidId: string,
     @requestBody() payload: { reason?: string }
   ) {
-    const { reason } = payload;
+    try {
+      const { reason } = payload || {};
+      
+      const bid = await this.productBidService.forceAcceptBid(bidId, reason);
+      
+      // Send notification to buyer - same as seller acceptance
+      if (bid.seller && bid.buyer) {
+        try {
+          const message = reason 
+            ? `Your bid of $${bid.bidPrice} has been accepted by admin! Reason: ${reason}`
+            : `Your bid of $${bid.bidPrice} has been accepted by admin!`;
+          
+          await this.bidMessageService.createBidAcceptedMessage(
+            bid.seller.toString(),
+            bid.buyer.toString(),
+            bid.product.toString(),
+            bidId,
+            message
+          );
+        } catch (messageError) {
+          // Log error but don't fail the bid acceptance
+          console.error('Failed to create bid accepted message:', messageError);
+        }
+      }
+      
+      // Generate add-to-cart link for the buyer (same as seller acceptance)
+      const addToCartLink = `/api/v1/bids/${bidId}/add-to-cart`;
+      
+      return this.sendResponse(res, 200, 'Bid force accepted successfully', {
+        bid: bid,
+        addToCartLink,
+        expiresAt: bid.expiresAt
+      });
+    } catch (error: any) {
+      console.error('Error in forceAcceptBid:', error);
+      throw error;
+    }
+  }
+
+  @httpPut('/bids/:bidId/reject', TYPES.RequireAdmin)
+  public async rejectBid(
+    @response() res: Response,
+    @requestParam('bidId') bidId: string,
+    @requestBody() payload: { reason?: string; messageId?: string }
+  ) {
+    const { reason, messageId } = payload || {};
     
-    const bid = await this.productBidService.forceAcceptBid(bidId, reason);
+    const bid = await this.productBidService.forceRejectBid(bidId, reason);
     
-    // Send notification to both buyer and seller
-    if (bid.seller && bid.buyer) {
-      await this.bidMessageService.createSystemMessage(
-        bid.seller.toString(),
-        bid.buyer.toString(),
-        bid.product.toString(),
-        bidId,
-        `Your bid has been accepted by admin. ${reason ? `Reason: ${reason}` : ''}`
-      );
+    // Create BID_REJECTED message in chat
+    if (bid.buyer && bid.product) {
+      try {
+        const buyerId = typeof bid.buyer === 'object' && (bid.buyer as any)._id 
+          ? (bid.buyer as any)._id.toString() 
+          : bid.buyer.toString();
+        
+        const productId = typeof bid.product === 'object' && (bid.product as any)._id 
+          ? (bid.product as any)._id.toString() 
+          : bid.product.toString();
+        
+        // Get product owner (seller) - need to fetch product to get owner
+        const product = await Product.findById(productId).populate('owner', '_id');
+        const sellerUserId = product?.owner?._id?.toString() || product?.owner?.toString() || res.locals.admin;
+        
+        const productName = typeof bid.product === 'object' && (bid.product as any).name
+          ? (bid.product as any).name
+          : 'Product';
+        
+        // Always include reason in message if provided
+        const message = reason && reason.trim()
+          ? `Your offer has been declined. Reason: ${reason}`
+          : `Your offer has been declined.`;
+        
+        // IMPORTANT: sender = seller/admin (who rejects), recipient = buyer (who receives the rejection)
+        await this.bidMessageService.createBidRejectedMessage(
+          sellerUserId, // sender: seller's user ID or admin ID
+          buyerId, // recipient: buyer
+          productId,
+          bidId,
+          message
+        );
+        
+        console.log(`✅ Created BID_REJECTED message for bid ${bidId}: sender=${sellerUserId}, recipient=${buyerId}, reason=${reason || 'none'}`);
+      } catch (error) {
+        console.error('❌ Failed to create bid rejected message:', error);
+        // Don't fail the request if message creation fails
+      }
     }
     
-    return this.sendResponse(res, 200, 'Bid force accepted successfully', bid);
+    return this.sendResponse(res, 200, 'Bid rejected successfully', {
+      bid,
+      messageId // Return messageId if provided for frontend update
+    });
   }
 
   @httpPut('/bids/:bidId/force-reject', TYPES.RequireAdmin)
@@ -707,22 +880,8 @@ export class AdminController extends BaseController {
     @requestParam('bidId') bidId: string,
     @requestBody() payload: { reason?: string }
   ) {
-    const { reason } = payload;
-    
-    const bid = await this.productBidService.forceRejectBid(bidId, reason);
-    
-    // Send notification to both buyer and seller
-    if (bid.seller && bid.buyer) {
-      await this.bidMessageService.createSystemMessage(
-        bid.seller.toString(),
-        bid.buyer.toString(),
-        bid.product.toString(),
-        bidId,
-        `Your bid has been rejected by admin. ${reason ? `Reason: ${reason}` : ''}`
-      );
-    }
-    
-    return this.sendResponse(res, 200, 'Bid force rejected successfully', bid);
+    // Alias to rejectBid for backward compatibility
+    return this.rejectBid(res, bidId, payload);
   }
 
   @httpPut('/bids/:bidId/cancel', TYPES.RequireAdmin)
@@ -739,18 +898,95 @@ export class AdminController extends BaseController {
     
     const bid = await this.productBidService.cancelBid(bidId, reason);
     
-    // Send notification to both buyer and seller
-    if (bid.seller && bid.buyer) {
-      await this.bidMessageService.createSystemMessage(
-        bid.seller.toString(),
-        bid.buyer.toString(),
-        bid.product.toString(),
-        bidId,
-        `This bid has been cancelled by admin. Reason: ${reason}`
-      );
+    // Create SYSTEM message in chat for both buyer and seller
+    if (bid.buyer && bid.product) {
+      try {
+        const buyerId = typeof bid.buyer === 'object' && (bid.buyer as any)._id 
+          ? (bid.buyer as any)._id.toString() 
+          : bid.buyer.toString();
+        
+        const productId = typeof bid.product === 'object' && (bid.product as any)._id 
+          ? (bid.product as any)._id.toString() 
+          : bid.product.toString();
+        
+        // Get product owner (seller) - need to fetch product to get owner
+        const product = await Product.findById(productId).populate('owner', '_id');
+        const sellerUserId = product?.owner?._id?.toString() || product?.owner?.toString() || res.locals.admin;
+        
+        // Create message for buyer (admin -> buyer)
+        await this.bidMessageService.createSystemMessage(
+          res.locals.admin, // sender: admin
+          buyerId, // recipient: buyer
+          productId,
+          bidId,
+          `This bid has been cancelled by admin. Reason: ${reason}`
+        );
+        
+        // Also create message for seller (admin -> seller) if seller is different from admin
+        if (sellerUserId !== res.locals.admin) {
+          await this.bidMessageService.createSystemMessage(
+            res.locals.admin, // sender: admin
+            sellerUserId, // recipient: seller
+            productId,
+            bidId,
+            `This bid has been cancelled by admin. Reason: ${reason}`
+          );
+        }
+        
+        console.log(`✅ Created CANCELLED messages for bid ${bidId}: reason=${reason}`);
+      } catch (error) {
+        console.error('❌ Failed to create bid cancelled message:', error);
+        // Don't fail the request if message creation fails
+      }
     }
     
     return this.sendResponse(res, 200, 'Bid cancelled successfully', bid);
+  }
+
+  @httpPost('/bids/:bidId/counter-offer', TYPES.RequireAdmin)
+  public async createCounterOffer(
+    @response() res: Response,
+    @requestParam('bidId') bidId: string,
+    @requestBody() payload: { counterPrice: number; reason?: string }
+  ) {
+    const { counterPrice, reason } = payload || {};
+    
+    if (!counterPrice || counterPrice <= 0) {
+      return this.sendResponse(res, 400, 'Counter price is required and must be greater than 0');
+    }
+    
+    const counterBid = await this.productBidService.createCounterOffer(bidId, counterPrice, reason);
+    
+    // Create counter offer message
+    const originalBid = await this.productBidService.getBidById(bidId);
+    if (originalBid && originalBid.buyer) {
+      try {
+        const buyerId = typeof originalBid.buyer === 'object' && (originalBid.buyer as any)._id 
+          ? (originalBid.buyer as any)._id.toString() 
+          : originalBid.buyer.toString();
+        
+        const message = reason 
+          ? `We counter your offer with $${counterPrice.toFixed(2)}. Reason: ${reason}`
+          : `We counter your offer with $${counterPrice.toFixed(2)}.`;
+        
+        await this.bidMessageService.createCounterOfferMessage(
+          originalBid.seller?.toString() || '',
+          buyerId,
+          originalBid.product.toString(),
+          bidId,
+          counterBid._id.toString(),
+          counterPrice,
+          message
+        );
+      } catch (error) {
+        console.error('Failed to create counter offer message:', error);
+      }
+    }
+    
+    return this.sendResponse(res, 200, 'Counter offer created successfully', {
+      counterBid,
+      originalBidId: bidId
+    });
   }
 
   @httpGet('/bid-messages', TYPES.RequireAdmin)

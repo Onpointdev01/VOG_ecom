@@ -39,21 +39,43 @@ export class AddressService extends BaseService implements IAddressService {
   }
 
   async addAddress(address: addressDTO): Promise<IAddress> {
-    // Check if user has any existing addresses
-    const existingAddresses = await this.Address.find({ user: address.user });
+    try {
+      // Check if user has any existing addresses
+      const existingAddresses = await this.Address.find({ user: address.user });
 
-    // If this is the first address, make it default automatically
-    if (existingAddresses.length === 0) {
-      address.isDefault = true;
+      // If this is the first address, make it default automatically
+      if (existingAddresses.length === 0) {
+        address.isDefault = true;
+      }
+
+      // If setting as default, clear all other default flags
+      if (address.isDefault) {
+        await this.Address.updateMany({ user: address.user }, { $set: { isDefault: false } });
+      }
+
+      const newAddress = await this.Address.create(address);
+      return newAddress;
+    } catch (error: any) {
+      console.error('Error in addAddress:', error);
+      
+      // Handle MongoDB validation errors
+      if (error.name === 'ValidationError') {
+        const validationErrors = Object.keys(error.errors || {}).map(key => {
+          const err = error.errors[key];
+          return `${key}: ${err.message}`;
+        }).join(', ');
+        throw new AppError(`Validation failed: ${validationErrors}`, 400);
+      }
+      
+      // Re-throw AppError as-is
+      if (error instanceof AppError) {
+        throw error;
+      }
+      
+      // Log and throw generic error for unexpected errors
+      console.error('Unexpected error during address creation:', error);
+      throw new AppError(error?.message || 'Failed to create address. Please try again.', 500);
     }
-
-    // If setting as default, clear all other default flags
-    if (address.isDefault) {
-      await this.Address.updateMany({ user: address.user }, { $set: { isDefault: false } });
-    }
-
-    const newAddress = await this.Address.create(address);
-    return newAddress;
   }
 
   async updateAddress(address: addressDTO, id: string): Promise<IAddress> {

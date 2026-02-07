@@ -18,6 +18,10 @@ export const TYPES = {
   Attribute: Symbol.for('Attribute'),
   AttributeValue: Symbol.for('AttributeValue'),
   Notification: Symbol.for('Notification'),
+  TokenBlacklist: Symbol.for('TokenBlacklist'),
+  Payout: Symbol.for('Payout'),
+  AuditLog: Symbol.for('AuditLog'),
+  BidOffer: Symbol.for('BidOffer'),
 
   AuthService: Symbol.for('AuthService'),
   AdminService: Symbol.for('AdminService'),
@@ -39,10 +43,15 @@ export const TYPES = {
   SellerService: Symbol.for('SellerService'),
   BoutiqueService: Symbol.for('BoutiqueService'),
   NotificationService: Symbol.for('NotificationService'),
+  WebSocketService: Symbol.for('WebSocketService'),
+  PayoutService: Symbol.for('PayoutService'),
+  SKUService: Symbol.for('SKUService'),
+  TranslationService: Symbol.for('TranslationService'),
 
   RequireSignIn: Symbol.for('RequireSignIn'),
   RequireSeller: Symbol.for('RequireSeller'),
   RequireAdmin: Symbol.for('RequireAdmin'),
+  RequireAuth: Symbol.for('RequireAuth'), // Combined middleware for user or admin
   OptionalAuth: Symbol.for('OptionalAuth'),
 };
 export default TYPES;

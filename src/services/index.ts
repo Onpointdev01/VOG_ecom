@@ -17,6 +17,12 @@ export * from './ShippingZoneService';
 export * from './AttributeService';
 export * from './AttributeValueService';
 export * from './SellerService';
+<<<<<<< HEAD
 export * from './BoutiqueService';
+=======
+export * from './PayoutService';
+export * from './SKUService';
+export * from './TranslationService';
+>>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
 
 export * from './NewCategoryService';

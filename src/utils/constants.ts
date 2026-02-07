@@ -19,6 +19,10 @@ const constants = {
     SHIPPING_ZONE: 'ShippingZone',
     ATTRIBUTE: 'Attribute',
     ATTRIBUTE_VALUE: 'AttributeValue',
+    TOKEN_BLACKLIST: 'TokenBlacklist',
+    PAYOUT: 'Payout',
+    AUDIT_LOG: 'AuditLog',
+    BID_OFFER: 'BidOffer',
   },
 };
 export default constants;

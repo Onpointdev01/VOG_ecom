@@ -8,6 +8,7 @@ import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
 import { createProductDTO, createReviewDTO, getAllProductsResponse } from '../utils/dtos';
 import { IReview, IUser, IProductVariant, ProductVariant, ISeller } from '../models';
+import { NotificationService } from './NotificationService';
 
 export interface IProductService {
   createProduct(payload: createProductDTO): Promise<IProduct>;
@@ -59,6 +60,8 @@ export interface IProductService {
 
 @injectable()
 export class ProductService extends BaseService implements IProductService {
+  private notificationService?: NotificationService;
+
   constructor(
     @inject(TYPES.Product) private Product: Model<IProduct>,
     @inject(TYPES.ProductVariant) private ProductVariant: Model<IProductVariant>,
@@ -69,12 +72,38 @@ export class ProductService extends BaseService implements IProductService {
     super();
   }
 
+  /**
+   * Set notification service (called after NotificationService is initialized)
+   */
+  setNotificationService(notificationService: NotificationService): void {
+    this.notificationService = notificationService;
+  }
+
   async createProduct(payload: createProductDTO): Promise<IProduct> {
     // Check if product exists by name or another unique identifier
     // const existingProduct = await this.Product.findOne({ name });
     // if (existingProduct) throw new AppError('Product already exists', 400);
     await this.verifySeller(payload.owner.toString());
     const newProduct = await this.Product.create(payload);
+    
+    // Notify admins of new product
+    try {
+      const seller = await this.Seller.findById(payload.owner).populate('user');
+      const sellerName = seller ? (seller as any).name || 'Unknown Seller' : 'Unknown Seller';
+      
+      if (this.notificationService) {
+        await this.notificationService.sendNewProductNotificationToAdmins(
+          (newProduct._id as string).toString(),
+          newProduct.name,
+          sellerName,
+          newProduct.productType || 'simple'
+        );
+      }
+    } catch (error) {
+      console.error('Failed to send new product notification to admins:', error);
+      // Don't throw - notification failure shouldn't fail product creation
+    }
+    
     return newProduct;
   }
 
@@ -193,21 +222,60 @@ export class ProductService extends BaseService implements IProductService {
     }
     const aggregationPipeline: any[] = [];
     
-    // Text search must be the first stage in aggregation pipeline
-    if (search) {
+    // Search handling - use regex search which always works
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+      // Escape special regex characters to prevent errors
+      const escapedSearchTerm = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Create regex pattern string for MongoDB (not RegExp object)
+      const regexPattern = escapedSearchTerm;
+      
+      // Use regex search which works without requiring text index
+      // This searches in name, description, and brand fields
       aggregationPipeline.push({
         $match: {
           $and: [
-            { $text: { $search: search } },
+            {
+              $or: [
+                { name: { $regex: regexPattern, $options: 'i' } },
+                { description: { $regex: regexPattern, $options: 'i' } },
+                { brand: { $regex: regexPattern, $options: 'i' } }
+              ]
+            },
             filter
           ]
         }
       });
       
-      // Add text score for search relevance
+      // Add relevance score based on where the match was found
+      // Name matches are most relevant, then brand, then description
       aggregationPipeline.push({
         $addFields: {
-          score: { $meta: 'textScore' }
+          score: {
+            $add: [
+              { 
+                $cond: [
+                  { $regexMatch: { input: '$name', regex: regexPattern, options: 'i' } }, 
+                  10, 
+                  0
+                ] 
+              },
+              { 
+                $cond: [
+                  { $regexMatch: { input: '$brand', regex: regexPattern, options: 'i' } }, 
+                  5, 
+                  0
+                ] 
+              },
+              { 
+                $cond: [
+                  { $regexMatch: { input: '$description', regex: regexPattern, options: 'i' } }, 
+                  1, 
+                  0
+                ] 
+              }
+            ]
+          }
         }
       });
     } else {
@@ -382,41 +450,53 @@ export class ProductService extends BaseService implements IProductService {
     });
 
     // Add sorting based on options or search relevance or default
-    if (search && (!options?.sortBy || options.sortBy === 'relevance')) {
-      // For search results, use text score unless different sort is specified
-      aggregationPipeline.push({
-        $sort: { score: { $meta: 'textScore' }, _id: 1 }
-      });
+    const sortBy = options?.sortBy || 'createdAt';
+    const sortOrder = options?.sortOrder === 'asc' ? 1 : -1;
+    
+    const sortObj: any = {};
+    
+    // For search results, prioritize relevance score if available
+    if (search && (!sortBy || sortBy === 'relevance' || sortBy === 'newest')) {
+      // If we have a score field (from text search), use it as primary sort
+      if (search) {
+        sortObj.score = -1; // Higher score = more relevant
+      }
+      
+      // Add secondary sort based on options
+      if (sortBy === 'newest') {
+        sortObj.createdAt = -1;
+      } else {
+        sortObj.createdAt = -1; // Default: newest first for search results
+      }
     } else {
-      // Custom sorting
-      const sortBy = options?.sortBy || 'createdAt';
-      const sortOrder = options?.sortOrder === 'asc' ? 1 : -1;
-      
-      const sortObj: any = {};
-      
+      // Custom sorting for non-search or specific sort requests
       switch (sortBy) {
         case 'name':
           sortObj.name = sortOrder;
           break;
         case 'price':
-          sortObj.computedPrice = sortOrder;
+        case 'price_asc':
+        case 'price_desc':
+          sortObj.computedPrice = sortBy === 'price_asc' ? 1 : -1;
           break;
         case 'rating':
           sortObj.rating = sortOrder;
           break;
+        case 'popular':
         case 'popularity':
           sortObj.noOfReviews = sortOrder;
           break;
         case 'createdAt':
+        case 'newest':
         default:
           sortObj.createdAt = sortOrder;
           break;
       }
-      
-      aggregationPipeline.push({
-        $sort: sortObj
-      });
     }
+    
+    aggregationPipeline.push({
+      $sort: sortObj
+    });
 
     // Add pagination if specified
     if (options?.page && options?.limit) {
@@ -427,6 +507,8 @@ export class ProductService extends BaseService implements IProductService {
       );
     }
 
+    // Execute aggregation
+    // We're using regex search which always works, no try-catch needed
     const products = await this.Product.aggregate(aggregationPipeline).exec();
     
     // Transform _id to id using schema transforms where possible
@@ -1201,6 +1283,25 @@ export class ProductService extends BaseService implements IProductService {
       productType: 'simple' as const
     };
     const newProduct = await this.Product.create(productData);
+    
+    // Notify admins of new product
+    try {
+      const seller = await this.Seller.findById(payload.owner).populate('user');
+      const sellerName = seller ? (seller as any).name || 'Unknown Seller' : 'Unknown Seller';
+      
+      if (this.notificationService) {
+        await this.notificationService.sendNewProductNotificationToAdmins(
+          (newProduct._id as string).toString(),
+          newProduct.name,
+          sellerName,
+          'simple'
+        );
+      }
+    } catch (error) {
+      console.error('Failed to send new product notification to admins:', error);
+      // Don't throw - notification failure shouldn't fail product creation
+    }
+    
     return newProduct;
   }
 
@@ -1236,6 +1337,24 @@ export class ProductService extends BaseService implements IProductService {
         });
         const savedVariant = await variant.save();
         createdVariants.push(savedVariant);
+      }
+
+      // Notify admins of new product
+      try {
+        const seller = await this.Seller.findById(product.owner).populate('user');
+        const sellerName = seller ? (seller as any).name || 'Unknown Seller' : 'Unknown Seller';
+        
+        if (this.notificationService) {
+          await this.notificationService.sendNewProductNotificationToAdmins(
+            (variableProduct._id as string).toString(),
+            variableProduct.name,
+            sellerName,
+            'variable'
+          );
+        }
+      } catch (error) {
+        console.error('Failed to send new product notification to admins:', error);
+        // Don't throw - notification failure shouldn't fail product creation
       }
 
       // Return the product with variants populated

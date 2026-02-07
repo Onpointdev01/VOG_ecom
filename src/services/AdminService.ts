@@ -45,7 +45,11 @@ export interface IAdminService {
   
   // Order Management
   getAllOrders(filters: any, page: number, limit: number): Promise<{ orders: IOrder[]; total: number; totalPages: number; currentPage: number }>;
+<<<<<<< HEAD
   getOrderStats(): Promise<{ total: number; pending: number; confirmed: number; outForDelivery: number; complete: number; cancelled: number }>;
+=======
+  getOrderStats(): Promise<any>;
+>>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
   updateOrderStatus(orderId: string, orderStatus: string): Promise<IOrder>;
   updateOrderPaymentStatus(orderId: string, paymentStatus: string): Promise<IOrder>;
   getOrderDetails(orderId: string): Promise<IOrder>;
@@ -489,26 +493,40 @@ export class AdminService extends BaseService implements IAdminService {
   }
 
   async updateProductStatus(productId: string, isActive: boolean): Promise<IProduct> {
-    const product = await this.verifyDoc(productId, Product);
+    const product = await Product.findByIdAndUpdate(
+      productId,
+      { isActive },
+      { new: true, runValidators: true }
+    );
     
-    product.isActive = isActive;
-    await product.save();
+    if (!product) {
+      throw new AppError('Product not found', 404);
+    }
     
     return product;
   }
 
   async updateProductFeatured(productId: string, data: { isRecommended?: boolean; isFlash?: boolean }): Promise<IProduct> {
-    const product = await this.verifyDoc(productId, Product);
+    const updateData: any = {};
     
     if (data.isRecommended !== undefined) {
-      product.isRecommended = data.isRecommended;
+      updateData.isRecommended = data.isRecommended;
     }
     
     if (data.isFlash !== undefined) {
-      product.isFlash = data.isFlash;
+      updateData.isFlash = data.isFlash;
     }
     
-    await product.save();
+    const product = await Product.findByIdAndUpdate(
+      productId,
+      updateData,
+      { new: true, runValidators: true }
+    );
+    
+    if (!product) {
+      throw new AppError('Product not found', 404);
+    }
+    
     return product;
   }
 
@@ -519,6 +537,7 @@ export class AdminService extends BaseService implements IAdminService {
 
   // Order Management Methods
   async getAllOrders(filters: any, page: number, limit: number): Promise<{ orders: IOrder[]; total: number; totalPages: number; currentPage: number }> {
+<<<<<<< HEAD
     const skip = (page - 1) * limit;
 
     const orders = await Order.find(filters)
@@ -543,10 +562,43 @@ export class AdminService extends BaseService implements IAdminService {
       .skip(skip)
       .limit(limit)
       .lean();
+=======
+    try {
+      const skip = (page - 1) * limit;
+      
+      const orders = await Order.find(filters)
+        .populate('user', 'firstName lastName email')
+        .populate({
+          path: 'items.product',
+          select: 'name price images',
+          options: { strictPopulate: false }
+        })
+        .populate({
+          path: 'payments',
+          select: 'transactionId paymentMethod status amount providerTransactionId createdAt',
+          options: { strictPopulate: false }
+        })
+        .populate({
+          path: 'activePayment',
+          select: 'transactionId paymentMethod status amount providerTransactionId createdAt',
+          options: { strictPopulate: false }
+        })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(); // Use lean() to avoid Mongoose document overhead
+>>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
 
-    const total = await Order.countDocuments(filters);
-    const totalPages = Math.ceil(total / limit);
+      // Filter out orders from deleted users (where user is null after population)
+      const ordersWithUsers = (orders as any[]).filter(order => {
+        if (!order.user) {
+          console.log(`⚠️ [AdminService] Filtering out order ${order._id || order.orderNumber} - user is deleted`);
+          return false;
+        }
+        return true;
+      });
 
+<<<<<<< HEAD
     const ordersWithSellerShop = (orders as any[]).map((order) => {
       const owner = order.items?.[0]?.product?.owner;
       const seller = owner
@@ -575,6 +627,77 @@ export class AdminService extends BaseService implements IAdminService {
       totalPages,
       currentPage: page,
     };
+=======
+      // Recalculate total count excluding deleted users
+      const totalWithUsers = await Order.countDocuments({
+        ...filters,
+        user: { $exists: true, $ne: null }
+      });
+      const totalPages = Math.ceil(totalWithUsers / limit);
+
+      return {
+        orders: ordersWithUsers as IOrder[],
+        total: totalWithUsers,
+        totalPages,
+        currentPage: page,
+      };
+    } catch (error: any) {
+      console.error('Error in getAllOrders:', error);
+      console.error('Error stack:', error.stack);
+      console.error('Filters:', JSON.stringify(filters, null, 2));
+      throw new AppError(error.message || 'Failed to fetch orders', 500);
+    }
+  }
+
+  async getOrderStats(): Promise<any> {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const startOfWeek = new Date(today);
+      startOfWeek.setDate(today.getDate() - today.getDay());
+      
+      const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      
+      const [
+        total,
+        pending,
+        confirmed,
+        outForDelivery,
+        complete,
+        cancelled,
+        todayOrders,
+        weekOrders,
+        monthOrders
+      ] = await Promise.all([
+        Order.countDocuments().catch(() => 0),
+        Order.countDocuments({ orderStatus: 'PENDING' }).catch(() => 0),
+        Order.countDocuments({ orderStatus: 'CONFIRMED' }).catch(() => 0),
+        Order.countDocuments({ orderStatus: 'OUT_FOR_DELIVERY' }).catch(() => 0),
+        Order.countDocuments({ orderStatus: 'COMPLETE' }).catch(() => 0),
+        Order.countDocuments({ orderStatus: 'CANCELLED' }).catch(() => 0),
+        Order.countDocuments({ createdAt: { $gte: today } }).catch(() => 0),
+        Order.countDocuments({ createdAt: { $gte: startOfWeek } }).catch(() => 0),
+        Order.countDocuments({ createdAt: { $gte: startOfMonth } }).catch(() => 0)
+      ]);
+
+      return {
+        total,
+        pending,
+        confirmed,
+        outForDelivery,
+        complete,
+        cancelled,
+        today: todayOrders,
+        week: weekOrders,
+        month: monthOrders
+      };
+    } catch (error: any) {
+      console.error('Error in getOrderStats:', error);
+      console.error('Error stack:', error.stack);
+      throw new AppError(error.message || 'Failed to fetch order statistics', 500);
+    }
+>>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
   }
 
   async getOrderStats(): Promise<{ total: number; pending: number; confirmed: number; outForDelivery: number; complete: number; cancelled: number }> {
@@ -609,6 +732,7 @@ export class AdminService extends BaseService implements IAdminService {
   }
 
   async getOrderDetails(orderId: string): Promise<IOrder> {
+<<<<<<< HEAD
     const order = await Order.findById(orderId)
       .populate('user', 'firstName lastName email phoneNumber')
       .populate({
@@ -628,10 +752,109 @@ export class AdminService extends BaseService implements IAdminService {
       .populate('payments', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt')
       .populate('activePayment', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt')
       .lean();
+=======
+    try {
+      // First get the order without populate to check if it exists and get the user reference
+      const orderDoc = await Order.findById(orderId);
+      if (!orderDoc) {
+        throw new AppError('Order not found', 404);
+      }
+>>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
 
-    if (!order) {
-      throw new AppError('Order not found', 404);
+      // Now populate with proper error handling
+      const order = await Order.findById(orderId)
+        .populate({
+          path: 'user',
+          select: 'firstName lastName email phoneNumber',
+          options: { strictPopulate: false }
+        })
+        .populate({
+          path: 'items.product',
+          select: 'name price images brand description',
+          options: { strictPopulate: false }
+        })
+        .populate({
+          path: 'payments',
+          select: 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt',
+          options: { strictPopulate: false }
+        })
+        .populate({
+          path: 'activePayment',
+          select: 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt',
+          options: { strictPopulate: false }
+        })
+        .lean(); // Use lean() to get plain JavaScript object
+
+      if (!order) {
+        throw new AppError('Order not found', 404);
+      }
+
+      // Don't return order if user is deleted
+      if (!order.user) {
+        throw new AppError('Order not found or user deleted', 404);
+      }
+
+      // Ensure user is properly handled
+      const orderData = order as any;
+      
+      // Handle case where user might be null/undefined or missing _id
+      if (!orderData.user) {
+        // If user is null/undefined, get the user ID from the original document
+        const userId = orderDoc.user?.toString() || orderDoc.user;
+        if (userId) {
+          // Try to fetch user data
+          try {
+            const user = await User.findById(userId).select('firstName lastName email phoneNumber').lean();
+            orderData.user = user || {
+              _id: userId,
+              id: userId,
+              firstName: 'Unknown',
+              lastName: 'User',
+              email: 'unknown@example.com'
+            };
+          } catch (userError) {
+            // If user fetch fails, create a placeholder
+            orderData.user = {
+              _id: userId,
+              id: userId,
+              firstName: 'Unknown',
+              lastName: 'User',
+              email: 'unknown@example.com'
+            };
+          }
+        } else {
+          // No user reference at all
+          orderData.user = {
+            _id: null,
+            id: null,
+            firstName: 'Unknown',
+            lastName: 'User',
+            email: 'unknown@example.com'
+          };
+        }
+      } else if (orderData.user && typeof orderData.user === 'object') {
+        // Ensure user has _id and id fields
+        if (!orderData.user._id && !orderData.user.id) {
+          const userId = orderDoc.user?.toString() || orderDoc.user;
+          if (userId) {
+            orderData.user._id = userId;
+            orderData.user.id = userId;
+          }
+        } else if (orderData.user._id && !orderData.user.id) {
+          orderData.user.id = orderData.user._id.toString();
+        } else if (orderData.user.id && !orderData.user._id) {
+          orderData.user._id = orderData.user.id;
+        }
+      }
+
+      return orderData as IOrder;
+    } catch (error: any) {
+      console.error('Error in getOrderDetails:', error);
+      console.error('Error stack:', error.stack);
+      console.error('OrderId:', orderId);
+      throw new AppError(error.message || 'Failed to fetch order details', 500);
     }
+<<<<<<< HEAD
 
     const owner = (order as any).items?.[0]?.product?.owner;
     const seller = owner
@@ -653,6 +876,8 @@ export class AdminService extends BaseService implements IAdminService {
         };
 
     return { ...order, ...seller } as IOrder;
+=======
+>>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
   }
 
   // =====================================

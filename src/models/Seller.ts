@@ -5,7 +5,7 @@ const { SELLER, USER } = constants.mongooseModels;
 
 export interface ISeller extends Document {
   user: Schema.Types.ObjectId; // Reference to the user model
-  type: string; // 'individual' or 'company'
+  type: string; // 'individual' or 'enterprise'
   name: string; // Name of the seller or brand
   logo: string; // URL to the seller's logo image
   noOfRating: number; // Number of ratings given to the seller
@@ -20,7 +20,7 @@ export interface ISeller extends Document {
 const sellerSchema: Schema<ISeller> = new Schema<ISeller>(
   {
     user: { type: Schema.Types.ObjectId, ref: USER, required: true },
-    type: { type: String, enum: ['individual', 'company'], required: true },
+    type: { type: String, enum: ['individual', 'enterprise'], required: true },
     name: { type: String, required: true },
     logo: { type: String, default: '' },
     noOfRating: { type: Number, default: 0 },

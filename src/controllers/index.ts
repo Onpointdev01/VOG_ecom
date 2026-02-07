@@ -15,4 +15,8 @@ export * from './ShippingZoneController';
 export * from './AttributeController';
 export * from './AttributeValueController';
 export * from './SellerController';
+<<<<<<< HEAD
 export * from './BoutiqueController';
+=======
+export * from './TranslationController';
+>>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558

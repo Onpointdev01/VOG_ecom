@@ -1,0 +1,160 @@
+[33m61939a8[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Revert "backend updated"
+[33mae4f2cb[m[33m ([m[1;32mVOG_ecom[m[33m)[m backend updated
+[33m7525411[m chore: update yarn.lock
+[33m1cb3e2e[m notification
+[33m0c958db[m notification
+[33mbcfb6d1[m add upload profile image
+[33m90649d4[m wishlist logs
+[33m626b6a7[m fix reviews
+[33m03775c7[m user friendly notification message
+[33m491ab32[m fix order notification
+[33m2a304db[m fix order notification
+[33m9c884dd[m fix order notification
+[33md81d32d[m import notification service
+[33m30d242b[m add notification service
+[33m412b9a1[m fix to category
+[33m4834d6a[m fix for address
+[33m67e7fd5[m fix for address
+[33mdb56853[m fix for bidding
+[33m6e1ec9f[m add get seller details
+[33mecabce7[m add get seller details
+[33m2ae9488[m fixes
+[33m80e554a[m add attributes for products
+[33m50f5c29[m export shipping zone
+[33mb2a7c2a[m export shipping zone
+[33mdd4cef2[m add shipping zone api
+[33m135f84e[m modified clear cart items
+[33m7c8f6f2[m cart total recalculation
+[33m49cbc67[m made postal code and city optional
+[33mc1e87e6[m made postal code and city optional
+[33m11b47da[m update src folder
+[33m2cf51d8[m restore authcontroller
+[33mffe647b[m fix category image url issues
+[33m376be2d[m fix issuses
+[33m763e0e2[m fix for orders
+[33m696428a[m Revert: undo all changes since 1 day ago (to d3b1912)
+[33m3dc35b8[m updated
+[33madb056c[m updated
+[33m7ce0b87[m updated
+[33m1957d84[m updated
+[33m171ab96[m updated
+[33m7889567[m updated
+[33m1cfc0b0[m notification updated
+[33md3b1912[m Update server.ts restored
+[33m7039ca9[m Update server.ts websoket added
+[33mc694836[m Update UserService.ts
+[33m6664287[m Update UserController.ts
+[33mb1512d4[m Update UserController.ts
+[33m9e5d6d8[m Update UserService.ts role switcher added
+[33m10a31e7[m Update UserController.ts account type flip
+[33ma2cb68c[m Update AuthController.ts restored
+[33m91ef3a9[m Update AuthController.ts restored
+[33m8d538df[m Update NewCategoryService.ts restored
+[33m22f6dc2[m Update Category.ts restored
+[33m9df543e[m Update Category.ts
+[33md86d734[m Update NewCategoryService.ts
+[33m07da24b[m Update NewCategoriesController.ts
+[33mcbc5bbd[m Update NewCategoriesController.ts
+[33m2e2ef6a[m Update NewCategoryService.ts
+[33mab432f0[m Update Category.ts
+[33m31405d2[m Update Category.ts
+[33m9e5bcf2[m Update NewCategoryService.ts
+[33ma7f8069[m Update NewCategoriesController.ts
+[33m0433d72[m Update ProductBid.ts
+[33md10f0b7[m Update ProductBid.ts
+[33me321c89[m Update ProductBid.ts
+[33m9831ba0[m Update ProductBid.ts
+[33m756c749[m fix name in bidding chat
+[33m81dcea7[m add sort and filter
+[33m3b93eb8[m fix to recent views
+[33mc25580d[m fix recent views
+[33mf1f0f81[m fix
+[33m462d319[m fixed search
+[33mb97604b[m search suggestions
+[33mf8487d7[m admin view bids
+[33med50320[m admin view bids
+[33mf047c74[m admin view bids
+[33mce9cb45[m fix conversations end point
+[33mdecc8ac[m fetching conversations
+[33md7133cf[m sorting conversations
+[33m5b7ec59[m bidding messages
+[33m77ab5ed[m bidding process
+[33md09414b[m bidding process
+[33mae2ea8a[m bidding process
+[33md3d9f49[m bidding process
+[33mbb00b8a[m bidding process
+[33m32f1e61[m bidding process
+[33m3ca5f9a[m bidding process
+[33md7222e8[m fix bidding process
+[33m85987bb[m fix errors in bidding
+[33m3d879a8[m fix bid
+[33m95abcf5[m categories change
+[33m2341078[m admin endpoints
+[33m08a33de[m admin endpoints
+[33mebcdf8a[m update packages
+[33m9c035af[m update packages
+[33mf143eee[m update packages
+[33m60feb0a[m getting users recently viewed products
+[33me1d529d[m getting reviews for a product
+[33m365bdb4[m add pending cart items
+[33m5e12a24[m fix order tracking issues
+[33m1f45bf4[m add admin sercices
+[33m6604486[m fix orders
+[33m141fa23[m fix order service
+[33mbb92289[m fixes to backend
+[33m7f48359[m order
+[33m9eb7391[m add to cart
+[33m40f48ff[m fix remove from wishlist
+[33mddc497d[m changes to api structure
+[33m552726d[m Get all Products now optionally require token
+[33m995f716[m user profile fix
+[33mf9742b5[m wishlist fix
+[33maad2264[m refresh token sort
+[33m2e79325[m Add refresh token to login response
+[33mc62f4b5[m Bid begins
+[33mf36a8f0[m increase and decrease cart item quantity
+[33mcfd8842[m payment options
+[33m0e29ccd[m get users cart and add to cart
+[33m47e173c[m upload change
+[33m014a914[m begging of cart
+[33mc2e3f3b[m Cart Model created
+[33mb52010f[m Address endpoints
+[33md369026[m review upadated
+[33me423d2b[m review updated (product)
+[33m000758c[m REVIEW UPDATED
+[33m81c6252[m user updated
+[33md5a4df8[m user updated
+[33m01243ce[m user updated
+[33m714f3ad[m controller updated
+[33m03cd84e[m user updated
+[33m7c5a442[m user controller updated
+[33mee676f4[m USER UPDATED
+[33m68c05c6[m whislist added
+[33me273217[m subcategory added to category
+[33m53c8fec[m Add search to the product
+[33m4d1e4d0[m Reviews modified
+[33m7c5ab3a[m Products model refactor
+[33mbeec64e[m Products refactor
+[33m3a62cdc[m Upload
+[33mc935e1e[m Conflict fix & review fix
+[33m3889e0b[m stash
+[33m4b815aa[m Review (updated)
+[33md8e1aea[m Merge branch 'main' of https://github.com/Onpointdev01/VOG_ecom
+[33m7e546f0[m category service created
+[33m5be633e[m product (endpoints:controller,service)
+[33mba67e6c[m Products
+[33m2b7ac0d[m New update
+[33m26aa6b1[m package.json updated
+[33m96caac7[m good code\
+[33ma644524[m Category(Controller&Service) updated
+[33m781a8e7[m Category(controller and Service)
+[33m1f3981b[m Update to env example
+[33m20cc061[m Review && Category
+[33m414b3e6[m Emails with resend
+[33maa3d4f8[m chore: forget, reset password, verify email
+[33m33e257f[m SignUp and Login
+[33mcc76915[m chore: readme
+[33m6e6f7f8[m chore: logger setup
+[33m9c66e0a[m chore: Auth setup
+[33m4330df9[m chore: Initial setup
+[33m94f3889[m Initial commit
