@@ -1,5 +1,6 @@
 import { injectable } from 'inversify';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { BaseService } from './BaseService';
 import { Admin, IAdmin } from '../models/Admin';
 import { User, IUser } from '../models/User';
@@ -22,6 +23,10 @@ export interface IAdminService {
   
   // User Management
   getAllUsers(filters: any, page: number, limit: number): Promise<{ users: IUser[]; total: number; totalPages: number; currentPage: number }>;
+  getUserDetails(userId: string): Promise<{ user: IUser; seller: ISeller | null }>;
+  updateUserDetails(userId: string, payload: AdminUpdateUserPayload): Promise<IUser>;
+  updateSellerByUserId(userId: string, payload: AdminUpdateSellerPayload): Promise<ISeller>;
+  resetUserPassword(userId: string, newPassword: string): Promise<void>;
   updateUserBanStatus(userId: string, banned: boolean, banReason?: string, banExpires?: Date): Promise<IUser>;
   
   // Category Management
@@ -45,11 +50,7 @@ export interface IAdminService {
   
   // Order Management
   getAllOrders(filters: any, page: number, limit: number): Promise<{ orders: IOrder[]; total: number; totalPages: number; currentPage: number }>;
-<<<<<<< HEAD
   getOrderStats(): Promise<{ total: number; pending: number; confirmed: number; outForDelivery: number; complete: number; cancelled: number }>;
-=======
-  getOrderStats(): Promise<any>;
->>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
   updateOrderStatus(orderId: string, orderStatus: string): Promise<IOrder>;
   updateOrderPaymentStatus(orderId: string, paymentStatus: string): Promise<IOrder>;
   getOrderDetails(orderId: string): Promise<IOrder>;
@@ -65,6 +66,28 @@ export interface CreateAdminRequest {
   email: string;
   password: string;
   role?: 'SUPER_ADMIN' | 'ADMIN';
+}
+
+/** Allowed fields for admin to update on a user (no password, no ban – use ban endpoint) */
+export interface AdminUpdateUserPayload {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phoneNumber?: string;
+  nationality?: string;
+  currentLocation?: string;
+  profileImageUrl?: string;
+  role?: string;
+  verified?: boolean;
+}
+
+/** Allowed fields for admin to update on a seller */
+export interface AdminUpdateSellerPayload {
+  name?: string;
+  logo?: string;
+  type?: string;
+  official?: boolean;
+  status?: string;
 }
 
 @injectable()
@@ -229,13 +252,71 @@ export class AdminService extends BaseService implements IAdminService {
 
   async updateUserBanStatus(userId: string, banned: boolean, banReason?: string, banExpires?: Date): Promise<IUser> {
     const user = await this.verifyDoc(userId, User);
-    
+
     user.banned = banned;
     user.banReason = banned ? banReason || null : null;
     user.banExpires = banned && banExpires ? banExpires : null;
-    
+
     await user.save();
     return user;
+  }
+
+  async getUserDetails(userId: string): Promise<{ user: IUser; seller: ISeller | null }> {
+    const user = await User.findById(userId)
+      .select('-password -refreshToken -verifyCode -passwordResetToken')
+      .lean();
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+    const seller = await Seller.findOne({ user: userId }).lean();
+    return {
+      user: user as IUser,
+      seller: seller ? (seller as ISeller) : null,
+    };
+  }
+
+  async updateUserDetails(userId: string, payload: AdminUpdateUserPayload): Promise<IUser> {
+    const user = await this.verifyDoc(userId, User);
+    const allowed = ['firstName', 'lastName', 'email', 'phoneNumber', 'nationality', 'currentLocation', 'profileImageUrl', 'role', 'verified'];
+    const userRecord = user as unknown as Record<string, unknown>;
+    for (const key of allowed) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (value !== undefined) {
+        userRecord[key] = value;
+      }
+    }
+    await user.save();
+    return user;
+  }
+
+  async updateSellerByUserId(userId: string, payload: AdminUpdateSellerPayload): Promise<ISeller> {
+    const seller = await Seller.findOne({ user: userId });
+    if (!seller) {
+      throw new AppError('Seller profile not found for this user', 404);
+    }
+    const allowed = ['name', 'logo', 'type', 'official', 'status'];
+    const sellerRecord = seller as unknown as Record<string, unknown>;
+    for (const key of allowed) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (value !== undefined) {
+        sellerRecord[key] = value;
+      }
+    }
+    await seller.save();
+    return seller;
+  }
+
+  async resetUserPassword(userId: string, newPassword: string): Promise<void> {
+    if (!newPassword || newPassword.trim().length < 6) {
+      throw new AppError('Password must be at least 6 characters', 400);
+    }
+    const user = await User.findById(userId).select('+password');
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+    const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
+    (user as any).password = hashedPassword;
+    await user.save();
   }
 
   // Category Management Methods
@@ -537,35 +618,9 @@ export class AdminService extends BaseService implements IAdminService {
 
   // Order Management Methods
   async getAllOrders(filters: any, page: number, limit: number): Promise<{ orders: IOrder[]; total: number; totalPages: number; currentPage: number }> {
-<<<<<<< HEAD
-    const skip = (page - 1) * limit;
-
-    const orders = await Order.find(filters)
-      .populate('user', 'firstName lastName email')
-      .populate({
-        path: 'items.product',
-        select: 'name price images owner',
-        populate: {
-          path: 'owner',
-          model: Seller,
-          select: 'name logo user',
-          populate: {
-            path: 'user',
-            model: User,
-            select: 'email',
-          },
-        },
-      })
-      .populate('payments', 'transactionId paymentMethod status amount providerTransactionId createdAt')
-      .populate('activePayment', 'transactionId paymentMethod status amount providerTransactionId createdAt')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-=======
     try {
       const skip = (page - 1) * limit;
-      
+
       const orders = await Order.find(filters)
         .populate('user', 'firstName lastName email')
         .populate({
@@ -586,10 +641,8 @@ export class AdminService extends BaseService implements IAdminService {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
-        .lean(); // Use lean() to avoid Mongoose document overhead
->>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
+        .lean();
 
-      // Filter out orders from deleted users (where user is null after population)
       const ordersWithUsers = (orders as any[]).filter(order => {
         if (!order.user) {
           console.log(`⚠️ [AdminService] Filtering out order ${order._id || order.orderNumber} - user is deleted`);
@@ -598,37 +651,6 @@ export class AdminService extends BaseService implements IAdminService {
         return true;
       });
 
-<<<<<<< HEAD
-    const ordersWithSellerShop = (orders as any[]).map((order) => {
-      const owner = order.items?.[0]?.product?.owner;
-      const seller = owner
-        ? {
-            seller_id: owner._id?.toString?.() || owner.id,
-            seller_name: owner.name ?? null,
-            seller_email: owner.user?.email ?? null,
-            shop_id: owner._id?.toString?.() || owner.id,
-            shop_name: owner.name ?? null,
-            shop_logo: owner.logo ?? null,
-          }
-        : {
-            seller_id: null,
-            seller_name: null,
-            seller_email: null,
-            shop_id: null,
-            shop_name: null,
-            shop_logo: null,
-          };
-      return { ...order, ...seller };
-    });
-
-    return {
-      orders: ordersWithSellerShop as IOrder[],
-      total,
-      totalPages,
-      currentPage: page,
-    };
-=======
-      // Recalculate total count excluding deleted users
       const totalWithUsers = await Order.countDocuments({
         ...filters,
         user: { $exists: true, $ne: null }
@@ -649,67 +671,22 @@ export class AdminService extends BaseService implements IAdminService {
     }
   }
 
-  async getOrderStats(): Promise<any> {
-    try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      const startOfWeek = new Date(today);
-      startOfWeek.setDate(today.getDate() - today.getDay());
-      
-      const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-      
-      const [
-        total,
-        pending,
-        confirmed,
-        outForDelivery,
-        complete,
-        cancelled,
-        todayOrders,
-        weekOrders,
-        monthOrders
-      ] = await Promise.all([
-        Order.countDocuments().catch(() => 0),
-        Order.countDocuments({ orderStatus: 'PENDING' }).catch(() => 0),
-        Order.countDocuments({ orderStatus: 'CONFIRMED' }).catch(() => 0),
-        Order.countDocuments({ orderStatus: 'OUT_FOR_DELIVERY' }).catch(() => 0),
-        Order.countDocuments({ orderStatus: 'COMPLETE' }).catch(() => 0),
-        Order.countDocuments({ orderStatus: 'CANCELLED' }).catch(() => 0),
-        Order.countDocuments({ createdAt: { $gte: today } }).catch(() => 0),
-        Order.countDocuments({ createdAt: { $gte: startOfWeek } }).catch(() => 0),
-        Order.countDocuments({ createdAt: { $gte: startOfMonth } }).catch(() => 0)
-      ]);
-
-      return {
-        total,
-        pending,
-        confirmed,
-        outForDelivery,
-        complete,
-        cancelled,
-        today: todayOrders,
-        week: weekOrders,
-        month: monthOrders
-      };
-    } catch (error: any) {
-      console.error('Error in getOrderStats:', error);
-      console.error('Error stack:', error.stack);
-      throw new AppError(error.message || 'Failed to fetch order statistics', 500);
-    }
->>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
-  }
-
   async getOrderStats(): Promise<{ total: number; pending: number; confirmed: number; outForDelivery: number; complete: number; cancelled: number }> {
-    const [total, ...counts] = await Promise.all([
-      Order.countDocuments(),
-      Order.countDocuments({ orderStatus: 'PENDING' }),
-      Order.countDocuments({ orderStatus: 'CONFIRMED' }),
-      Order.countDocuments({ orderStatus: 'OUT_FOR_DELIVERY' }),
-      Order.countDocuments({ orderStatus: 'COMPLETE' }),
-      Order.countDocuments({ orderStatus: 'CANCELLED' }),
+    const [
+      total,
+      pending,
+      confirmed,
+      outForDelivery,
+      complete,
+      cancelled
+    ] = await Promise.all([
+      Order.countDocuments().catch(() => 0),
+      Order.countDocuments({ orderStatus: 'PENDING' }).catch(() => 0),
+      Order.countDocuments({ orderStatus: 'CONFIRMED' }).catch(() => 0),
+      Order.countDocuments({ orderStatus: 'OUT_FOR_DELIVERY' }).catch(() => 0),
+      Order.countDocuments({ orderStatus: 'COMPLETE' }).catch(() => 0),
+      Order.countDocuments({ orderStatus: 'CANCELLED' }).catch(() => 0)
     ]);
-    const [pending, confirmed, outForDelivery, complete, cancelled] = counts;
     return { total, pending, confirmed, outForDelivery, complete, cancelled };
   }
 
@@ -732,34 +709,11 @@ export class AdminService extends BaseService implements IAdminService {
   }
 
   async getOrderDetails(orderId: string): Promise<IOrder> {
-<<<<<<< HEAD
-    const order = await Order.findById(orderId)
-      .populate('user', 'firstName lastName email phoneNumber')
-      .populate({
-        path: 'items.product',
-        select: 'name price images brand description owner',
-        populate: {
-          path: 'owner',
-          model: Seller,
-          select: 'name logo user',
-          populate: {
-            path: 'user',
-            model: User,
-            select: 'email',
-          },
-        },
-      })
-      .populate('payments', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt')
-      .populate('activePayment', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt')
-      .lean();
-=======
     try {
-      // First get the order without populate to check if it exists and get the user reference
       const orderDoc = await Order.findById(orderId);
       if (!orderDoc) {
         throw new AppError('Order not found', 404);
       }
->>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
 
       // Now populate with proper error handling
       const order = await Order.findById(orderId)
@@ -854,30 +808,6 @@ export class AdminService extends BaseService implements IAdminService {
       console.error('OrderId:', orderId);
       throw new AppError(error.message || 'Failed to fetch order details', 500);
     }
-<<<<<<< HEAD
-
-    const owner = (order as any).items?.[0]?.product?.owner;
-    const seller = owner
-      ? {
-          seller_id: owner._id?.toString?.() || owner.id,
-          seller_name: owner.name ?? null,
-          seller_email: owner.user?.email ?? null,
-          shop_id: owner._id?.toString?.() || owner.id,
-          shop_name: owner.name ?? null,
-          shop_logo: owner.logo ?? null,
-        }
-      : {
-          seller_id: null,
-          seller_name: null,
-          seller_email: null,
-          shop_id: null,
-          shop_name: null,
-          shop_logo: null,
-        };
-
-    return { ...order, ...seller } as IOrder;
-=======
->>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
   }
 
   // =====================================

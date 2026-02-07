@@ -79,8 +79,8 @@ export class PaymentService {
 
       const updatedPayment = await payment.save();
 
-      // Update the order's payment status to stay in sync
-      await this.syncOrderPaymentStatus(payment.order.toString(), request.status);
+      // Update the order's payment status (and currency) to stay in sync
+      await this.syncOrderPaymentStatus(payment.order.toString(), request.status, updatedPayment.currency);
 
       return updatedPayment;
     } catch (error) {
@@ -88,13 +88,15 @@ export class PaymentService {
     }
   }
 
-  private async syncOrderPaymentStatus(orderId: string, paymentStatus: string): Promise<void> {
+  private async syncOrderPaymentStatus(orderId: string, paymentStatus: string, currency?: string): Promise<void> {
     try {
       const { Order } = require('../models/Order');
-      await Order.findByIdAndUpdate(orderId, { 
+      const update: any = {
         paymentStatus,
         ...(paymentStatus === 'COMPLETED' && { orderStatus: 'CONFIRMED' })
-      });
+      };
+      if (paymentStatus === 'COMPLETED' && currency) update.currency = currency;
+      await Order.findByIdAndUpdate(orderId, update);
     } catch (error) {
       console.error('Error syncing order payment status:', error);
       // Don't throw here - payment update should succeed even if sync fails
@@ -156,6 +158,48 @@ export class PaymentService {
       return await refundPayment.save();
     } catch (error) {
       throw new Error(`Failed to create refund: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Create Payment documents for orders that have paymentStatus COMPLETED but no Payment record.
+   * Ensures admin payments list shows all completed payments.
+   */
+  async ensurePaymentsForCompletedOrders(): Promise<number> {
+    try {
+      const { Order } = require('../models/Order');
+      const orders = await Order.find({ paymentStatus: 'COMPLETED' }).lean();
+      let created = 0;
+      for (const order of orders) {
+        const orderId = (order as any)._id?.toString();
+        if (!orderId) continue;
+        const existing = await Payment.countDocuments({ order: orderId });
+        if (existing > 0) continue;
+        const paymentMethod = (order as any).paymentMethod || 'CASH_ON_DELIVERY';
+        const payment = new Payment({
+          order: orderId,
+          user: (order as any).user,
+          paymentMethod,
+          paymentType: 'PAYMENT',
+          status: 'COMPLETED',
+          amount: (order as any).finalPrice ?? 0,
+          currency: 'XAF',
+          phoneNumber: paymentMethod === 'CASH_ON_DELIVERY' ? (order as any).shippingAddress?.phoneNumber : undefined,
+          description: `Payment for order ${(order as any).orderNumber || orderId}`,
+          attemptedAt: (order as any).createdAt || new Date(),
+          completedAt: (order as any).updatedAt || new Date(),
+        });
+        await payment.save();
+        await Order.findByIdAndUpdate(orderId, {
+          $push: { payments: payment._id },
+          $set: { activePayment: payment._id, currency: payment.currency || 'XAF' },
+        });
+        created++;
+      }
+      return created;
+    } catch (error) {
+      console.error('ensurePaymentsForCompletedOrders error:', error);
+      return 0;
     }
   }
 

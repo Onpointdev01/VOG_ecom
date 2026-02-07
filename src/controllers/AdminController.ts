@@ -272,8 +272,51 @@ export class AdminController extends BaseController {
     }
 
     const users = await this.adminService.getAllUsers(filters, pageNumber, limitNumber);
-    
+
     return this.sendResponse(res, 200, 'Users retrieved successfully', users);
+  }
+
+  @httpGet('/users/:userId', TYPES.RequireAdmin)
+  public async getUserDetails(
+    @response() res: Response,
+    @requestParam('userId') userId: string
+  ) {
+    const result = await this.adminService.getUserDetails(userId);
+    return this.sendResponse(res, 200, 'User details retrieved successfully', result);
+  }
+
+  @httpPut('/users/:userId/reset-password', TYPES.RequireAdmin)
+  public async resetUserPassword(
+    @response() res: Response,
+    @requestParam('userId') userId: string,
+    @requestBody() payload: { newPassword: string }
+  ) {
+    const { newPassword } = payload;
+    if (!newPassword || typeof newPassword !== 'string') {
+      throw new AppError('newPassword is required', 400);
+    }
+    await this.adminService.resetUserPassword(userId, newPassword);
+    return this.sendResponse(res, 200, 'User password reset successfully', null);
+  }
+
+  @httpPut('/users/:userId', TYPES.RequireAdmin)
+  public async updateUserDetails(
+    @response() res: Response,
+    @requestParam('userId') userId: string,
+    @requestBody() payload: any
+  ) {
+    const user = await this.adminService.updateUserDetails(userId, payload);
+    return this.sendResponse(res, 200, 'User updated successfully', user);
+  }
+
+  @httpPut('/users/:userId/seller', TYPES.RequireAdmin)
+  public async updateUserSeller(
+    @response() res: Response,
+    @requestParam('userId') userId: string,
+    @requestBody() payload: any
+  ) {
+    const seller = await this.adminService.updateSellerByUserId(userId, payload);
+    return this.sendResponse(res, 200, 'Seller profile updated successfully', seller);
   }
 
   @httpPut('/users/:userId/ban', TYPES.RequireAdmin)
@@ -520,18 +563,8 @@ export class AdminController extends BaseController {
   // Order Management Endpoints
   @httpGet('/orders/stats', TYPES.RequireAdmin)
   public async getOrderStats(@response() res: Response) {
-    try {
-      const stats = await this.adminService.getOrderStats();
-      return this.sendResponse(res, 200, 'Order statistics retrieved successfully', stats);
-    } catch (error: any) {
-      console.error('Error fetching order stats:', error);
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
-      });
-      return this.sendResponse(res, 500, error.message || 'Failed to fetch order statistics');
-    }
+    const stats = await this.adminService.getOrderStats();
+    return this.sendResponse(res, 200, 'Order statistics retrieved successfully', stats);
   }
 
   @httpGet('/orders', TYPES.RequireAdmin)
@@ -541,6 +574,7 @@ export class AdminController extends BaseController {
     @queryParam('limit') limit: string = '10',
     @queryParam('status') status?: string,
     @queryParam('paymentStatus') paymentStatus?: string,
+    @queryParam('currency') currency?: string,
     @queryParam('search') search?: string,
     @queryParam('dateFrom') dateFrom?: string,
     @queryParam('dateTo') dateTo?: string
@@ -557,6 +591,10 @@ export class AdminController extends BaseController {
       
       if (paymentStatus) {
         filters.paymentStatus = paymentStatus;
+      }
+      
+      if (currency) {
+        filters.currency = currency;
       }
       
       if (search) {
@@ -585,12 +623,6 @@ export class AdminController extends BaseController {
       });
       throw error; // Re-throw to let error handler process it
     }
-  }
-
-  @httpGet('/orders/stats', TYPES.RequireAdmin)
-  public async getOrderStats(@response() res: Response) {
-    const stats = await this.adminService.getOrderStats();
-    return this.sendResponse(res, 200, 'Order stats retrieved successfully', stats);
   }
 
   @httpPut('/orders/:orderId/status', TYPES.RequireAdmin)

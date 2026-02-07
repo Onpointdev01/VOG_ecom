@@ -17,6 +17,8 @@ export class PaymentController extends BaseController {
   @httpGet('/stats')
   async getPaymentStats(req: Request, res: Response) {
     try {
+      await this.paymentService.ensurePaymentsForCompletedOrders();
+
       const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
       const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
 
@@ -32,6 +34,9 @@ export class PaymentController extends BaseController {
   @httpGet('/')
   async getAllPayments(req: Request, res: Response) {
     try {
+      // Backfill Payment documents from orders that have paymentStatus COMPLETED but no Payment record
+      await this.paymentService.ensurePaymentsForCompletedOrders();
+
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 10;
       const search = req.query.search as string;

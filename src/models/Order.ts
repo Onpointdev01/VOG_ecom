@@ -44,6 +44,7 @@ export interface IOrder extends Document {
   paymentReference?: string;
   notes?: string;
   cartItemIds?: string[]; // Store original cart item IDs for clearing
+  currency?: string; // e.g. XAF, USD - set from payment when completed
   
   // Payment tracking
   payments: Schema.Types.ObjectId[]; // Reference to Payment documents
@@ -182,6 +183,10 @@ const orderSchema: Schema<IOrder> = new Schema({
   },
   cartItemIds: {
     type: [String],
+    required: false,
+  },
+  currency: {
+    type: String,
     required: false,
   },
   payments: [{

@@ -14,8 +14,18 @@ import { OAuth2Client } from 'google-auth-library';
 import { BaseService } from './BaseService';
 import { ISeller } from '../models/Seller';
 
+/** Result of signup: user fields plus email delivery status (not stored on IUser) */
+export interface SignUpUserResult {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  emailSent: boolean;
+  emailError?: string | null;
+}
+
 export interface IAuthService {
-  signupUser(payload: SignUpUserDTO): Promise<Partial<IUser>>;
+  signupUser(payload: SignUpUserDTO): Promise<SignUpUserResult>;
   signupSeller(payload: SignUpSellerDTO): Promise<Partial<ISeller>>;
   login(email: string, password: string, type?: 'user' | 'seller' | 'admin'): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
   socialLogin(
@@ -57,7 +67,7 @@ export class AuthService extends BaseService implements IAuthService {
     return user;
   }
 
-  async signupUser(payload: SignUpUserDTO): Promise<Partial<IUser>> {
+  async signupUser(payload: SignUpUserDTO): Promise<SignUpUserResult> {
     // Handle both formats: {firstName, lastName} or {name}
     let { email, firstName, lastName, nationality, phoneNumber, currentLocation, role } = payload;
     let { password } = payload;
@@ -144,13 +154,13 @@ export class AuthService extends BaseService implements IAuthService {
       }
 
       // Return user data with email status
-      return { 
-        id: newUser._id, 
-        email: normalizedEmail, 
-        firstName, 
+      return {
+        id: String(newUser._id),
+        email: normalizedEmail,
+        firstName,
         lastName,
         emailSent,
-        emailError: emailSent ? null : (emailError?.message || 'Email service unavailable')
+        emailError: emailSent ? null : (emailError?.message ?? 'Email service unavailable')
       };
     } catch (error: any) {
       // Handle MongoDB validation errors

@@ -98,17 +98,14 @@ import {
   AttributeValueService,
   ISellerService,
   SellerService,
-<<<<<<< HEAD
   IBoutiqueService,
   BoutiqueService,
-=======
   IPayoutService,
   PayoutService,
   ISKUService,
   SKUService,
   ITranslationService,
   TranslationService,
->>>>>>> 94b41ea23b9fbb237b295540e7ae2e9140551558
 } from './services';
 
 import { NotificationService } from './services/NotificationService';
