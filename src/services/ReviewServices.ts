@@ -1,7 +1,7 @@
 import { inject, injectable } from 'inversify';
 import { Model } from 'mongoose';
 import TYPES from '../di';
-import { IReview } from '../models/Review';
+import { IReview, refreshSellerReviewMetrics } from '../models/Review';
 import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
 
@@ -39,15 +39,23 @@ export class ReviewService extends BaseService implements IReviewService {
         seller: payload.seller,
         reviewType: 'seller',
       });
+      let review: IReview;
       if (existing) {
         existing.rating = payload.rating as number;
-        existing.comment = (payload.comment as string) ?? existing.comment;
+        if (payload.comment !== undefined) {
+          existing.comment = payload.comment as string;
+        }
         await existing.save();
-        return existing;
+        review = existing;
+      } else {
+        review = (await this.Review.create(payload)) as IReview;
       }
+      if (review.seller) {
+        await refreshSellerReviewMetrics(review.seller as any);
+      }
+      return review;
     }
-    const newReview = await this.Review.create(payload);
-    return newReview;
+    return this.Review.create(payload) as Promise<IReview>;
   }
 
   async updateReview(id: string, payload: Partial<IReview>): Promise<IReview> {

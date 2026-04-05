@@ -543,6 +543,7 @@ export class ProductService extends BaseService implements IProductService {
           id: product.owner._id?.toString(),
           name: product.owner.name,
           rating: product.owner.rating,
+          noOfRating: product.owner.noOfRating,
           logo: product.owner.logo,
           official: product.owner.official
         } : null,
@@ -1037,6 +1038,7 @@ export class ProductService extends BaseService implements IProductService {
         id: product.owner._id?.toString(),
         name: product.owner.name,
         rating: product.owner.rating,
+        noOfRating: product.owner.noOfRating,
         logo: product.owner.logo,
         official: product.owner.official
       } : null,
@@ -1229,6 +1231,7 @@ export class ProductService extends BaseService implements IProductService {
             id: product.owner._id?.toString(),
             name: product.owner.name,
             rating: product.owner.rating,
+            noOfRating: product.owner.noOfRating,
             logo: product.owner.logo,
             official: product.owner.official,
           }

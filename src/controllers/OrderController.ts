@@ -107,6 +107,13 @@ export class OrderController extends BaseController {
     }
   }
 
+  @httpPost('/:orderId/review-complete', TYPES.RequireSignIn)
+  public async markOrderReviewComplete(@response() res: Response, @requestParam('orderId') orderId: string) {
+    const userId = res.locals.user;
+    const order = await this.orderService.markBuyerReviewCompleted(orderId, userId);
+    return this.sendResponse(res, 200, 'Order review marked complete', order);
+  }
+
   @httpGet('/:orderId', TYPES.RequireSignIn)
   public async getOrder(@response() res: Response, @requestParam('orderId') orderId: string) {
     const userId = res.locals.user;

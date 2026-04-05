@@ -9,6 +9,7 @@ import TYPES from '../di';
 import { ISeller } from '../models/Seller';
 import { IOrder } from '../models/Order';
 import { IProduct } from '../models/Product';
+import { IReview } from '../models/Review';
 import { BaseService } from './BaseService';
 import AppError from '../utils/errors/AppError';
 
@@ -105,9 +106,43 @@ export class BoutiqueService extends BaseService implements IBoutiqueService {
   constructor(
     @inject(TYPES.Seller) private Seller: Model<ISeller>,
     @inject(TYPES.Order) private Order: Model<IOrder>,
-    @inject(TYPES.Product) private Product: Model<IProduct>
+    @inject(TYPES.Product) private Product: Model<IProduct>,
+    @inject(TYPES.Review) private Review: Model<IReview>
   ) {
     super();
+  }
+
+  /**
+   * Live store (seller) averages from Review documents — source of truth when Seller denormalized fields are stale.
+   */
+  private async storeReviewStatsBySellerIds(
+    sellerIds: string[]
+  ): Promise<Map<string, { avg: number; count: number }>> {
+    const map = new Map<string, { avg: number; count: number }>();
+    const oids = sellerIds
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+    if (!oids.length) return map;
+
+    const rows = await this.Review.aggregate([
+      { $match: { reviewType: 'seller', seller: { $in: oids } } },
+      {
+        $group: {
+          _id: '$seller',
+          count: { $sum: 1 },
+          sumR: { $sum: '$rating' },
+        },
+      },
+    ]);
+
+    for (const row of rows) {
+      if (!row._id) continue;
+      const id = row._id.toString();
+      const count = Number(row.count) || 0;
+      const sumR = Number(row.sumR) || 0;
+      map.set(id, { count, avg: count > 0 ? sumR / count : 0 });
+    }
+    return map;
   }
 
   /**
@@ -136,13 +171,17 @@ export class BoutiqueService extends BaseService implements IBoutiqueService {
       noOfRating?: number;
       official?: boolean;
     };
-    const { avg, count } = normalizeStoreRatingFields(doc.rating, doc.noOfRating);
+    const { avg: docAvg, count: docCount } = normalizeStoreRatingFields(doc.rating, doc.noOfRating);
+    const statsMap = await this.storeReviewStatsBySellerIds([boutiqueId]);
+    const live = statsMap.get(boutiqueId);
+    const rating = live !== undefined ? live.avg : docAvg;
+    const noOfRating = live !== undefined ? live.count : docCount;
     return {
       id: doc._id.toString(),
       name: doc.name || 'Store',
       logo: doc.logo || '',
-      rating: avg,
-      noOfRating: count,
+      rating,
+      noOfRating,
       official: !!doc.official,
     };
   }
@@ -173,18 +212,24 @@ export class BoutiqueService extends BaseService implements IBoutiqueService {
       if (row._id) countByOwner.set(row._id.toString(), row.count || 0);
     }
 
+    const sellerIds = (sellers as any[]).map((s) => s._id.toString());
+    const reviewStats = await this.storeReviewStatsBySellerIds(sellerIds);
+
     const boutiques: BoutiqueListItem[] = sellers.map((s: any) => {
       const sid = s._id.toString();
       const product_count = countByOwner.get(sid) ?? 0;
-      const { avg, count } = normalizeStoreRatingFields(s.rating, s.noOfRating);
+      const { avg: docAvg, count: docCount } = normalizeStoreRatingFields(s.rating, s.noOfRating);
+      const live = reviewStats.get(sid);
+      const rating = live !== undefined ? live.avg : docAvg;
+      const noOfRating = live !== undefined ? live.count : docCount;
       return {
         id: sid,
         name: s.name,
         logo: s.logo || '',
         description: '',
         product_count,
-        rating: avg,
-        noOfRating: count,
+        rating,
+        noOfRating,
         created_at: s.createdAt ? new Date(s.createdAt).toISOString() : '',
       };
     });
@@ -258,12 +303,16 @@ export class BoutiqueService extends BaseService implements IBoutiqueService {
       .select('name logo rating noOfRating products createdAt')
       .lean();
 
+    const topSellerIds = (sellers as any[]).map((s) => s._id.toString());
+    const topReviewStats = await this.storeReviewStatsBySellerIds(topSellerIds);
+
     const scored: TopBoutiquePerformance[] = sellers.map((s: any) => {
       const id = s._id.toString();
       const product_count = productCountByOwner.get(id) ?? 0;
-      const { avg, count } = normalizeStoreRatingFields(s.rating, s.noOfRating);
-      const rating = avg;
-      const noOfRating = count;
+      const { avg: docAvg, count: docCount } = normalizeStoreRatingFields(s.rating, s.noOfRating);
+      const live = topReviewStats.get(id);
+      const rating = live !== undefined ? live.avg : docAvg;
+      const noOfRating = live !== undefined ? live.count : docCount;
       const metrics = salesBySeller.get(id) || { totalSales: 0, total_orders: 0 };
       const total_sales = metrics.totalSales;
       const total_orders = metrics.total_orders;

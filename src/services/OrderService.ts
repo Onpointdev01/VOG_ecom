@@ -385,7 +385,7 @@ export class OrderService extends BaseService {
     const doc = await Order.findById(orderId).populate({
       path: 'items.product',
       select: 'name price images sizes color owner',
-      populate: { path: 'owner', select: 'name logo' },
+      populate: { path: 'owner', select: '_id name logo official rating noOfRating' },
     });
     if (!doc) throw new AppError('Order not found', 404);
     return doc;
@@ -473,6 +473,23 @@ export class OrderService extends BaseService {
       console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
       throw new AppError(`Failed to retrieve orders: ${error instanceof Error ? error.message : 'Unknown error'}`, 500);
     }
+  }
+
+  async markBuyerReviewCompleted(orderId: string, userId: string): Promise<IOrder> {
+    if (!validator.isMongoId(orderId)) throw new AppError('invalid id provided', 400);
+    const order = await Order.findById(orderId);
+    if (!order) throw new AppError('Order not found', 404);
+    if (order.user.toString() !== userId) {
+      throw new AppError('Access denied', 403);
+    }
+    if (order.orderStatus !== 'COMPLETE') {
+      throw new AppError('Reviews can only be completed for delivered orders', 400);
+    }
+    if (!order.buyerReviewCompletedAt) {
+      order.buyerReviewCompletedAt = new Date();
+      await order.save();
+    }
+    return this.getOrderById(orderId);
   }
 
   async getAllOrders(filter: any = {}, options: { page: number; limit: number }): Promise<{ orders: IOrder[]; total: number; page: number; totalPages: number }> {

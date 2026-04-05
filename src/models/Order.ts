@@ -49,7 +49,10 @@ export interface IOrder extends Document {
   // Payment tracking
   payments: Schema.Types.ObjectId[]; // Reference to Payment documents
   activePayment?: Schema.Types.ObjectId; // Current active payment attempt
-  
+
+  /** Set when the buyer finishes the post-delivery review flow for this order */
+  buyerReviewCompletedAt?: Date;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -196,6 +199,10 @@ const orderSchema: Schema<IOrder> = new Schema({
   activePayment: {
     type: Schema.Types.ObjectId,
     ref: PAYMENT,
+    required: false,
+  },
+  buyerReviewCompletedAt: {
+    type: Date,
     required: false,
   },
 }, { timestamps: true });

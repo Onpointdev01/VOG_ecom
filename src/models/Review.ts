@@ -1,4 +1,4 @@
-import { Document, Model, model, Schema } from 'mongoose';
+import mongoose, { Document, Model, model, Schema } from 'mongoose';
 import constants from '../utils/constants';
 import { Product, Seller } from '.';
 
@@ -9,7 +9,8 @@ export interface IReview extends Document {
   user: Schema.Types.ObjectId;
   reviewType: string;
   rating: number;
-  comment: string;
+  /** Required for product reviews; optional for store (seller) reviews */
+  comment?: string;
   product: Schema.Types.ObjectId;
   seller: Schema.Types.ObjectId;
 }
@@ -35,7 +36,6 @@ const reviewSchema: Schema<IReview> = new Schema<IReview>(
     },
     comment: {
       type: String,
-      required: true,
       trim: true,
     },
     product: {
@@ -71,6 +71,13 @@ reviewSchema.index(
   }
 );
 
+reviewSchema.pre('validate', function (next) {
+  if (this.reviewType === 'product' && (!this.comment || !String(this.comment).trim())) {
+    this.invalidate('comment', 'Comment is required for product reviews');
+  }
+  next();
+});
+
 reviewSchema.set('toJSON', {
   transform: (doc, ret) => {
     ret.id = ret._id.toString();
@@ -95,11 +102,16 @@ async function refreshProductReviewMetrics(productId: Schema.Types.ObjectId) {
   await product.save();
 }
 
-async function refreshSellerReviewMetrics(sellerId: Schema.Types.ObjectId) {
-  const seller = await Seller.findById(sellerId);
+/** Recompute Seller.rating / noOfRating from seller-type reviews (exported for explicit calls). */
+export async function refreshSellerReviewMetrics(sellerId: Schema.Types.ObjectId | string) {
+  const sid =
+    typeof sellerId === 'string'
+      ? new mongoose.Types.ObjectId(sellerId)
+      : sellerId;
+  const seller = await Seller.findById(sid);
   if (!seller) return;
 
-  const sellerReviews = await Review.find({ seller: sellerId, reviewType: 'seller' }).select('rating');
+  const sellerReviews = await Review.find({ seller: sid, reviewType: 'seller' }).select('rating');
   const totalReviews = sellerReviews.length;
   const totalRating = sellerReviews.reduce((acc, r) => acc + r.rating, 0);
   const averageRating = totalReviews > 0 ? totalRating / totalReviews : 0;
