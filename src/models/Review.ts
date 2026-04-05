@@ -61,7 +61,15 @@ const reviewSchema: Schema<IReview> = new Schema<IReview>(
 );
 
 // Transform _id to id for API responses
-reviewSchema.index({ product: 1, seller: 1, reviewer: 1 });
+reviewSchema.index({ product: 1, seller: 1, user: 1 });
+/** One store review per user per seller (updates replace the same document). */
+reviewSchema.index(
+  { user: 1, seller: 1, reviewType: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { reviewType: 'seller', seller: { $exists: true, $ne: null } },
+  }
+);
 
 reviewSchema.set('toJSON', {
   transform: (doc, ret) => {
@@ -72,46 +80,46 @@ reviewSchema.set('toJSON', {
   },
 });
 
-// start of pre-save hook for ratings
-reviewSchema.pre('save', async function (next) {
-  if (this.isModified('rating') || this.isNew) {
-    await updateMetrics(this);
-  }
-  next();
-});
+async function refreshProductReviewMetrics(productId: Schema.Types.ObjectId) {
+  const product = await Product.findById(productId);
+  if (!product) return;
 
-//TODO: push reviews to seller and product collection
-async function updateMetrics(review: IReview) {
-  if (review.reviewType === 'product' && review.product) {
-    const product = await Product.findById(review.product);
+  const productReviews = await Review.find({ product: productId, reviewType: 'product' }).select('_id rating');
+  const totalReviews = productReviews.length;
+  const totalRating = productReviews.reduce((acc, r) => acc + r.rating, 0);
+  const averageRating = totalReviews > 0 ? totalRating / totalReviews : 0;
 
-    if (product) {
-      const existingReviews = await Review.find({ product: review.product });
-
-      const totalReviews = existingReviews.length + 1; // Include the new review
-      const totalRating = existingReviews.reduce((acc, r) => acc + r.rating, 0) + review.rating;
-      const averageRating = totalRating / totalReviews;
-
-      product.noOfReviews = totalReviews;
-      product.rating = averageRating;
-      product.reviews.push(review._id);
-      await product.save();
-    }
-  } else if (review.reviewType === 'seller' && review.seller) {
-    const seller = await Seller.findById(review.seller);
-    if (seller) {
-      const existingReviews = await Review.find({ seller: review.seller });
-
-      const totalReviews = existingReviews.length + 1; // Include the new review
-      const totalRating = existingReviews.reduce((acc, r) => acc + r.rating, 0) + review.rating;
-      const averageRating = totalRating / totalReviews;
-
-      seller.rating = totalReviews;
-      seller.noOfRating = averageRating;
-      // seller.reviews.push(review._id);
-      await seller.save();
-    }
-  }
+  product.reviews = productReviews.map((r) => r._id) as unknown as typeof product.reviews;
+  product.noOfReviews = totalReviews;
+  product.rating = averageRating;
+  await product.save();
 }
+
+async function refreshSellerReviewMetrics(sellerId: Schema.Types.ObjectId) {
+  const seller = await Seller.findById(sellerId);
+  if (!seller) return;
+
+  const sellerReviews = await Review.find({ seller: sellerId, reviewType: 'seller' }).select('rating');
+  const totalReviews = sellerReviews.length;
+  const totalRating = sellerReviews.reduce((acc, r) => acc + r.rating, 0);
+  const averageRating = totalReviews > 0 ? totalRating / totalReviews : 0;
+
+  seller.rating = averageRating;
+  seller.noOfRating = totalReviews;
+  await seller.save();
+}
+
+/** After persist: recompute aggregates from DB (correct for creates and rating updates). */
+reviewSchema.post('save', async function (doc: IReview) {
+  try {
+    if (doc.reviewType === 'product' && doc.product) {
+      await refreshProductReviewMetrics(doc.product as Schema.Types.ObjectId);
+    } else if (doc.reviewType === 'seller' && doc.seller) {
+      await refreshSellerReviewMetrics(doc.seller as Schema.Types.ObjectId);
+    }
+  } catch (e) {
+    console.error('[Review] post-save aggregate refresh failed:', e);
+  }
+});
 
 export const Review: Model<IReview> = model<IReview>(REVIEW, reviewSchema);

@@ -14,6 +14,7 @@ import { PaymentMethod } from '../models/Payment';
 import AppError from '../utils/errors/AppError';
 import { TYPES } from '../di';
 import { Model } from 'mongoose';
+import validator from 'validator';
 import { IUser } from '../models';
 
 export interface CreateOrderRequest {
@@ -380,8 +381,14 @@ export class OrderService extends BaseService {
   }
 
   async getOrderById(orderId: string): Promise<IOrder> {
-    // Don't populate user for ownership checks - populate only items.product
-    return this.verifyDoc(orderId, Order, 'items.product');
+    if (!validator.isMongoId(orderId)) throw new AppError('invalid id provided', 400);
+    const doc = await Order.findById(orderId).populate({
+      path: 'items.product',
+      select: 'name price images sizes color owner',
+      populate: { path: 'owner', select: 'name logo' },
+    });
+    if (!doc) throw new AppError('Order not found', 404);
+    return doc;
   }
 
   async getUserOrders(userId: string, options?: { limit?: number; status?: string; page?: number }): Promise<IOrder[]> {
@@ -432,10 +439,18 @@ export class OrderService extends BaseService {
       const orders = await query.lean().exec();
       console.log('Query executed successfully, found', orders?.length || 0, 'orders');
       
-      // Clean up any null products (deleted products)
+      // Clean up any null products (deleted products). lean() skips toJSON — expose `id` for clients.
       const cleanedOrders = (orders || []).map((order: any) => {
+        const oid = order._id;
+        if (oid != null && order.id == null) {
+          order.id = typeof oid.toString === 'function' ? oid.toString() : String(oid);
+        }
         if (order.items && Array.isArray(order.items)) {
           order.items = order.items.map((item: any) => {
+            const iid = item._id;
+            if (iid != null && item.id == null) {
+              item.id = typeof iid.toString === 'function' ? iid.toString() : String(iid);
+            }
             // If product was deleted (null), provide a placeholder
             if (!item.product) {
               item.product = {

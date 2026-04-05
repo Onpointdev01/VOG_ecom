@@ -38,8 +38,31 @@ export class ReviewController extends BaseController {
       user: authenticatedUserId,
     };
 
+    const existingSeller =
+      reviewPayload.reviewType === 'seller' &&
+      (await this.reviewService.getMySellerReview(
+        String(reviewPayload.seller),
+        String(authenticatedUserId)
+      ));
+
     const newReview = await this.reviewService.createReview(reviewPayload);
-    return this.sendResponse(res, 201, 'Review created successfully', newReview);
+    const message = existingSeller
+      ? 'Store review updated successfully'
+      : 'Review created successfully';
+    const status = existingSeller ? 200 : 201;
+    return this.sendResponse(res, status, message, newReview);
+  }
+
+  /** Current user's store review for a seller (one per user per store; used to pre-fill / update). */
+  @httpGet('/seller/:sellerId/me', TYPES.RequireSignIn)
+  async getMySellerReview(
+    @request() req: Request,
+    @response() res: Response,
+    @requestParam('sellerId') sellerId: string
+  ) {
+    const userId = res.locals.user || req.user?._id?.toString();
+    const review = await this.reviewService.getMySellerReview(sellerId, String(userId));
+    return this.sendResponse(res, 200, 'Seller review retrieved', review);
   }
 
   @httpGet('/:id')

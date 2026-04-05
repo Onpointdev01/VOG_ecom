@@ -12,13 +12,52 @@ import { IProduct } from '../models/Product';
 import { BaseService } from './BaseService';
 import AppError from '../utils/errors/AppError';
 
+/**
+ * Store (seller) ratings only — not derived from product reviews.
+ * Handles legacy rows where Review pre-save swapped count vs average.
+ */
+function normalizeStoreRatingFields(
+  ratingRaw?: number | null,
+  noOfRatingRaw?: number | null
+): { avg: number; count: number } {
+  const R = ratingRaw == null ? NaN : Number(ratingRaw);
+  const N = noOfRatingRaw == null ? NaN : Number(noOfRatingRaw);
+
+  if (Number.isFinite(R) && R > 5) {
+    const avg = Number.isFinite(N) && N >= 0 && N <= 5 ? N : 0;
+    return { avg, count: Math.max(0, Math.round(R)) };
+  }
+
+  if (
+    Number.isFinite(R) &&
+    Number.isFinite(N) &&
+    N > 0 &&
+    N <= 5 &&
+    N % 1 !== 0 &&
+    Number.isInteger(R) &&
+    R >= 1
+  ) {
+    return { avg: N, count: R };
+  }
+
+  if (Number.isFinite(R) && R >= 0 && R <= 5) {
+    const count = Number.isFinite(N) ? Math.max(0, Math.round(N)) : 0;
+    return { avg: R, count };
+  }
+
+  return { avg: 0, count: 0 };
+}
+
 export interface BoutiqueListItem {
   id: string;
   name: string;
   logo: string;
   description: string;
   product_count: number;
+  /** Average store (seller) review score, 0–5. */
   rating: number;
+  /** Number of store (seller) reviews. */
+  noOfRating: number;
   created_at: string;
 }
 
@@ -36,6 +75,7 @@ export interface TopBoutiquePerformance {
   description: string;
   product_count: number;
   rating: number;
+  noOfRating: number;
   created_at: string;
   performance_score: number;
   total_sales: number;
@@ -47,7 +87,10 @@ export interface PublicBoutiqueProfile {
   id: string;
   name: string;
   logo: string;
+  /** Average store (seller) review score, 0–5. */
   rating: number;
+  /** Number of store (seller) reviews. */
+  noOfRating: number;
   official: boolean;
 }
 
@@ -70,7 +113,7 @@ export class BoutiqueService extends BaseService implements IBoutiqueService {
   /**
    * List boutiques (sellers) with pagination and optional search by name.
    * Product count is derived from Product collection (owner ref); Seller.products array is not maintained on create.
-   * Rating uses noOfRating (Review model stores average there; rating field holds count due to existing bug).
+   * Store `rating` / `noOfRating` come from Seller only (seller-type reviews), not from products.
    */
   /**
    * Active seller summary for buyer-facing vendor screen (name, logo, rating) even with zero active products.
@@ -93,17 +136,13 @@ export class BoutiqueService extends BaseService implements IBoutiqueService {
       noOfRating?: number;
       official?: boolean;
     };
-    const rating =
-      typeof doc.noOfRating === 'number' && doc.noOfRating >= 0 && doc.noOfRating <= 5
-        ? doc.noOfRating
-        : typeof doc.rating === 'number' && doc.rating >= 0 && doc.rating <= 5
-          ? doc.rating
-          : 0;
+    const { avg, count } = normalizeStoreRatingFields(doc.rating, doc.noOfRating);
     return {
       id: doc._id.toString(),
       name: doc.name || 'Store',
       logo: doc.logo || '',
-      rating,
+      rating: avg,
+      noOfRating: count,
       official: !!doc.official,
     };
   }
@@ -137,16 +176,15 @@ export class BoutiqueService extends BaseService implements IBoutiqueService {
     const boutiques: BoutiqueListItem[] = sellers.map((s: any) => {
       const sid = s._id.toString();
       const product_count = countByOwner.get(sid) ?? 0;
-      const rating = typeof s.noOfRating === 'number' && s.noOfRating >= 0 && s.noOfRating <= 5
-        ? s.noOfRating
-        : (typeof s.rating === 'number' && s.rating >= 0 && s.rating <= 5 ? s.rating : 0);
+      const { avg, count } = normalizeStoreRatingFields(s.rating, s.noOfRating);
       return {
         id: sid,
         name: s.name,
         logo: s.logo || '',
         description: '',
         product_count,
-        rating,
+        rating: avg,
+        noOfRating: count,
         created_at: s.createdAt ? new Date(s.createdAt).toISOString() : '',
       };
     });
@@ -223,9 +261,9 @@ export class BoutiqueService extends BaseService implements IBoutiqueService {
     const scored: TopBoutiquePerformance[] = sellers.map((s: any) => {
       const id = s._id.toString();
       const product_count = productCountByOwner.get(id) ?? 0;
-      const rating = typeof s.noOfRating === 'number' && s.noOfRating >= 0 && s.noOfRating <= 5
-        ? s.noOfRating
-        : (typeof s.rating === 'number' && s.rating >= 0 && s.rating <= 5 ? s.rating : 0);
+      const { avg, count } = normalizeStoreRatingFields(s.rating, s.noOfRating);
+      const rating = avg;
+      const noOfRating = count;
       const metrics = salesBySeller.get(id) || { totalSales: 0, total_orders: 0 };
       const total_sales = metrics.totalSales;
       const total_orders = metrics.total_orders;
@@ -248,6 +286,7 @@ export class BoutiqueService extends BaseService implements IBoutiqueService {
         description: '',
         product_count,
         rating,
+        noOfRating,
         created_at: s.createdAt ? new Date(s.createdAt).toISOString() : '',
         performance_score: Math.round(performance_score * 100) / 100,
         total_sales,

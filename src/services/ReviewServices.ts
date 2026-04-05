@@ -8,6 +8,7 @@ import { BaseService } from './BaseService';
 export interface IReviewService {
   getAllReviews(): Promise<IReview[]>;
   getReviewsByProduct(productId: string): Promise<IReview[]>;
+  getMySellerReview(sellerId: string, userId: string): Promise<IReview | null>;
   getReviewById(id: string): Promise<IReview>;
   createReview(payload: Partial<IReview>): Promise<IReview>;
   updateReview(id: string, payload: Partial<IReview>): Promise<IReview>;
@@ -32,7 +33,19 @@ export class ReviewService extends BaseService implements IReviewService {
   
 
   async createReview(payload: Partial<IReview>): Promise<IReview> {
-    // Optional: Add any business logic, e.g., checking if product exists
+    if (payload.reviewType === 'seller' && payload.seller && payload.user) {
+      const existing = await this.Review.findOne({
+        user: payload.user,
+        seller: payload.seller,
+        reviewType: 'seller',
+      });
+      if (existing) {
+        existing.rating = payload.rating as number;
+        existing.comment = (payload.comment as string) ?? existing.comment;
+        await existing.save();
+        return existing;
+      }
+    }
     const newReview = await this.Review.create(payload);
     return newReview;
   }
@@ -50,5 +63,14 @@ export class ReviewService extends BaseService implements IReviewService {
 
   async getReviewsByProduct(productId: string): Promise<IReview[]> {
     return this.Review.find({ product: productId }).populate('user', 'firstName lastName'); // Fetch first and last name
+  }
+
+  async getMySellerReview(sellerId: string, userId: string): Promise<IReview | null> {
+    const doc = await this.Review.findOne({
+      seller: sellerId,
+      user: userId,
+      reviewType: 'seller',
+    }).lean();
+    return doc as IReview | null;
   }
 }
