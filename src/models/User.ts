@@ -30,6 +30,7 @@ export interface IUser extends Document {
   verifyCodeExpires?: Date;
   refreshToken?: string;
   socialLogin: ISocialLogin[];
+  firebaseUid?: string;
   seller?: PopulatedDoc<ISeller>;
   wishlist: Schema.Types.ObjectId[]; // Array of product IDs for the wishlist
   pushTokens: string[]; // Array of Expo push tokens for notifications
@@ -131,6 +132,11 @@ const userSchema: Schema = new Schema<IUser>(
     },
 
     socialLogin: [socialLoginSchema],
+    firebaseUid: {
+      type: String,
+      index: true,
+      sparse: true,
+    },
     seller: {
       type: Schema.Types.ObjectId,
       ref: SELLER,

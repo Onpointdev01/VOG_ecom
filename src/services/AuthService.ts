@@ -13,6 +13,7 @@ import validator from 'validator';
 import { OAuth2Client } from 'google-auth-library';
 import { BaseService } from './BaseService';
 import { ISeller } from '../models/Seller';
+import { getFirebaseAdminAuth } from '../utils/firebaseAdmin';
 
 /** Result of signup: user fields plus email delivery status (not stored on IUser) */
 export interface SignUpUserResult {
@@ -31,6 +32,10 @@ export interface IAuthService {
   socialLogin(
     idToken: string,
     provider: string
+  ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
+  firebaseSocialLogin(
+    firebaseIdToken: string,
+    providerHint?: 'google' | 'apple'
   ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
   forgotPassword(email: string): Promise<void>;
   resetPassword(token: string, password: string): Promise<void>;
@@ -374,6 +379,135 @@ export class AuthService extends BaseService implements IAuthService {
 
     return { user: trimedUser, token: token, refreshToken: refreshToken };
   };
+
+  private async buildAuthUserResponse(user: IUser): Promise<Partial<IUser> & { type?: string; seller?: string }> {
+    const userWithSeller = await this.User.findById(user._id).populate('seller');
+    const hasSeller = !!userWithSeller?.seller;
+    const userRole = user.role || 'user';
+    const userType = hasSeller ? 'seller' : userRole;
+
+    const trimedUser: Partial<IUser> & { type?: string; seller?: string } = {
+      id: user._id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      profileImageUrl: user.profileImageUrl,
+      nationality: user.nationality,
+      currentLocation: user.currentLocation,
+      banned: user.banned,
+      verified: user.verified,
+      role: userRole,
+      type: userType,
+    };
+
+    if (hasSeller) {
+      const seller = userWithSeller?.seller as any;
+      const sellerId = seller?._id || seller?.id || seller;
+      if (sellerId) {
+        trimedUser.seller = sellerId.toString();
+      }
+    }
+
+    return trimedUser;
+  }
+
+  private splitDisplayName(displayName?: string | null): { firstName: string; lastName: string } {
+    const fullName = (displayName || '').trim();
+    if (!fullName) {
+      return { firstName: 'User', lastName: 'Firebase' };
+    }
+    const parts = fullName.split(/\s+/);
+    const firstName = parts[0] || 'User';
+    const lastName = parts.slice(1).join(' ') || 'Firebase';
+    return { firstName, lastName };
+  }
+
+  async firebaseSocialLogin(
+    firebaseIdToken: string,
+    providerHint?: 'google' | 'apple'
+  ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }> {
+    let decoded: any;
+    try {
+      decoded = await getFirebaseAdminAuth().verifyIdToken(firebaseIdToken);
+    } catch (error) {
+      throw new AppError('Invalid Firebase token', 401);
+    }
+
+    const firebaseUid = decoded?.uid;
+    if (!firebaseUid) {
+      throw new AppError('Invalid Firebase token payload', 400);
+    }
+
+    const signInProvider = decoded?.firebase?.sign_in_provider;
+    const provider = providerHint || signInProvider;
+    if (!provider || !['google', 'apple'].includes(provider)) {
+      throw new AppError('Unsupported social provider', 400);
+    }
+
+    const email = String(decoded?.email || '').trim().toLowerCase();
+    if (!email) {
+      throw new AppError('No email available from Firebase token', 400);
+    }
+
+    const providerId = decoded?.sub || firebaseUid;
+    let user = await this.User.findOne({ firebaseUid });
+
+    if (!user) {
+      user = await this.User.findOne({
+        'socialLogin.provider': provider,
+        'socialLogin.providerId': providerId,
+      });
+    }
+
+    if (!user) {
+      user = await this.User.findOne({ email });
+    }
+
+    if (user) {
+      let shouldSave = false;
+
+      if (!user.firebaseUid) {
+        user.firebaseUid = firebaseUid;
+        shouldSave = true;
+      }
+
+      const hasProviderLink = user.socialLogin?.some(
+        (entry) => entry.provider === provider && entry.providerId === providerId
+      );
+      if (!hasProviderLink) {
+        user.socialLogin.push({ provider, providerId });
+        shouldSave = true;
+      }
+
+      if (!user.verified) {
+        user.verified = true;
+        shouldSave = true;
+      }
+
+      if (shouldSave) {
+        await user.save();
+      }
+    } else {
+      const { firstName, lastName } = this.splitDisplayName(decoded?.name);
+      user = await this.User.create({
+        email,
+        firstName,
+        lastName,
+        profileImageUrl: decoded?.picture || `https://ui-avatars.com/api/?name=${firstName}+${lastName}`,
+        socialLogin: [{ provider, providerId }],
+        firebaseUid,
+        verified: true,
+      });
+    }
+
+    const userRole = user.role || 'user';
+    const token = generateAccessToken(user._id as string, userRole);
+    const refreshToken = generateRefreshToken(user._id as string, userRole);
+    await this.User.findByIdAndUpdate(user._id, { refreshToken });
+
+    const trimedUser = await this.buildAuthUserResponse(user);
+    return { user: trimedUser, token, refreshToken };
+  }
 
   async socialLogin(
     idToken: string,

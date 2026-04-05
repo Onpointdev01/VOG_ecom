@@ -7,6 +7,7 @@ import TYPES from '../di';
 import { IAuthService } from '../services';
 import {
   LoginDTO,
+  firebaseSocialLoginDTO,
   ResetPasswordDTO,
   SignUpSellerDTO,
   SignUpUserDTO,
@@ -153,6 +154,21 @@ export class AuthController extends BaseController {
     logger.info(`Social login attempt for provider: ${provider}`);
     const result = await this.authService.socialLogin(idToken, provider);
     
+    return this.sendResponse(res, 200, 'Successfully logged in', {
+      user: result.user,
+      token: result.token,
+      refreshToken: result.refreshToken,
+    });
+  }
+
+  @httpPost('/firebase-social-login')
+  async firebaseSocialLogin(@response() res: Response, @requestBody() payload: firebaseSocialLoginDTO) {
+    const { firebaseIdToken, providerHint } = payload;
+    if (!firebaseIdToken) throw new AppError('firebaseIdToken is required', 400);
+
+    logger.info(`Firebase social login attempt for provider: ${providerHint || 'unknown'}`);
+    const result = await this.authService.firebaseSocialLogin(firebaseIdToken, providerHint);
+
     return this.sendResponse(res, 200, 'Successfully logged in', {
       user: result.user,
       token: result.token,

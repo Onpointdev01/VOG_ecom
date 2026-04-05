@@ -42,6 +42,11 @@ export interface socialLoginDTO {
   provider: string;
 }
 
+export interface firebaseSocialLoginDTO {
+  firebaseIdToken: string;
+  providerHint?: 'google' | 'apple';
+}
+
 export interface createProductDTO {
   name: string;
   description: string;
