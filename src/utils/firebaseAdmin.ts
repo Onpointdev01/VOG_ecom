@@ -1,13 +1,29 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import * as admin from 'firebase-admin';
 
+function normalizeServiceAccount(parsed: Record<string, unknown>): Record<string, unknown> {
+  if (parsed.private_key) {
+    parsed.private_key = String(parsed.private_key).replace(/\\n/g, '\n');
+  }
+  return parsed;
+}
+
 function resolveCredential(): admin.credential.Credential {
+  const filePath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+  if (filePath) {
+    const resolved = path.isAbsolute(filePath)
+      ? filePath
+      : path.join(process.cwd(), filePath);
+    const raw = fs.readFileSync(resolved, 'utf8');
+    const parsed = normalizeServiceAccount(JSON.parse(raw));
+    return admin.credential.cert(parsed as admin.ServiceAccount);
+  }
+
   const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (serviceAccountJson) {
-    const parsed = JSON.parse(serviceAccountJson);
-    if (parsed.private_key) {
-      parsed.private_key = String(parsed.private_key).replace(/\\n/g, '\n');
-    }
-    return admin.credential.cert(parsed);
+    const parsed = normalizeServiceAccount(JSON.parse(serviceAccountJson));
+    return admin.credential.cert(parsed as admin.ServiceAccount);
   }
 
   const projectId = process.env.FIREBASE_PROJECT_ID;
@@ -16,7 +32,7 @@ function resolveCredential(): admin.credential.Credential {
 
   if (!projectId || !clientEmail || !privateKeyRaw) {
     throw new Error(
-      'Firebase Admin credentials are missing. Set FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_PROJECT_ID/FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY.'
+      'Firebase Admin credentials are missing. Set FIREBASE_SERVICE_ACCOUNT_PATH, FIREBASE_SERVICE_ACCOUNT_JSON, or FIREBASE_PROJECT_ID/FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY.'
     );
   }
 
