@@ -10,6 +10,7 @@ import { ISeller } from '../models/Seller';
 import { IOrder } from '../models/Order';
 import { IProduct } from '../models/Product';
 import { BaseService } from './BaseService';
+import AppError from '../utils/errors/AppError';
 
 export interface BoutiqueListItem {
   id: string;
@@ -41,9 +42,19 @@ export interface TopBoutiquePerformance {
   total_orders: number;
 }
 
+/** Public storefront header (no auth) — used when a boutique has no active products in catalog. */
+export interface PublicBoutiqueProfile {
+  id: string;
+  name: string;
+  logo: string;
+  rating: number;
+  official: boolean;
+}
+
 export interface IBoutiqueService {
   listBoutiques(page: number, limit: number, search?: string): Promise<BoutiquesListResult>;
   getTopByPerformance(limit: number): Promise<TopBoutiquePerformance[]>;
+  getPublicProfile(boutiqueId: string): Promise<PublicBoutiqueProfile>;
 }
 
 @injectable()
@@ -61,6 +72,42 @@ export class BoutiqueService extends BaseService implements IBoutiqueService {
    * Product count is derived from Product collection (owner ref); Seller.products array is not maintained on create.
    * Rating uses noOfRating (Review model stores average there; rating field holds count due to existing bug).
    */
+  /**
+   * Active seller summary for buyer-facing vendor screen (name, logo, rating) even with zero active products.
+   */
+  async getPublicProfile(boutiqueId: string): Promise<PublicBoutiqueProfile> {
+    if (!mongoose.Types.ObjectId.isValid(boutiqueId)) {
+      throw new AppError('Boutique not found', 404);
+    }
+    const s = await this.Seller.findById(boutiqueId)
+      .select('name logo rating noOfRating official status')
+      .lean();
+    if (!s || (s as { status?: string }).status !== 'active') {
+      throw new AppError('Boutique not found', 404);
+    }
+    const doc = s as unknown as {
+      _id: { toString(): string };
+      name?: string;
+      logo?: string;
+      rating?: number;
+      noOfRating?: number;
+      official?: boolean;
+    };
+    const rating =
+      typeof doc.noOfRating === 'number' && doc.noOfRating >= 0 && doc.noOfRating <= 5
+        ? doc.noOfRating
+        : typeof doc.rating === 'number' && doc.rating >= 0 && doc.rating <= 5
+          ? doc.rating
+          : 0;
+    return {
+      id: doc._id.toString(),
+      name: doc.name || 'Store',
+      logo: doc.logo || '',
+      rating,
+      official: !!doc.official,
+    };
+  }
+
   async listBoutiques(page: number, limit: number, search?: string): Promise<BoutiquesListResult> {
     const skip = (page - 1) * limit;
     const match: Record<string, unknown> = { status: 'active' };

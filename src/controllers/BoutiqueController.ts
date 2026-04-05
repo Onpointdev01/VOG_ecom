@@ -58,6 +58,19 @@ export class BoutiqueController extends BaseController {
   }
 
   /**
+   * GET /api/v1/boutiques/:boutiqueId/profile
+   * Public boutique header (name, logo, rating) for vendor screen when catalog is empty.
+   */
+  @httpGet('/:boutiqueId/profile')
+  async getBoutiquePublicProfile(
+    @response() res: Response,
+    @requestParam('boutiqueId') boutiqueId: string
+  ) {
+    const data = await this.boutiqueService.getPublicProfile(boutiqueId);
+    return this.sendResponse(res, 200, 'Boutique profile retrieved successfully', data);
+  }
+
+  /**
    * GET /api/v1/boutiques/:boutiqueId/products
    * Products belonging to a boutique with optional filters and sort.
    */
