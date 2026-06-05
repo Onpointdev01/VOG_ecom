@@ -9,6 +9,7 @@ import { EmailCheckResult, SignUpSellerDTO, SignUpUserDTO } from '../utils/dtos'
 import AppError from '../utils/errors/AppError';
 import { generateAccessToken, generateCode, generateRefreshToken, decodeToken } from '../utils/helpers';
 import { sendEmail, renderTemplate } from '../utils/helpers/sendMail';
+import logger from '../utils/logger';
 import validator from 'validator';
 import { OAuth2Client } from 'google-auth-library';
 import { BaseService } from './BaseService';
@@ -110,6 +111,17 @@ export class AuthService extends BaseService implements IAuthService {
     const user: IUser | null = await this.User.findOne({ email }, '+password');
     if (!user) {
       throw new AppError('Invalid email or password', 400);
+    }
+
+    if (!user.password) {
+      const usesSocial = Array.isArray(user.socialLogin) && user.socialLogin.length > 0;
+      throw new AppError(
+        usesSocial
+          ? 'This account uses Google sign-in. Use Forgot Password to set a password for the seller portal.'
+          : 'No password is set for this account. Use Forgot Password to create one.',
+        400,
+        'NO_PASSWORD_SET'
+      );
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -250,19 +262,40 @@ export class AuthService extends BaseService implements IAuthService {
 
     const code = generateCode(6);
     const expiresIn = 10;
-    user.passwordResetToken = code;
+    user.passwordResetToken = crypto.createHash('md5').update(code).digest('hex');
     user.passwordResetExpires = new Date(Date.now() + expiresIn * 60 * 1000);
 
     await user.save();
-    await this.sendVerificationCode();
-    //TODO: send email with code
+
+    const userName = user.firstName || 'there';
+
+    try {
+      await sendEmail({
+        to: [email],
+        subject: 'Reset your password — St Cael',
+        html: renderTemplate('password-reset.html', { user: userName, code }),
+      });
+    } catch (emailError) {
+      logger.error('Forgot password email failed', { email, emailError });
+      if (process.env.NODE_ENV === 'development') {
+        logger.info(`[dev] Password reset code for ${email}: ${code}`);
+        return;
+      }
+      throw new AppError('Unable to send reset email. Please try again later.', 503);
+    }
   }
 
   async resetPassword(email: string, code: string, password: string): Promise<void> {
     const user = await this.User.findOne({ email });
     if (!user) throw new AppError('User not found', 404);
 
-    if (user.passwordResetExpires!.getTime() < Date.now()) throw new AppError('provided code is expired', 400);
+    if (!user.passwordResetExpires || user.passwordResetExpires.getTime() < Date.now()) {
+      throw new AppError('provided code is expired', 400);
+    }
+
+    if (!user.passwordResetToken) {
+      throw new AppError('No reset request found. Request a new code.', 400);
+    }
 
     const hashedCode = crypto.createHash('md5').update(code).digest('hex');
     if (user.passwordResetToken !== hashedCode) throw new AppError('code does not match code sent', 400);
@@ -329,7 +362,7 @@ export class AuthService extends BaseService implements IAuthService {
     await sendEmail({
       to: ['smtpbenjo@gmail.com'],
       subject: 'Email Verification',
-      html: renderTemplate('src/utils/templates/password-reset.html', { usersName, code }),
+      html: renderTemplate('password-reset.html', { user: usersName, code }),
     });
   }
 

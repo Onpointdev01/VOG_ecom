@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "build": "rm -rf dist && tsc ",
+    "build": "rimraf dist && tsc && node scripts/copy-email-templates.js",
     "dev": "cross-env NODE_ENV=development  nodemon",
     "start": "NODE_ENV=production node dist/server.js",
     "test": "yarn run unit-test && yarn run integration-test",
