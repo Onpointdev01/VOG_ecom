@@ -1,84 +1,33 @@
 import { inject } from 'inversify';
-import { controller, httpPost, requestBody, response, request } from 'inversify-express-utils';
-import { Response, Request } from 'express';
+import { controller, httpPost, requestBody, response } from 'inversify-express-utils';
+import { Response } from 'express';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
 import { IAuthService } from '../services';
 import {
   LoginDTO,
-  firebaseSocialLoginDTO,
   ResetPasswordDTO,
   SignUpSellerDTO,
   SignUpUserDTO,
   socialLoginDTO,
+  firebaseSocialLoginDTO,
   VerifyEmailDTO,
 } from '../utils/dtos';
 import logger from '../utils/logger';
 import AppError from '../utils/errors/AppError';
-import { authRateLimiter, passwordResetRateLimiter } from '../middlewares/rateLimiter';
 
-/**
- * @swagger
- * tags:
- *   name: Auth
- *   description: Authentication endpoints
- */
 @controller('/api/v1/auth')
 export class AuthController extends BaseController {
   constructor(@inject(TYPES.AuthService) private authService: IAuthService) {
     super();
   }
 
-  /**
-   * @swagger
-   * /api/v1/auth/signup:
-   *   post:
-   *     summary: Register a new user
-   *     tags: [Auth]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             required:
-   *               - email
-   *               - password
-   *               - firstName
-   *               - lastName
-   *             properties:
-   *               email:
-   *                 type: string
-   *                 format: email
-   *               password:
-   *                 type: string
-   *                 minLength: 6
-   *               firstName:
-   *                 type: string
-   *               lastName:
-   *                 type: string
-   *               role:
-   *                 type: string
-   *                 enum: [user, seller]
-   *                 default: user
-   *     responses:
-   *       201:
-   *         description: User created successfully
-   *       400:
-   *         description: Validation error or email already exists
-   *       403:
-   *         description: Admin registration not allowed
-   */
   //signup
   @httpPost('/signup')
   async signUpUser(@response() res: Response, @requestBody() payload: SignUpUserDTO) {
     const newUser = await this.authService.signupUser(payload);
-    // If email wasn't sent, include warning in message
-    const message = newUser.emailSent 
-      ? 'created user successfully' 
-      : 'Account created successfully, but we couldn\'t send the verification email. Please use the "Resend Verification" option.';
-    return this.sendResponse(res, 201, message, newUser);
+    return this.sendResponse(res, 201, 'created user successfully', newUser);
   }
 
   //signup seller
@@ -88,62 +37,13 @@ export class AuthController extends BaseController {
     return this.sendResponse(res, 201, 'created seller successfully', newSeller);
   }
 
-  /**
-   * @swagger
-   * /api/v1/auth/login:
-   *   post:
-   *     summary: Login user
-   *     tags: [Auth]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             required:
-   *               - email
-   *               - password
-   *             properties:
-   *               email:
-   *                 type: string
-   *                 format: email
-   *               password:
-   *                 type: string
-   *     responses:
-   *       200:
-   *         description: Login successful
-   *         headers:
-   *           Set-Cookie:
-   *             description: Refresh token in httpOnly cookie
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 data:
-   *                   type: object
-   *                   properties:
-   *                     user:
-   *                       $ref: '#/components/schemas/User'
-   *                     token:
-   *                       type: string
-   *       400:
-   *         description: Invalid credentials
-   *       403:
-   *         description: Email not verified
-   */
-  //login (with rate limiting)
-  @httpPost('/login', authRateLimiter)
+  //login
+  @httpPost('/login')
   async login(@response() res: Response, @requestBody() payload: LoginDTO) {
-    const { email, password, type } = payload;
-    logger.info(`Login attempt for email: ${email}, type: ${type || 'user'}`);
-    const result = await this.authService.login(email, password, type);
-    
-    return this.sendResponse(res, 200, 'Successfully logged in', {
-      user: result.user,
-      token: result.token,
-      refreshToken: result.refreshToken,
-    });
+    const { email, password } = payload;
+    logger.info(`Login attempt for email: ${email}`);
+    const result = await this.authService.login(email, password);
+    return this.sendResponse(res, 200, 'Successfully logged in', result);
   }
 
   @httpPost('/social-login')
@@ -153,12 +53,7 @@ export class AuthController extends BaseController {
 
     logger.info(`Social login attempt for provider: ${provider}`);
     const result = await this.authService.socialLogin(idToken, provider);
-    
-    return this.sendResponse(res, 200, 'Successfully logged in', {
-      user: result.user,
-      token: result.token,
-      refreshToken: result.refreshToken,
-    });
+    return this.sendResponse(res, 200, 'Successfully logged in', result);
   }
 
   @httpPost('/firebase-social-login')
@@ -168,16 +63,11 @@ export class AuthController extends BaseController {
 
     logger.info(`Firebase social login attempt for provider: ${providerHint || 'unknown'}`);
     const result = await this.authService.firebaseSocialLogin(firebaseIdToken, providerHint);
-
-    return this.sendResponse(res, 200, 'Successfully logged in', {
-      user: result.user,
-      token: result.token,
-      refreshToken: result.refreshToken,
-    });
+    return this.sendResponse(res, 200, 'Successfully logged in', result);
   }
 
-  //forgot password (with rate limiting)
-  @httpPost('/forgot-password', passwordResetRateLimiter)
+  //forgot password
+  @httpPost('/forgot-password')
   async forgotPassword(@response() res: Response, @requestBody() payload: { email: string }) {
     const { email } = payload;
     if (!email) throw new AppError('Email is required', 400);
@@ -187,10 +77,10 @@ export class AuthController extends BaseController {
 
   //reset password
   @httpPost('/reset-password')
-  async resetPassword(@response() res: Response, @requestBody() payload: { token: string; password: string }) {
-    const { token, password } = payload;
-    if (!token || !password) throw new AppError('Token and password are required', 400);
-    await this.authService.resetPassword(token, password);
+  async resetPassword(@response() res: Response, @requestBody() payload: ResetPasswordDTO) {
+    const { email, code, password } = payload;
+    if (!email || !code || !password) throw new AppError('All fields are required', 400);
+    await this.authService.resetPassword(email, code, password);
     return this.sendResponse(res, 200, 'Password reset successful');
   }
 
@@ -232,28 +122,11 @@ export class AuthController extends BaseController {
 
   //refresh token
   @httpPost('/refresh-token')
-  async refreshToken(@response() res: Response, @request() req: Request) {
-    const { refreshToken } = req.body;
+  async refreshToken(@response() res: Response, @requestBody() payload: { refreshToken: string }) {
+    const { refreshToken } = payload;
     if (!refreshToken) throw new AppError('Refresh token is required', 400);
 
     const result = await this.authService.refreshToken(refreshToken);
-    
-    return this.sendResponse(res, 200, 'Token refreshed successfully', {
-      token: result.token,
-      refreshToken: result.refreshToken,
-    });
-  }
-
-  //logout
-  @httpPost('/logout')
-  async logout(@response() res: Response, @request() req: Request) {
-    const userId = (req as any).user?.id || (req as any).user?._id;
-    const { refreshToken } = req.body;
-    
-    if (userId && refreshToken) {
-      await this.authService.logout(userId.toString(), refreshToken);
-    }
-    
-    return this.sendResponse(res, 200, 'Logged out successfully');
+    return this.sendResponse(res, 200, 'Token refreshed successfully', result);
   }
 }

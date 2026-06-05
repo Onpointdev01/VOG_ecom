@@ -5,6 +5,7 @@ import AppError from '../utils/errors/AppError';
 import TYPES from '../di';
 import { Model } from 'mongoose';
 import { addressDTO } from '../utils/dtos';
+import { neighborhoodCodeFromName } from '../utils/neighborhoodCode';
 
 export interface IAddressService {
   addAddress(address: addressDTO): Promise<IAddress>;
@@ -38,47 +39,46 @@ export class AddressService extends BaseService implements IAddressService {
     return updatedAddress;
   }
 
-  async addAddress(address: addressDTO): Promise<IAddress> {
-    try {
-      // Check if user has any existing addresses
-      const existingAddresses = await this.Address.find({ user: address.user });
-
-      // If this is the first address, make it default automatically
-      if (existingAddresses.length === 0) {
-        address.isDefault = true;
-      }
-
-      // If setting as default, clear all other default flags
-      if (address.isDefault) {
-        await this.Address.updateMany({ user: address.user }, { $set: { isDefault: false } });
-      }
-
-      const newAddress = await this.Address.create(address);
-      return newAddress;
-    } catch (error: any) {
-      console.error('Error in addAddress:', error);
-      
-      // Handle MongoDB validation errors
-      if (error.name === 'ValidationError') {
-        const validationErrors = Object.keys(error.errors || {}).map(key => {
-          const err = error.errors[key];
-          return `${key}: ${err.message}`;
-        }).join(', ');
-        throw new AppError(`Validation failed: ${validationErrors}`, 400);
-      }
-      
-      // Re-throw AppError as-is
-      if (error instanceof AppError) {
-        throw error;
-      }
-      
-      // Log and throw generic error for unexpected errors
-      console.error('Unexpected error during address creation:', error);
-      throw new AppError(error?.message || 'Failed to create address. Please try again.', 500);
+  private normalizeNeighborhood(address: addressDTO): addressDTO {
+    if (address.neighborhood?.trim()) {
+      return {
+        ...address,
+        neighborhood: neighborhoodCodeFromName(address.neighborhood),
+      };
     }
+    return address;
+  }
+
+  async addAddress(address: addressDTO): Promise<IAddress> {
+    address = this.normalizeNeighborhood(address);
+    if (!address.neighborhood) {
+      throw new AppError('Neighborhood is required', 400);
+    }
+    // Check if user has any existing addresses
+    const existingAddresses = await this.Address.find({ user: address.user });
+
+    // If this is the first address, make it default automatically
+    if (existingAddresses.length === 0) {
+      address.isDefault = true;
+    }
+
+    // If setting as default, clear all other default flags
+    if (address.isDefault) {
+      await this.Address.updateMany({ user: address.user }, { $set: { isDefault: false } });
+    }
+
+    const newAddress = await this.Address.create(address);
+    return newAddress;
   }
 
   async updateAddress(address: addressDTO, id: string): Promise<IAddress> {
+    address = this.normalizeNeighborhood(address);
+    if (address.neighborhood === '' || address.neighborhood === undefined) {
+      const existing = await this.Address.findById(id);
+      if (!existing?.neighborhood) {
+        throw new AppError('Neighborhood is required', 400);
+      }
+    }
     // If trying to unset default flag, check if this is the only address
     const existingAddress = await this.Address.findById(id);
     if (!existingAddress) throw new AppError('Address not found', 404);

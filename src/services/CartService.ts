@@ -2,10 +2,13 @@ import { inject, injectable } from 'inversify';
 import { Model } from 'mongoose';
 import mongoose from 'mongoose';
 import TYPES from '../di';
-import { IBid, ICart, IProduct, IUser, IProductVariant, IOrder } from '../models';
+import { IBid, ICart, IOffer, IProduct, IUser, IProductVariant, IOrder } from '../models';
 import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
 import { AddToCartDTO, CartItemUpdateDTO, CartResponse, UpdateCartItemDTO } from '../utils/dtos';
+import { toIdString } from '../utils/mongoId';
+import { ProductAvailabilityService } from './ProductAvailabilityService';
+import { isVariableProductType } from '../utils/productAvailability';
 
 // Helper to safely get buyer ID from bid
 function getBuyerId(bid: IBid): string {
@@ -23,6 +26,7 @@ export interface ICartService {
   increaseItemQuantity(userID: string, itemId: string): Promise<CartItemUpdateDTO>;
   addToCart(payload: AddToCartDTO): Promise<ICart>;
   addBidToCart(userId: string, productId: string, bidPrice: number, size: string, color: string, bidId: string): Promise<ICart>;
+  addOfferToCart(userId: string, productId: string, offerAmount: number, size: string, color: string, offerId: string): Promise<ICart>;
   getCartByUserId(userId: string): Promise<CartResponse>;
   updateCartItem(userId: string, itemId: string, payload: UpdateCartItemDTO): Promise<ICart>;
   removeCartItem(userId: string, itemId: string): Promise<ICart>;
@@ -37,7 +41,10 @@ export class CartService extends BaseService implements ICartService {
     @inject(TYPES.Product) private Product: Model<IProduct>,
     @inject(TYPES.ProductVariant) private ProductVariant: Model<IProductVariant>,
     @inject(TYPES.Bid) private Bid: Model<IBid>,
-    @inject(TYPES.Order) private Order: Model<IOrder>
+    @inject(TYPES.Offer) private Offer: Model<IOffer>,
+    @inject(TYPES.Order) private Order: Model<IOrder>,
+    @inject(TYPES.ProductAvailabilityService)
+    private productAvailability: ProductAvailabilityService
   ) {
     super();
   }
@@ -81,11 +88,14 @@ export class CartService extends BaseService implements ICartService {
     }
 
     const product = item.product as IProduct;
+    const productId = toIdString(product._id ?? product.id);
+    await this.productAvailability.assertPurchasable(productId, item.quantity + 1);
+
     let availableQuantity: number;
 
     if (product.productType === 'simple') {
       availableQuantity = product.quantityAvailable || 0;
-    } else if (product.productType === 'variable') {
+    } else if (isVariableProductType(product.productType)) {
       // Find the specific variant for this cart item
       // Priority: SKU > size/color combination
       let variant;
@@ -130,10 +140,12 @@ export class CartService extends BaseService implements ICartService {
     const { user, productId, quantity, sku, size, color, variantId } = payload;
 
     await this.verifyUser(user);
+    await this.productAvailability.assertPurchasable(productId, quantity);
     const product = await this.verifyProduct(productId);
 
     let price: number;
     let availableQuantity: number;
+    let selectedVariant: IProductVariant | null = null;
 
     if (product.productType === 'simple') {
       // For simple products, use product-level pricing and stock
@@ -144,53 +156,40 @@ export class CartService extends BaseService implements ICartService {
 
       price = product.price!;
       availableQuantity = product.quantityAvailable!;
-    } else if (product.productType === 'variable') {
-      // For variable products, we need a specific variant
-      // Priority: SKU > variantId > size/color combination
-      let variant;
-      
-      if (sku) {
-        // Preferred method: use SKU
-        variant = await this.ProductVariant.findOne({
-          product: productId,
-          sku,
-          isActive: true
-        });
-      } else if (variantId) {
-        // Alternative method: use variantId
-        variant = await this.ProductVariant.findById(variantId);
-      } else if (size && color) {
-        // Fallback method: use size/color combination
-        variant = await this.ProductVariant.findOne({
-          product: productId,
-          size,
-          color,
-          isActive: true
-        });
-      } else {
-        throw new AppError('SKU, variantId, or size and color are required for variable products', 400);
+    } else if (isVariableProductType(product.productType)) {
+      selectedVariant = await this.resolveCartVariant(productId, { sku, variantId, size, color });
+
+      if (quantity > (selectedVariant.quantityAvailable || 0)) {
+        throw new AppError('Requested quantity exceeds available stock', 400);
       }
 
-      if (!variant) {
-        throw new AppError('Product variant not found or not available', 404);
-      }
-
-      price = variant.price;
-      availableQuantity = variant.quantityAvailable;
+      price = selectedVariant.price;
+      availableQuantity = selectedVariant.quantityAvailable;
     } else {
       throw new AppError('Invalid product type', 400);
     }
 
-    // Check for an accepted bid
-    const acceptedBid = await this.Bid.findOne({
+    // Check for an accepted offer (preferred) or legacy bid
+    const acceptedOffer = await this.Offer.findOne({
       product: productId,
       buyer: user,
       status: 'ACCEPTED',
       expiresAt: { $gte: new Date() },
     });
 
-    if (acceptedBid) {
-      price = acceptedBid.bidPrice;
+    if (acceptedOffer) {
+      price = acceptedOffer.amount;
+    } else {
+      const acceptedBid = await this.Bid.findOne({
+        product: productId,
+        buyer: user,
+        status: 'ACCEPTED',
+        expiresAt: { $gte: new Date() },
+      });
+
+      if (acceptedBid) {
+        price = acceptedBid.bidPrice;
+      }
     }
 
     const existingCart = await this.Cart.findOne({ user });
@@ -201,13 +200,20 @@ export class CartService extends BaseService implements ICartService {
         if (product.productType === 'simple') {
           // For simple products, only product ID matters (one variant per product)
           return item.product.toString() === productId;
-        } else {
-          // For variable products, use SKU for uniqueness (most reliable)
-          // Fall back to size/color if SKU not available
-          return item.product.toString() === productId && 
-                 ((sku && item.sku === sku) || 
-                  (!sku && item.size === size && item.color === color));
         }
+        if (!selectedVariant) return false;
+        const itemVariantId = item.variantId?.toString();
+        if (itemVariantId && itemVariantId === String(selectedVariant._id)) {
+          return item.product.toString() === productId;
+        }
+        if (selectedVariant.sku && item.sku && item.sku === selectedVariant.sku) {
+          return item.product.toString() === productId;
+        }
+        return (
+          item.product.toString() === productId &&
+          item.size === selectedVariant.size &&
+          item.color === selectedVariant.color
+        );
       });
 
       if (existingItem) {
@@ -227,11 +233,11 @@ export class CartService extends BaseService implements ICartService {
           _id: productId,
         };
 
-        if (product.productType === 'variable') {
-          // For variable products, store SKU, size, and color for identification
-          newItem.sku = sku || undefined;
-          newItem.size = size || undefined;
-          newItem.color = color || undefined;
+        if (isVariableProductType(product.productType) && selectedVariant) {
+          newItem.variantId = selectedVariant._id;
+          newItem.sku = selectedVariant.sku;
+          newItem.size = selectedVariant.size;
+          newItem.color = selectedVariant.color;
         } else {
           // For simple products, don't store SKU (not applicable)
           // Store size and color only for display purposes
@@ -255,11 +261,11 @@ export class CartService extends BaseService implements ICartService {
       price: price,
     };
 
-    if (product.productType === 'variable') {
-      // For variable products, store SKU, size, and color for identification
-      newItem.sku = sku || undefined;
-      newItem.size = size || undefined;
-      newItem.color = color || undefined;
+    if (isVariableProductType(product.productType) && selectedVariant) {
+      newItem.variantId = selectedVariant._id;
+      newItem.sku = selectedVariant.sku;
+      newItem.size = selectedVariant.size;
+      newItem.color = selectedVariant.color;
     } else {
       // For simple products, don't store SKU (not applicable)
       // Store size and color only for display purposes
@@ -286,21 +292,8 @@ export class CartService extends BaseService implements ICartService {
     bidId: string
   ): Promise<ICart> {
     await this.verifyUser(userId);
-    
-    // Ensure productId is a valid string ObjectId
-    let cleanProductId: string;
-    if (typeof productId === 'string') {
-      cleanProductId = productId.trim();
-    } else if (productId && typeof productId === 'object' && (productId as any).toString) {
-      cleanProductId = (productId as any).toString().trim();
-    } else {
-      cleanProductId = String(productId || '').trim();
-    }
-    
-    // Log for debugging
-    console.log('addBidToCart - Received productId:', productId, 'Cleaned:', cleanProductId);
-    
-    const product = await this.verifyProduct(cleanProductId);
+    await this.productAvailability.assertPurchasable(productId, 1);
+    const product = await this.verifyProduct(productId);
 
     // Verify the bid exists and is accepted
     const bid = await this.Bid.findById(bidId);
@@ -313,64 +306,16 @@ export class CartService extends BaseService implements ICartService {
     if (bid.status !== 'ACCEPTED' || bidBuyerId !== userId) {
       throw new AppError('Invalid or unauthorized bid', 400);
     }
-    
-    // Log bid price to ensure we're using the correct price
-    console.log(`[addBidToCart] Using bid price: ${bid.bidPrice} for bid ${bidId}`);
-    console.log(`[addBidToCart] Received bidPrice parameter: ${bidPrice}`);
-    
-    // Use the bid's bidPrice, not the parameter (in case they differ)
-    const finalBidPrice = bid.bidPrice || bidPrice;
-    
-    if (!finalBidPrice || finalBidPrice <= 0) {
-      throw new AppError('Invalid bid price', 400);
-    }
-    
-    // Ensure we use the productId from the bid (always use the bid's product ID)
-    // This handles cases where productId might be populated or in different format
-    let finalProductId = cleanProductId;
-    if (bid.product) {
-      let bidProductId: string;
-      
-      // Extract productId from bid.product in various formats
-      if (typeof bid.product === 'object') {
-        if ((bid.product as any)._id) {
-          bidProductId = (bid.product as any)._id.toString();
-        } else if ((bid.product as any).id) {
-          bidProductId = (bid.product as any).id.toString();
-        } else if ((bid.product as any).toString) {
-          bidProductId = (bid.product as any).toString();
-        } else {
-          bidProductId = String(bid.product);
-        }
-      } else if (typeof bid.product === 'string') {
-        bidProductId = bid.product;
-      } else {
-        bidProductId = String(bid.product);
-      }
-      
-      // Validate and use bid's product ID
-      if (bidProductId && bidProductId.length === 24 && /^[0-9a-fA-F]{24}$/.test(bidProductId)) {
-        if (mongoose.isValidObjectId(bidProductId)) {
-          finalProductId = bidProductId;
-        }
-      }
-    }
-    
-    // Final validation of finalProductId
-    if (!finalProductId || finalProductId.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(finalProductId)) {
-      console.error('Invalid finalProductId:', finalProductId, 'cleanProductId:', cleanProductId);
-      throw new AppError(`Invalid product ID format: ${finalProductId}`, 400);
-    }
 
     // Validate size and color based on product type
     if (product.productType === 'simple') {
       if (color && product.color && product.color !== color) {
         throw new AppError('Invalid color selected', 400);
       }
-    } else if (product.productType === 'variable') {
+    } else if (isVariableProductType(product.productType)) {
       // For variable products, check if variant exists
       const variant = await this.ProductVariant.findOne({
-        product: finalProductId,
+        product: productId,
         size,
         color,
         isActive: true
@@ -385,22 +330,22 @@ export class CartService extends BaseService implements ICartService {
     if (existingCart) {
       // Check if this exact bid product is already in cart
       const existingItem = existingCart.items.find(
-        (item) => item.product.toString() === finalProductId && 
-                  (item as any).bidId?.toString() === bidId // Track the specific bid
+        (item) => item.product.toString() === productId && 
+                  (item as any).bidId === bidId // Track the specific bid
       );
 
       if (existingItem) {
         throw new AppError('This bid item is already in your cart', 400);
       }
 
-      // Add new bid item to cart with bid price
+      // Add new bid item to cart
       existingCart.items.push({
-        product: finalProductId as any,
+        product: productId as any,
         quantity: 1, // Bid items are always quantity 1
         size,
         color,
-        price: finalBidPrice, // Use bid price, not product price
-        _id: finalProductId as any,
+        price: bidPrice,
+        _id: productId as any,
         // Add bid reference for tracking
         ...(bidId && { bidId })
       } as any);
@@ -414,14 +359,99 @@ export class CartService extends BaseService implements ICartService {
       user: userId,
       items: [
         {
-          product: finalProductId,
+          product: productId,
           quantity: 1,
           size,
           color,
-          price: finalBidPrice, // Use bid price, not product price
+          price: bidPrice,
           // Add bid reference
           ...(bidId && { bidId })
         } as any,
+      ],
+    });
+
+    await newCart.save();
+    return newCart;
+  }
+
+  async addOfferToCart(
+    userId: string,
+    productId: string,
+    offerAmount: number,
+    size: string,
+    color: string,
+    offerId: string
+  ): Promise<ICart> {
+    await this.verifyUser(userId);
+    await this.productAvailability.assertPurchasable(productId, 1);
+    const product = await this.verifyProduct(productId);
+
+    const offer = await this.Offer.findById(offerId);
+    if (!offer) {
+      throw new AppError('Offer not found', 404);
+    }
+
+    if (offer.status !== 'ACCEPTED' || toIdString(offer.buyer) !== userId) {
+      throw new AppError('Invalid or unauthorized offer', 400);
+    }
+
+    if (offer.expiresAt && offer.expiresAt < new Date()) {
+      throw new AppError('This offer has expired', 410);
+    }
+
+    if (product.productType === 'simple') {
+      if (color && product.color && product.color !== color) {
+        throw new AppError('Invalid color selected', 400);
+      }
+    } else if (isVariableProductType(product.productType)) {
+      const variant = await this.ProductVariant.findOne({
+        product: productId,
+        size,
+        color,
+        isActive: true,
+      });
+      if (!variant) {
+        throw new AppError('Product variant not found', 404);
+      }
+    }
+
+    const existingCart = await this.Cart.findOne({ user: userId });
+
+    if (existingCart) {
+      const existingItem = existingCart.items.find(
+        (item) =>
+          item.product.toString() === productId &&
+          (item.offerId?.toString() === offerId || (item as { offerId?: string }).offerId === offerId)
+      );
+
+      if (existingItem) {
+        throw new AppError('This offer item is already in your cart', 400);
+      }
+
+      existingCart.items.push({
+        product: productId as unknown as ICart['items'][0]['product'],
+        quantity: 1,
+        size,
+        color,
+        price: offerAmount,
+        offerId: offerId as unknown as ICart['items'][0]['offerId'],
+      } as ICart['items'][0]);
+
+      await existingCart.save();
+      return existingCart;
+    }
+
+    const newCart = new this.Cart({
+      user: userId,
+      items: [
+        {
+          product: productId,
+          quantity: 1,
+          size,
+          color,
+          price: offerAmount,
+          offerId,
+        },
       ],
     });
 
@@ -476,6 +506,7 @@ export class CartService extends BaseService implements ICartService {
         sku: item.sku || '',
         size: item.size || '',
         color: item.color || '',
+        variantId: item.variantId?.toString(),
         price: item.price,
         isPending: pendingCartItemIds.has(item._id.toString()), // Always include pending status
       })),
@@ -512,7 +543,7 @@ export class CartService extends BaseService implements ICartService {
       
       if (product.productType === 'simple') {
         availableQuantity = product.quantityAvailable || 0;
-      } else if (product.productType === 'variable') {
+      } else if (isVariableProductType(product.productType)) {
         // For variable products, check the specific variant
         // Priority: SKU > size/color combination
         let variant;
@@ -669,6 +700,47 @@ export class CartService extends BaseService implements ICartService {
   }
 
 
+  private async resolveCartVariant(
+    productId: string,
+    opts: { sku?: string; variantId?: string; size?: string; color?: string }
+  ): Promise<IProductVariant> {
+    let variant: IProductVariant | null = null;
+
+    if (opts.variantId) {
+      variant = await this.ProductVariant.findOne({
+        _id: opts.variantId,
+        product: productId,
+        isActive: true,
+      });
+    } else if (opts.sku) {
+      variant = await this.ProductVariant.findOne({
+        product: productId,
+        sku: opts.sku,
+        isActive: true,
+      });
+    } else if (opts.size || opts.color) {
+      const query: Record<string, unknown> = {
+        product: productId,
+        isActive: true,
+      };
+      if (opts.size) query.size = opts.size;
+      if (opts.color) query.color = opts.color;
+      variant = await this.ProductVariant.findOne(query);
+    } else {
+      throw new AppError('SKU, variantId, or size/color are required for variable products', 400);
+    }
+
+    if (!variant) {
+      throw new AppError('Product variant not found or not available', 404);
+    }
+
+    if ((variant.quantityAvailable || 0) < 1) {
+      throw new AppError('Selected variant is out of stock', 400);
+    }
+
+    return variant;
+  }
+
   // Private methods
   private async verifyUser(userId: string): Promise<IUser> {
     const user = await this.User.findById(userId);
@@ -679,29 +751,10 @@ export class CartService extends BaseService implements ICartService {
   }
 
   private async verifyProduct(productId: string): Promise<IProduct> {
-    // Clean and validate productId
-    let cleanId: string;
-    
-    if (typeof productId === 'string') {
-      cleanId = productId.trim();
-    } else if (productId && typeof productId === 'object' && (productId as any).toString) {
-      cleanId = (productId as any).toString().trim();
-    } else {
-      cleanId = String(productId || '').trim();
+    if (!mongoose.isValidObjectId(productId)) {
+      throw new AppError('Invalid product ID format', 400);
     }
-    
-    // Validate ObjectId format (24 hex characters)
-    if (!cleanId || cleanId.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(cleanId)) {
-      console.error('Invalid productId in verifyProduct:', cleanId, 'Original:', productId);
-      throw new AppError(`Invalid product ID format: ${cleanId}`, 400);
-    }
-    
-    if (!mongoose.isValidObjectId(cleanId)) {
-      console.error('mongoose.isValidObjectId failed for:', cleanId);
-      throw new AppError(`Invalid product ID format: ${cleanId}`, 400);
-    }
-    
-    const product = await this.Product.findById(cleanId);
+    const product = await this.Product.findById(productId);
     if (!product) {
       throw new AppError('Product not found', 404);
     }

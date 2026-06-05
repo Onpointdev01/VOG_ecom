@@ -10,6 +10,14 @@ export interface ISocialLogin {
   providerId: string;
 }
 
+export interface IOfferBan {
+  isBanned: boolean;
+  reason?: string | null;
+  bannedAt?: Date | null;
+  expiresAt?: Date | null;
+  unbannedAt?: Date | null;
+}
+
 export interface IUser extends Document {
   firstName: string;
   lastName: string;
@@ -25,6 +33,9 @@ export interface IUser extends Document {
   banned: boolean;
   banReason: string | null;
   banExpires: Date | null;
+  offerBan?: IOfferBan;
+  /** @deprecated Use offerBan */
+  bidBan?: IOfferBan;
   verified: boolean;
   verifyCode?: string;
   verifyCodeExpires?: Date;
@@ -68,8 +79,6 @@ const userSchema: Schema = new Schema<IUser>(
     email: {
       type: String,
       unique: true,
-      lowercase: true, // Automatically convert to lowercase
-      trim: true, // Automatically trim whitespace
       validate: [validator.isEmail, 'Email is invalid'],
       required: [true, 'Email address is required'],
     },
@@ -132,11 +141,7 @@ const userSchema: Schema = new Schema<IUser>(
     },
 
     socialLogin: [socialLoginSchema],
-    firebaseUid: {
-      type: String,
-      index: true,
-      sparse: true,
-    },
+    firebaseUid: { type: String, sparse: true, index: true },
     seller: {
       type: Schema.Types.ObjectId,
       ref: SELLER,
@@ -152,6 +157,20 @@ const userSchema: Schema = new Schema<IUser>(
         type: String,
       },
     ],
+    offerBan: {
+      isBanned: { type: Boolean, default: false },
+      reason: { type: String, default: null },
+      bannedAt: { type: Date, default: null },
+      expiresAt: { type: Date, default: null },
+      unbannedAt: { type: Date, default: null },
+    },
+    bidBan: {
+      isBanned: { type: Boolean, default: false },
+      reason: { type: String, default: null },
+      bannedAt: { type: Date, default: null },
+      expiresAt: { type: Date, default: null },
+      unbannedAt: { type: Date, default: null },
+    },
   },
   { timestamps: true }
 );

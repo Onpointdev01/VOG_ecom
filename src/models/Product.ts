@@ -1,8 +1,18 @@
 import { Document, Model, model, PopulatedDoc, Schema } from 'mongoose';
 import constants from '../utils/constants';
 import { ISeller, IProductVariant } from '.';
+import type { ProductAvailabilityStatus } from '../utils/productAvailability';
 
 const { PRODUCT, SELLER, REVIEW, CATEGORY, PRODUCT_VARIANT, ATTRIBUTE, ATTRIBUTE_VALUE } = constants.mongooseModels;
+
+export const PRODUCT_AVAILABILITY_STATUSES: ProductAvailabilityStatus[] = [
+  'ACTIVE',
+  'OUT_OF_STOCK',
+  'HIDDEN',
+  'ARCHIVED',
+  'DELETED',
+  'INVALID',
+];
 
 export interface IProduct extends Document {
   name: string;
@@ -15,6 +25,8 @@ export interface IProduct extends Document {
   reviews: Schema.Types.ObjectId[];
   noOfReviews: number;
   isActive: boolean;
+  availabilityStatus: ProductAvailabilityStatus;
+  deletedAt?: Date | null;
   isFlash: boolean;
   isRecommended: boolean;
 
@@ -33,6 +45,14 @@ export interface IProduct extends Document {
   // Fields for VARIABLE products (optional for simple)
   variants?: PopulatedDoc<IProductVariant>[];
 
+  /** Optional variant dimension config (sizes/colors toggles + option lists) */
+  variantConfig?: {
+    hasSizes: boolean;
+    hasColors: boolean;
+    sizes: string[];
+    colors: string[];
+  };
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -49,7 +69,15 @@ const productSchema: Schema<IProduct> = new Schema<IProduct>(
     reviews: { type: [Schema.Types.ObjectId], ref: REVIEW },
     noOfReviews: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
+    availabilityStatus: {
+      type: String,
+      enum: PRODUCT_AVAILABILITY_STATUSES,
+      default: 'ACTIVE',
+      index: true,
+    },
+    deletedAt: { type: Date, default: null, index: true },
     isFlash: { type: Boolean, default: false },
+    isRecommended: { type: Boolean, default: true },
 
     // Fields primarily for SIMPLE products
     price: { type: Number, min: 0 },
@@ -65,6 +93,12 @@ const productSchema: Schema<IProduct> = new Schema<IProduct>(
 
     // Fields for VARIABLE products
     variants: [{ type: Schema.Types.ObjectId, ref: PRODUCT_VARIANT }],
+    variantConfig: {
+      hasSizes: { type: Boolean, default: false },
+      hasColors: { type: Boolean, default: false },
+      sizes: { type: [String], default: [] },
+      colors: { type: [String], default: [] },
+    },
   },
   { timestamps: true }
 );
@@ -108,6 +142,52 @@ productSchema.pre('save', function (next) {
     this.noOfReviews = this.reviews.length;
   }
   next();
+});
+
+/** Keep availabilityStatus in sync with stock, isActive, and seller integrity. */
+productSchema.pre('save', async function (next) {
+  try {
+    const ProductVariantModel = this.db.model(constants.mongooseModels.PRODUCT_VARIANT);
+    const SellerModel = this.db.model(constants.mongooseModels.SELLER);
+    const { deriveAvailabilityStatus, getTotalStock } = await import('../utils/productAvailability');
+
+    let variants: Array<{ quantityAvailable?: number; isActive?: boolean }> = [];
+    const { isVariableProductType } = await import('../utils/productAvailability');
+    if (isVariableProductType(this.productType) && this._id) {
+      variants = await ProductVariantModel.find({
+        product: this._id,
+        isActive: { $ne: false },
+      })
+        .select('quantityAvailable isActive')
+        .lean();
+    }
+
+    const seller = this.owner
+      ? await SellerModel.findById(this.owner).select('status user').lean()
+      : null;
+
+    const productPlain = {
+      productType: this.productType,
+      isActive: this.isActive,
+      deletedAt: this.deletedAt,
+      availabilityStatus: this.availabilityStatus,
+      quantityAvailable: this.quantityAvailable,
+      owner: this.owner,
+      variants,
+      totalStock: getTotalStock(
+        { productType: this.productType, quantityAvailable: this.quantityAvailable },
+        variants
+      ),
+    };
+
+    this.availabilityStatus = deriveAvailabilityStatus({
+      product: productPlain,
+      seller: seller as import('../utils/productAvailability').SellerLike | null,
+    });
+    next();
+  } catch (err) {
+    next(err as Error);
+  }
 });
 
 // Transform _id to id for API responses

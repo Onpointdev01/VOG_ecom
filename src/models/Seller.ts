@@ -4,15 +4,26 @@ import constants from '../utils/constants';
 const { SELLER, USER } = constants.mongooseModels;
 
 export interface ISeller extends Document {
-  user: Schema.Types.ObjectId; // Reference to the user model
-  type: string; // 'individual' or 'enterprise'
-  name: string; // Name of the seller or brand
-  logo: string; // URL to the seller's logo image
-  noOfRating: number; // Number of ratings given to the seller
-  rating: number; // Average rating of the seller
-  official: boolean; // Whether the seller is an official store
-  status: string; // Status of the seller (e.g., 'active', 'suspended')
-  products: Schema.Types.ObjectId[]; // List of products sold by the seller
+  user: Schema.Types.ObjectId;
+  type: string;
+  name: string;
+  logo: string;
+  noOfRating: number;
+  rating: number;
+  official: boolean;
+  status: string;
+  products: Schema.Types.ObjectId[];
+  /** Always first on marketplace feed (platform / admin store) */
+  isPinned: boolean;
+  isPlatformStore: boolean;
+  /** Admin-enabled promotion subscription */
+  promotionActive: boolean;
+  promotionStartsAt?: Date;
+  promotionExpiresAt?: Date;
+  /** Used to sort promoted boutiques (most recent activation first) */
+  promotionActivatedAt?: Date;
+  /** Extensible tier for future promotion levels (1 = default) */
+  promotionTier: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -20,7 +31,7 @@ export interface ISeller extends Document {
 const sellerSchema: Schema<ISeller> = new Schema<ISeller>(
   {
     user: { type: Schema.Types.ObjectId, ref: USER, required: true },
-    type: { type: String, enum: ['individual', 'enterprise'], required: true },
+    type: { type: String, enum: ['individual', 'company'], required: true },
     name: { type: String, required: true },
     logo: { type: String, default: '' },
     noOfRating: { type: Number, default: 0 },
@@ -28,21 +39,29 @@ const sellerSchema: Schema<ISeller> = new Schema<ISeller>(
     official: { type: Boolean, default: false },
     status: { type: String, enum: ['active', 'suspended', ''], default: 'active' },
     products: [{ type: Schema.Types.ObjectId, ref: 'Product' }],
+    isPinned: { type: Boolean, default: false },
+    isPlatformStore: { type: Boolean, default: false },
+    promotionActive: { type: Boolean, default: false },
+    promotionStartsAt: { type: Date },
+    promotionExpiresAt: { type: Date },
+    promotionActivatedAt: { type: Date },
+    promotionTier: { type: Number, default: 1, min: 1 },
   },
   {
-    timestamps: true, // Automatically manage createdAt and updatedAt fields
+    timestamps: true,
   }
 );
 
-// Transform _id to id for API responses
+sellerSchema.index({ isPinned: 1 });
+sellerSchema.index({ promotionActive: 1, promotionExpiresAt: 1 });
+
 sellerSchema.set('toJSON', {
   transform: (doc, ret) => {
     ret.id = ret._id.toString();
     delete ret._id;
     delete ret.__v;
     return ret;
-  }
+  },
 });
 
-// Creating the Seller model
 export const Seller: Model<ISeller> = model<ISeller>(SELLER, sellerSchema);

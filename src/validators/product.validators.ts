@@ -4,10 +4,9 @@ export const getAllProductsSchema = joi.object({
   isFlash: joi.string().valid('0', '1'),
   isRecommended: joi.string().valid('0', '1'),
   category: joi.string(),
-  search: joi.string(), // Backend parameter
-  q: joi.string(), // Frontend parameter (alias for search)
+  search: joi.string(),
   seller: joi.string(),
-  sortBy: joi.string().valid('name', 'price', 'price_asc', 'price_desc', 'createdAt', 'newest', 'popular', 'popularity', 'rating', 'relevance'),
+  sortBy: joi.string().valid('name', 'price', 'createdAt', 'popularity', 'rating'),
   sortOrder: joi.string().valid('asc', 'desc'),
   minPrice: joi.string().pattern(/^\d+(\.\d+)?$/),
   maxPrice: joi.string().pattern(/^\d+(\.\d+)?$/),

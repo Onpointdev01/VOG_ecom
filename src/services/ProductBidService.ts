@@ -27,7 +27,6 @@ export interface IProductBidService {
   forceAcceptBid(bidId: string, reason?: string): Promise<IBid>;
   forceRejectBid(bidId: string, reason?: string): Promise<IBid>;
   cancelBid(bidId: string, reason: string): Promise<IBid>;
-  createCounterOffer(originalBidId: string, counterPrice: number, reason?: string): Promise<IBid>;
   getBidAnalytics(period: string, dateFrom?: string, dateTo?: string): Promise<any>;
   
   // Product-centric admin methods
@@ -73,9 +72,20 @@ export class ProductBidService implements IProductBidService {
       };
     }
 
-    // Removed: 24-hour restriction - users can now place unlimited bids
-    // Users can place multiple bids on the same product (including multiple pending bids)
-    // No restriction on pending bids - users can make multiple offers
+    // Check for existing active bids
+    const existingBid = await this.Bid.findOne({
+      product: productId,
+      buyer: buyerId,
+      status: { $in: ['PENDING', 'ACCEPTED'] },
+      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    });
+
+    if (existingBid) {
+      return {
+        isValid: false,
+        message: 'You can only place one bid per product in 24 hours',
+      };
+    }
 
     return { isValid: true };
   }
@@ -102,7 +112,7 @@ export class ProductBidService implements IProductBidService {
       buyer: buyerId,
       seller: product.owner,
       bidPrice,
-      status: 'PENDING', // New bids start as PENDING
+      status: 'PENDING',
       isWithinPriceRange: true,
     });
 
@@ -112,74 +122,18 @@ export class ProductBidService implements IProductBidService {
       if (!savedBid || !savedBid._id) {
         throw new AppError('Failed to create bid - document not saved properly', 500);
       }
-
-      // Notify seller of new bid
-      try {
-        const buyer = await this.User.findById(buyerId);
-        const buyerName = buyer ? `${buyer.firstName || ''} ${buyer.lastName || ''}`.trim() || buyer.email : 'Buyer';
-        const sellerId = (product.owner as any)._id || product.owner;
-        
-        await this.notificationService.sendNewBidNotificationToSeller(
-          sellerId.toString(),
-          savedBid._id.toString(),
-          productId,
-          product.name,
-          buyerName,
-          bidPrice
-        );
-      } catch (error) {
-        console.error('Failed to send new bid notification to seller:', error);
-        // Don't throw - notification failure shouldn't fail the bid creation
-      }
-
-      // Notify admins of new bid
-      try {
-        const buyer = await this.User.findById(buyerId);
-        const buyerName = buyer ? `${buyer.firstName || ''} ${buyer.lastName || ''}`.trim() || buyer.email : 'Buyer';
-        
-        await this.notificationService.sendNewBidNotificationToAdmins(
-          savedBid._id.toString(),
-          productId,
-          product.name,
-          buyerName,
-          bidPrice
-        );
-      } catch (error) {
-        console.error('Failed to send new bid notification to admins:', error);
-        // Don't throw - notification failure shouldn't fail the bid creation
-      }
-
       return savedBid;
-    } catch (error: any) {
-      // Log the actual error for debugging
-      console.error('Error creating bid:', {
-        error: error.message || error,
-        stack: error.stack,
-        productId,
-        buyerId,
-        bidPrice,
-        errorName: error.name,
-        errorCode: error.code
-      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Only one bid per product within 24 hours')) {
+        throw new AppError('You can only place one bid per product in 24 hours', 400);
+      }
       
       // Re-throw the original error if it's already an AppError
       if (error instanceof AppError) {
         throw error;
       }
       
-      // Check for specific MongoDB errors
-      if (error.name === 'ValidationError') {
-        const validationErrors = Object.values(error.errors || {}).map((err: any) => err.message).join(', ');
-        throw new AppError(`Validation error: ${validationErrors}`, 400);
-      }
-      
-      if (error.name === 'MongoServerError' || error.code === 11000) {
-        throw new AppError('A bid for this product already exists. Please wait before placing another bid.', 400);
-      }
-      
-      // Provide more specific error message based on error type
-      const errorMessage = error.message || 'Failed to create bid';
-      throw new AppError(errorMessage.includes('Failed') ? errorMessage : `Failed to create bid: ${errorMessage}`, 500);
+      throw new AppError('Failed to create bid', 500);
     }
   }
 
@@ -212,8 +166,7 @@ export class ProductBidService implements IProductBidService {
           bid.buyer.toString(),
           productName,
           bid.product.toString(),
-          bid.bidPrice,
-          bidId // Pass bidId to notification
+          bid.bidPrice
         );
       } catch (error) {
         console.error('Failed to send bid accepted notification:', error);
@@ -239,11 +192,6 @@ export class ProductBidService implements IProductBidService {
       throw new AppError('Unauthorized to reject this bid', 403);
     }
 
-    // Check if bid is in a valid state to be rejected
-    if (bid.status !== 'PENDING' && bid.status !== 'open') {
-      throw new AppError(`Cannot reject bid with status: ${bid.status}`, 400);
-    }
-
     // Update bid status and set cooldown
     bid.status = 'REJECTED';
     bid.cooldownUntil = new Date(Date.now() + 12 * 60 * 60 * 1000); // 12 hours cooldown
@@ -257,8 +205,7 @@ export class ProductBidService implements IProductBidService {
         await this.notificationService.sendBidRejectedNotification(
           bid.buyer.toString(),
           productName,
-          bid.product.toString(),
-          bidId // Pass bidId to notification
+          bid.product.toString()
         );
       } catch (error) {
         console.error('Failed to send bid rejected notification:', error);
@@ -281,7 +228,7 @@ export class ProductBidService implements IProductBidService {
 
     // Check if bid has expired
     if (bid.expiresAt && bid.expiresAt < new Date()) {
-      bid.status = 'expired';
+      bid.status = 'EXPIRED';
       return await bid.save();
     }
 
@@ -294,7 +241,7 @@ export class ProductBidService implements IProductBidService {
   async getBidsForProduct(productId: string): Promise<IBid[]> {
     return await this.Bid.find({
       product: productId,
-      status: { $in: ['PENDING', 'open', 'ACCEPTED'] },
+      status: { $in: ['PENDING', 'ACCEPTED'] },
     })
       .populate('buyer', 'firstName lastName email')
       .sort({ createdAt: -1 });
@@ -431,30 +378,9 @@ export class ProductBidService implements IProductBidService {
       .populate('product', 'name images price')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit)
-      .lean();
+      .limit(limit);
 
-    // Filter out bids from deleted users (where buyer is null after population)
-    const bidsWithBuyers = (bids as any[]).filter(bid => {
-      if (!bid.buyer) {
-        console.log(`⚠️ [getAllBidsForAdmin] Filtering out bid ${bid._id || bid.id} - buyer is deleted`);
-        return false;
-      }
-      return true;
-    });
-
-    // Recalculate total count excluding deleted users
-    const totalWithUsers = await this.Bid.countDocuments({
-      ...query,
-      buyer: { $exists: true, $ne: null }
-    });
-
-    return { 
-      bids: bidsWithBuyers as IBid[], 
-      total: totalWithUsers, 
-      page, 
-      totalPages: Math.ceil(totalWithUsers / limit) 
-    };
+    return { bids, total, page, totalPages };
   }
 
   /**
@@ -479,7 +405,7 @@ export class ProductBidService implements IProductBidService {
       totalProducts
     ] = await Promise.all([
       this.Bid.countDocuments(),
-      this.Bid.countDocuments({ status: { $in: ['PENDING', 'open'] } }),
+      this.Bid.countDocuments({ status: 'PENDING' }),
       this.Bid.countDocuments({ status: 'ACCEPTED' }),
       this.Bid.countDocuments({ status: 'REJECTED' }),
       this.Bid.countDocuments({ createdAt: { $gte: startOfDay } }),
@@ -531,10 +457,10 @@ export class ProductBidService implements IProductBidService {
   }
 
   /**
-   * Force accept a bid (admin only)
+   * Force accept a bid (admin override)
    */
   async forceAcceptBid(bidId: string, reason?: string): Promise<IBid> {
-    const bid = await this.Bid.findById(bidId).populate('product', 'name');
+    const bid = await this.Bid.findById(bidId);
     
     if (!bid) {
       throw new AppError('Bid not found', 404);
@@ -542,11 +468,6 @@ export class ProductBidService implements IProductBidService {
 
     if (bid.status === 'ACCEPTED') {
       throw new AppError('Bid is already accepted', 400);
-    }
-
-    // Check if bid can be accepted (must be PENDING or open)
-    if (bid.status !== 'PENDING' && bid.status !== 'open') {
-      throw new AppError(`Cannot accept bid with status: ${bid.status}. Only PENDING bids can be accepted.`, 400);
     }
 
     // Set expiration to 24 hours from now
@@ -558,42 +479,14 @@ export class ProductBidService implements IProductBidService {
     (bid as any).adminOverride = true;
     (bid as any).adminReason = reason;
 
-    const savedBid = await bid.save();
-    
-    // Log to verify status was saved correctly
-    console.log(`[forceAcceptBid] Bid ${bidId} saved with status:`, savedBid.status);
-    
-    // Verify the status was actually saved by fetching it again
-    const verifyBid = await this.Bid.findById(bidId);
-    if (verifyBid && verifyBid.status !== 'ACCEPTED') {
-      console.error(`[forceAcceptBid] WARNING: Bid ${bidId} status mismatch! Expected: ACCEPTED, Got: ${verifyBid.status}`);
-    }
-
-    // Send notification to buyer
-    if (bid.buyer) {
-      try {
-        const productName = (bid.product as any)?.name || 'Product';
-        await this.notificationService.sendBidAcceptedNotification(
-          bid.buyer.toString(),
-          productName,
-          bid.product.toString(),
-          bid.bidPrice,
-          bidId
-        );
-      } catch (error) {
-        console.error('Failed to send bid accepted notification:', error);
-        // Don't throw - notification failure shouldn't fail the bid acceptance
-      }
-    }
-
-    return savedBid;
+    return await bid.save();
   }
 
   /**
-   * Force reject a bid (admin only)
+   * Force reject a bid (admin override)
    */
   async forceRejectBid(bidId: string, reason?: string): Promise<IBid> {
-    const bid = await this.Bid.findById(bidId).populate('product', 'name');
+    const bid = await this.Bid.findById(bidId);
     
     if (!bid) {
       throw new AppError('Bid not found', 404);
@@ -603,50 +496,21 @@ export class ProductBidService implements IProductBidService {
       throw new AppError('Bid is already rejected', 400);
     }
 
-    // Check if bid can be rejected (must be PENDING or open)
-    if (bid.status !== 'PENDING' && bid.status !== 'open') {
-      throw new AppError(`Cannot reject bid with status: ${bid.status}. Only PENDING bids can be rejected.`, 400);
-    }
-
     bid.status = 'REJECTED';
-    bid.cooldownUntil = new Date(Date.now() + 12 * 60 * 60 * 1000); // 12 hours cooldown
     (bid as any).adminOverride = true;
     (bid as any).adminReason = reason;
 
-    const savedBid = await bid.save();
-
-    // Send notification to buyer
-    if (bid.buyer) {
-      try {
-        const productName = (bid.product as any)?.name || 'Product';
-        await this.notificationService.sendBidRejectedNotification(
-          bid.buyer.toString(),
-          productName,
-          bid.product.toString(),
-          bidId,
-          reason // Include reason in notification
-        );
-      } catch (error) {
-        console.error('Failed to send bid rejected notification:', error);
-        // Don't throw - notification failure shouldn't fail the bid rejection
-      }
-    }
-
-    return savedBid;
+    return await bid.save();
   }
 
   /**
    * Cancel a bid (admin action)
    */
   async cancelBid(bidId: string, reason: string): Promise<IBid> {
-    const bid = await this.Bid.findById(bidId).populate('product', 'name');
+    const bid = await this.Bid.findById(bidId);
     
     if (!bid) {
       throw new AppError('Bid not found', 404);
-    }
-
-    if (bid.status === 'CANCELLED') {
-      throw new AppError('Bid is already cancelled', 400);
     }
 
     bid.status = 'CANCELLED';
@@ -654,86 +518,7 @@ export class ProductBidService implements IProductBidService {
     (bid as any).cancellationReason = reason;
     (bid as any).cancelledAt = new Date();
 
-    const savedBid = await bid.save();
-
-    // Send notification to buyer
-    if (bid.buyer) {
-      try {
-        const productName = (bid.product as any)?.name || 'Product';
-        await this.notificationService.sendPushNotification(
-          bid.buyer.toString(),
-          'Bid Cancelled',
-          `Your bid on ${productName} has been cancelled by admin. Reason: ${reason}`,
-          { type: 'bid', bidId, productId: bid.product.toString() }
-        );
-      } catch (error) {
-        console.error('Failed to send bid cancellation notification:', error);
-        // Don't throw - notification failure shouldn't fail the bid cancellation
-      }
-    }
-
-    return savedBid;
-  }
-
-  /**
-   * Create a counter offer (admin/seller proposes a different price)
-   */
-  async createCounterOffer(originalBidId: string, counterPrice: number, reason?: string): Promise<IBid> {
-    const originalBid = await this.Bid.findById(originalBidId).populate('product', 'name price');
-    
-    if (!originalBid) {
-      throw new AppError('Original bid not found', 404);
-    }
-
-    if (originalBid.status !== 'PENDING' && originalBid.status !== 'open') {
-      throw new AppError(`Cannot create counter offer for bid with status: ${originalBid.status}`, 400);
-    }
-
-    // Validate counter price
-    const product = originalBid.product as any;
-    if (!product || !product.price) {
-      throw new AppError('Product price not found', 400);
-    }
-
-    const lowerBound = product.price * 0.75;
-    const upperBound = product.price * 1.25;
-
-    if (counterPrice < lowerBound || counterPrice > upperBound) {
-      throw new AppError(`Counter offer must be between $${lowerBound.toFixed(2)} and $${upperBound.toFixed(2)}`, 400);
-    }
-
-    // Mark original bid as countered
-    originalBid.status = 'countered';
-    await originalBid.save();
-
-    // Create new bid with counter price
-    const counterBid = new this.Bid({
-      product: originalBid.product,
-      buyer: originalBid.buyer,
-      seller: originalBid.seller,
-      bidPrice: counterPrice,
-      status: 'PENDING', // Counter offer starts as pending, waiting for buyer response
-      isWithinPriceRange: true,
-    });
-
-    const savedCounterBid = await counterBid.save();
-
-    // Send notification to buyer
-    if (originalBid.buyer) {
-      try {
-        const productName = product.name || 'Product';
-        await this.notificationService.sendCounterOfferNotification(
-          originalBid.buyer.toString(),
-          productName,
-          originalBid.product.toString(),
-          counterPrice
-        );
-      } catch (error) {
-        console.error('Failed to send counter offer notification:', error);
-      }
-    }
-
-    return savedCounterBid;
+    return await bid.save();
   }
 
   /**
@@ -881,7 +666,7 @@ export class ProductBidService implements IProductBidService {
             $size: {
               $filter: {
                 input: '$bids',
-                cond: { $in: ['$$this.status', ['PENDING', 'open']] }
+                cond: { $eq: ['$$this.status', 'PENDING'] }
               }
             }
           },
@@ -957,24 +742,14 @@ export class ProductBidService implements IProductBidService {
     // Get all bids for this product
     const bids = await this.Bid.find({ product: productId })
       .populate('buyer', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .lean();
-
-    // Filter out bids from deleted users (where buyer is null after population)
-    const bidsWithBuyers = (bids as any[]).filter(bid => {
-      if (!bid.buyer) {
-        console.log(`⚠️ [getProductBidsForAdmin] Filtering out bid ${bid._id || bid.id} - buyer is deleted`);
-        return false;
-      }
-      return true;
-    });
+      .sort({ createdAt: -1 });
 
     // Calculate statistics
-    const totalBids = bidsWithBuyers.length;
-    const pendingBids = bidsWithBuyers.filter(bid => bid.status === 'PENDING' || bid.status === 'open').length;
-    const acceptedBids = bidsWithBuyers.filter(bid => bid.status === 'ACCEPTED').length;
-    const rejectedBids = bidsWithBuyers.filter(bid => bid.status === 'REJECTED').length;
-    const bidPrices = bidsWithBuyers.map(bid => bid.bidPrice);
+    const totalBids = bids.length;
+    const pendingBids = bids.filter(bid => bid.status === 'PENDING').length;
+    const acceptedBids = bids.filter(bid => bid.status === 'ACCEPTED').length;
+    const rejectedBids = bids.filter(bid => bid.status === 'REJECTED').length;
+    const bidPrices = bids.map(bid => bid.bidPrice);
     const highestBid = bidPrices.length > 0 ? Math.max(...bidPrices) : 0;
     const lowestBid = bidPrices.length > 0 ? Math.min(...bidPrices) : 0;
     const avgBidPrice = bidPrices.length > 0 ? bidPrices.reduce((a, b) => a + b, 0) / bidPrices.length : 0;
@@ -993,7 +768,7 @@ export class ProductBidService implements IProductBidService {
           email: (product.owner as any).email
         }
       },
-      bids: bidsWithBuyers.map(bid => ({
+      bids: bids.map(bid => ({
         id: bid._id,
         buyer: bid.buyer,
         bidPrice: bid.bidPrice,

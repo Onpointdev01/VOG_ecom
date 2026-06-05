@@ -5,20 +5,19 @@ import {
   httpPost,
   httpPut,
   httpDelete,
+  request,
   requestBody,
   requestParam,
-  request,
   response,
   queryParam,
 } from 'inversify-express-utils';
-import { Response, Request } from 'express';
+import { Request, Response } from 'express';
 import TYPES from '../di';
 import { AdminService, CreateAdminRequest } from '../services/AdminService';
-import { IProductBidService, IBidMessageService } from '../services';
+import { IBidMessageService, IOfferService, IMessageService } from '../services';
 import { OrderService } from '../services/OrderService';
 import { BaseController } from './BaseController';
 import AppError from '../utils/errors/AppError';
-import { Product } from '../models';
 
 export interface SignInAdminDTO {
   email: string;
@@ -40,25 +39,12 @@ export interface ChangePasswordDTO {
 export class AdminController extends BaseController {
   constructor(
     @inject(TYPES.AdminService) private adminService: AdminService,
-    @inject(TYPES.ProductBidService) private productBidService: IProductBidService,
+    @inject(TYPES.OfferService) private offerService: IOfferService,
+    @inject(TYPES.MessageService) private messageService: IMessageService,
     @inject(TYPES.BidMessageService) private bidMessageService: IBidMessageService,
     @inject(TYPES.OrderService) private orderService: OrderService
   ) {
     super();
-  }
-
-  /**
-   * Fix complete orders payment status (admin utility)
-   * POST /api/v1/admin/orders/fix-payment-status
-   */
-  @httpPost('/orders/fix-payment-status', TYPES.RequireAdmin)
-  public async fixCompleteOrdersPaymentStatus(@response() res: Response) {
-    try {
-      const result = await this.orderService.fixCompleteOrdersPaymentStatus();
-      return this.sendResponse(res, 200, `Fixed ${result.updated} orders`, result);
-    } catch (error: any) {
-      throw new AppError(error.message || 'Failed to fix orders', error.statusCode || 500);
-    }
   }
 
   @httpPost('/signup')
@@ -272,40 +258,34 @@ export class AdminController extends BaseController {
     }
 
     const users = await this.adminService.getAllUsers(filters, pageNumber, limitNumber);
-
+    
     return this.sendResponse(res, 200, 'Users retrieved successfully', users);
   }
 
   @httpGet('/users/:userId', TYPES.RequireAdmin)
-  public async getUserDetails(
+  public async getUserById(
     @response() res: Response,
     @requestParam('userId') userId: string
   ) {
-    const result = await this.adminService.getUserDetails(userId);
-    return this.sendResponse(res, 200, 'User details retrieved successfully', result);
-  }
-
-  @httpPut('/users/:userId/reset-password', TYPES.RequireAdmin)
-  public async resetUserPassword(
-    @response() res: Response,
-    @requestParam('userId') userId: string,
-    @requestBody() payload: { newPassword: string }
-  ) {
-    const { newPassword } = payload;
-    if (!newPassword || typeof newPassword !== 'string') {
-      throw new AppError('newPassword is required', 400);
+    const user = await this.adminService.getUserById(userId);
+    const plain = { ...(user as unknown as Record<string, unknown>) };
+    const seller = plain.seller;
+    if (seller && typeof seller === 'object') {
+      delete plain.seller;
     }
-    await this.adminService.resetUserPassword(userId, newPassword);
-    return this.sendResponse(res, 200, 'User password reset successfully', null);
+    return this.sendResponse(res, 200, 'User retrieved successfully', {
+      user: plain,
+      seller: seller || null,
+    });
   }
 
   @httpPut('/users/:userId', TYPES.RequireAdmin)
-  public async updateUserDetails(
+  public async updateUser(
     @response() res: Response,
     @requestParam('userId') userId: string,
-    @requestBody() payload: any
+    @requestBody() payload: Record<string, unknown>
   ) {
-    const user = await this.adminService.updateUserDetails(userId, payload);
+    const user = await this.adminService.updateUserById(userId, payload as never);
     return this.sendResponse(res, 200, 'User updated successfully', user);
   }
 
@@ -313,10 +293,35 @@ export class AdminController extends BaseController {
   public async updateUserSeller(
     @response() res: Response,
     @requestParam('userId') userId: string,
-    @requestBody() payload: any
+    @requestBody() payload: Record<string, unknown>
   ) {
-    const seller = await this.adminService.updateSellerByUserId(userId, payload);
-    return this.sendResponse(res, 200, 'Seller profile updated successfully', seller);
+    const seller = await this.adminService.updateSellerForUser(userId, payload);
+    return this.sendResponse(res, 200, 'Seller updated successfully', seller);
+  }
+
+  @httpGet('/sellers', TYPES.RequireAdmin)
+  public async listSellers(
+    @response() res: Response,
+    @queryParam('page') page: string = '1',
+    @queryParam('limit') limit: string = '20',
+    @queryParam('search') search?: string
+  ) {
+    const result = await this.adminService.listSellersForAdmin(
+      Math.max(1, parseInt(page, 10) || 1),
+      Math.min(100, Math.max(1, parseInt(limit, 10) || 20)),
+      search
+    );
+    return this.sendResponse(res, 200, 'Sellers retrieved successfully', result);
+  }
+
+  @httpPut('/sellers/:sellerId/promotion', TYPES.RequireAdmin)
+  public async updateSellerPromotion(
+    @response() res: Response,
+    @requestParam('sellerId') sellerId: string,
+    @requestBody() payload: Record<string, unknown>
+  ) {
+    const seller = await this.adminService.updateSellerById(sellerId, payload);
+    return this.sendResponse(res, 200, 'Seller promotion updated successfully', seller);
   }
 
   @httpPut('/users/:userId/ban', TYPES.RequireAdmin)
@@ -358,15 +363,30 @@ export class AdminController extends BaseController {
   @httpPost('/categories', TYPES.RequireAdmin)
   public async createCategory(
     @response() res: Response,
-    @requestBody() payload: { name: string; description?: string; parent?: string | null; isActive?: boolean; imageUrl?: string }
+    @requestBody()
+    payload: {
+      name: string;
+      description?: string;
+      parent?: string | null;
+      isActive?: boolean;
+      imageUrl?: string;
+      attributes?: Array<{ attribute: string; isRequired?: boolean; displayOrder?: number }>;
+    }
   ) {
-    const { name, description, parent, isActive, imageUrl } = payload;
+    const { name, description, parent, isActive, imageUrl, attributes } = payload;
 
     if (!name?.trim()) {
       throw new AppError('Category name is required', 400);
     }
 
-    const category = await this.adminService.createCategory({ name, description, parent, isActive, imageUrl });
+    const category = await this.adminService.createCategory({
+      name,
+      description,
+      parent,
+      isActive,
+      imageUrl,
+      attributes,
+    });
     return this.sendResponse(res, 201, 'Category created successfully', category);
   }
 
@@ -374,15 +394,37 @@ export class AdminController extends BaseController {
   public async updateCategory(
     @response() res: Response,
     @requestParam('categoryId') categoryId: string,
-    @requestBody() payload: { name?: string; description?: string; parent?: string | null; isActive?: boolean; imageUrl?: string }
+    @requestBody()
+    payload: {
+      name?: string;
+      description?: string;
+      parent?: string | null;
+      isActive?: boolean;
+      imageUrl?: string;
+      attributes?: Array<{ attribute: string; isRequired?: boolean; displayOrder?: number }>;
+    }
   ) {
-    const { name, description, parent, isActive, imageUrl } = payload;
+    const { name, description, parent, isActive, imageUrl, attributes } = payload;
 
-    if (!name && description === undefined && parent === undefined && isActive === undefined && imageUrl === undefined) {
+    if (
+      !name &&
+      description === undefined &&
+      parent === undefined &&
+      isActive === undefined &&
+      imageUrl === undefined &&
+      attributes === undefined
+    ) {
       throw new AppError('At least one field is required for update', 400);
     }
 
-    const category = await this.adminService.updateCategory(categoryId, { name, description, parent, isActive, imageUrl });
+    const category = await this.adminService.updateCategory(categoryId, {
+      name,
+      description,
+      parent,
+      isActive,
+      imageUrl,
+      attributes,
+    });
     return this.sendResponse(res, 200, 'Category updated successfully', category);
   }
 
@@ -521,9 +563,10 @@ export class AdminController extends BaseController {
       color,
       quantityAvailable,
       images,
+      attributes,
       isActive,
       isRecommended,
-      isFlash
+      isFlash,
     } = payload;
 
     // Basic validation
@@ -531,20 +574,30 @@ export class AdminController extends BaseController {
       throw new AppError('Name, description, brand, and category are required', 400);
     }
 
+    const imageList = Array.isArray(images) ? images.filter(Boolean) : [];
+    if (imageList.length === 0) {
+      throw new AppError('At least one product image is required', 400);
+    }
+
     const adminId = res.locals.admin;
-    
+
     const product = await this.adminService.createProduct({
       name: name.trim(),
       description: description.trim(),
       brand,
       category,
       productType: productType || 'simple',
-      price,
-      originalPrice,
+      price: price !== undefined && price !== '' ? Number(price) : undefined,
+      originalPrice:
+        originalPrice !== undefined && originalPrice !== '' ? Number(originalPrice) : undefined,
       condition,
       color,
-      quantityAvailable,
-      images: images || [],
+      quantityAvailable:
+        quantityAvailable !== undefined && quantityAvailable !== ''
+          ? Number(quantityAvailable)
+          : undefined,
+      images: imageList,
+      attributes: Array.isArray(attributes) ? attributes : undefined,
       isActive: isActive !== undefined ? isActive : true,
       isRecommended: isRecommended || false,
       isFlash: isFlash || false,
@@ -561,6 +614,12 @@ export class AdminController extends BaseController {
   }
 
   // Order Management Endpoints
+  @httpGet('/orders/payment-stats', TYPES.RequireAdmin)
+  public async getOrderPaymentStats(@response() res: Response) {
+    const stats = await this.adminService.getOrderPaymentStats();
+    return this.sendResponse(res, 200, 'Order payment statistics retrieved successfully', stats);
+  }
+
   @httpGet('/orders/stats', TYPES.RequireAdmin)
   public async getOrderStats(@response() res: Response) {
     const stats = await this.adminService.getOrderStats();
@@ -574,55 +633,45 @@ export class AdminController extends BaseController {
     @queryParam('limit') limit: string = '10',
     @queryParam('status') status?: string,
     @queryParam('paymentStatus') paymentStatus?: string,
-    @queryParam('currency') currency?: string,
+    @queryParam('paymentMethod') paymentMethod?: string,
     @queryParam('search') search?: string,
     @queryParam('dateFrom') dateFrom?: string,
     @queryParam('dateTo') dateTo?: string
   ) {
-    try {
-      const pageNumber = Math.max(1, parseInt(page) || 1);
-      const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 10));
-      
-      const filters: any = {};
-      
-      if (status) {
-        filters.orderStatus = status;
-      }
-      
-      if (paymentStatus) {
-        filters.paymentStatus = paymentStatus;
-      }
-      
-      if (currency) {
-        filters.currency = currency;
-      }
-      
-      if (search) {
-        filters.$or = [
-          { orderNumber: { $regex: search, $options: 'i' } },
-          { 'shippingAddress.fullName': { $regex: search, $options: 'i' } },
-          { 'shippingAddress.phoneNumber': { $regex: search, $options: 'i' } }
-        ];
-      }
-      
-      if (dateFrom || dateTo) {
-        filters.createdAt = {};
-        if (dateFrom) filters.createdAt.$gte = new Date(dateFrom);
-        if (dateTo) filters.createdAt.$lte = new Date(dateTo);
-      }
-
-      const orders = await this.adminService.getAllOrders(filters, pageNumber, limitNumber);
-      
-      return this.sendResponse(res, 200, 'Orders retrieved successfully', orders);
-    } catch (error: any) {
-      console.error('Error in getAllOrders controller:', error);
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
-      });
-      throw error; // Re-throw to let error handler process it
+    const pageNumber = Math.max(1, parseInt(page) || 1);
+    const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 10));
+    
+    const filters: any = {};
+    
+    if (status) {
+      filters.orderStatus = status;
     }
+    
+    if (paymentStatus) {
+      filters.paymentStatus = paymentStatus;
+    }
+
+    if (paymentMethod) {
+      filters.paymentMethod = paymentMethod;
+    }
+    
+    if (search) {
+      filters.$or = [
+        { orderNumber: { $regex: search, $options: 'i' } },
+        { 'shippingAddress.fullName': { $regex: search, $options: 'i' } },
+        { 'shippingAddress.phoneNumber': { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (dateFrom || dateTo) {
+      filters.createdAt = {};
+      if (dateFrom) filters.createdAt.$gte = new Date(dateFrom);
+      if (dateTo) filters.createdAt.$lte = new Date(dateTo);
+    }
+
+    const orders = await this.adminService.getAllOrders(filters, pageNumber, limitNumber);
+    
+    return this.sendResponse(res, 200, 'Orders retrieved successfully', orders);
   }
 
   @httpPut('/orders/:orderId/status', TYPES.RequireAdmin)
@@ -633,16 +682,22 @@ export class AdminController extends BaseController {
     @requestBody() payload: { orderStatus: string }
   ) {
     const { orderStatus } = payload;
-    const admin = (req as any).admin;
+    const admin = (req as Request & { user?: { _id: string } }).user;
+    const adminUserId = admin?._id?.toString() || '';
+    const current = await this.orderService.getOrderById(orderId);
 
-    // Use OrderService instead of AdminService to ensure notifications are sent
-    // OrderService handles cart clearing and push notifications
-    // Pass adminId to exclude this admin from receiving notifications
-    const order = await this.orderService.updateOrderStatus(
-      orderId, 
-      orderStatus,
-      { adminId: admin?._id?.toString() || admin?.id }
-    );
+    let order;
+    if (current.orderStatus === 'PENDING' && orderStatus === 'CONFIRMED') {
+      order = await this.orderService.approveOrderByAdmin(orderId, adminUserId);
+    } else if (current.orderStatus === 'PENDING' && orderStatus === 'CANCELLED') {
+      order = await this.orderService.rejectOrderByAdmin(orderId, adminUserId);
+    } else {
+      order = await this.orderService.updateOrderStatus(
+        orderId,
+        orderStatus,
+        adminUserId ? { userId: adminUserId, role: 'ADMIN' } : undefined
+      );
+    }
 
     return this.sendResponse(res, 200, 'Order status updated successfully', order);
   }
@@ -660,28 +715,197 @@ export class AdminController extends BaseController {
       throw new AppError('Invalid payment status', 400);
     }
 
-    const order = await this.adminService.updateOrderPaymentStatus(orderId, paymentStatus);
-    
+    const order = await this.orderService.updatePaymentStatus(orderId, paymentStatus);
+
     return this.sendResponse(res, 200, 'Order payment status updated successfully', order);
+  }
+
+  @httpPut('/orders/:orderId/mark-paid', TYPES.RequireAdmin)
+  public async markOrderAsPaid(
+    @response() res: Response,
+    @request() req: Request,
+    @requestParam('orderId') orderId: string,
+    @requestBody() payload: { paymentReference?: string; note?: string }
+  ) {
+    const admin = (req as Request & { admin?: { _id: string } }).admin;
+    const adminId = admin?._id?.toString();
+    if (!adminId) {
+      throw new AppError('Admin not authenticated', 401);
+    }
+
+    const order = await this.orderService.recordOrderPaidByAdmin(orderId, adminId, {
+      paymentReference: payload?.paymentReference,
+      note: payload?.note,
+    });
+
+    return this.sendResponse(res, 200, 'Order marked as paid successfully', order);
   }
 
   @httpGet('/orders/:orderId', TYPES.RequireAdmin)
   public async getOrderDetails(@response() res: Response, @requestParam('orderId') orderId: string) {
-    try {
-      if (!orderId || orderId === 'undefined') {
-        return this.sendResponse(res, 400, 'Order ID is required');
-      }
-      const order = await this.adminService.getOrderDetails(orderId);
-      return this.sendResponse(res, 200, 'Order details retrieved successfully', order);
-    } catch (error: any) {
-      console.error('Error in getOrderDetails controller:', error);
-      throw error;
-    }
+    const order = await this.adminService.getOrderDetails(orderId);
+    return this.sendResponse(res, 200, 'Order details retrieved successfully', order);
   }
 
   // =====================================
-  // BID MANAGEMENT ENDPOINTS
+  // OFFER MANAGEMENT ENDPOINTS (canonical)
   // =====================================
+
+  @httpGet('/offers', TYPES.RequireAdmin)
+  public async getAllOffers(
+    @response() res: Response,
+    @queryParam('page') page?: string,
+    @queryParam('limit') limit?: string,
+    @queryParam('status') status?: string,
+    @queryParam('search') search?: string,
+    @queryParam('dateFrom') dateFrom?: string,
+    @queryParam('dateTo') dateTo?: string,
+    @queryParam('productId') productId?: string,
+    @queryParam('buyerId') buyerId?: string,
+    @queryParam('sellerId') sellerId?: string
+  ) {
+    const filters = this.buildOfferFilters({
+      status,
+      productId,
+      buyerId,
+      sellerId,
+      dateFrom,
+      dateTo,
+    });
+    const result = await this.offerService.getAllOffersForAdmin(
+      filters,
+      parseInt(page || '1', 10),
+      parseInt(limit || '20', 10),
+      search
+    );
+    return this.sendResponse(res, 200, 'Offers retrieved successfully', result);
+  }
+
+  @httpGet('/offers/statistics', TYPES.RequireAdmin)
+  public async getOfferStatistics(@response() res: Response) {
+    const stats = await this.offerService.getOfferStatistics();
+    return this.sendResponse(res, 200, 'Offer statistics retrieved successfully', stats);
+  }
+
+  @httpGet('/offers/analytics', TYPES.RequireAdmin)
+  public async getOfferAnalytics(
+    @response() res: Response,
+    @queryParam('period') period?: string,
+    @queryParam('dateFrom') dateFrom?: string,
+    @queryParam('dateTo') dateTo?: string
+  ) {
+    const analytics = await this.offerService.getOfferAnalytics(
+      period || 'weekly',
+      dateFrom,
+      dateTo
+    );
+    return this.sendResponse(res, 200, 'Offer analytics retrieved successfully', analytics);
+  }
+
+  @httpGet('/offers/:offerId', TYPES.RequireAdmin)
+  public async getOfferDetails(@response() res: Response, @requestParam('offerId') offerId: string) {
+    const offer = await this.offerService.getOfferById(offerId);
+    if (!offer) {
+      throw new AppError('Offer not found', 404);
+    }
+    return this.sendResponse(res, 200, 'Offer details retrieved successfully', offer);
+  }
+
+  @httpGet('/offer-messages', TYPES.RequireAdmin)
+  public async getAllOfferMessages(
+    @response() res: Response,
+    @queryParam('page') page?: string,
+    @queryParam('limit') limit?: string,
+    @queryParam('productId') productId?: string,
+    @queryParam('conversationId') conversationId?: string,
+    @queryParam('type') type?: string
+  ) {
+    const messages = await this.messageService.getAllMessagesForAdmin(
+      { productId, conversationId, type },
+      parseInt(page || '1', 10),
+      parseInt(limit || '50', 10)
+    );
+    return this.sendResponse(res, 200, 'Offer messages retrieved successfully', messages);
+  }
+
+  @httpGet('/products/with-offers', TYPES.RequireAdmin)
+  public async getProductsWithOffers(
+    @response() res: Response,
+    @queryParam('page') page?: string,
+    @queryParam('limit') limit?: string,
+    @queryParam('search') search?: string
+  ) {
+    const products = await this.offerService.getProductsWithOffers(
+      { search },
+      parseInt(page || '1', 10),
+      parseInt(limit || '10', 10)
+    );
+    return this.sendResponse(res, 200, 'Products with offers retrieved successfully', products);
+  }
+
+  @httpGet('/products/:productId/offers', TYPES.RequireAdmin)
+  public async getProductOffers(
+    @response() res: Response,
+    @requestParam('productId') productId: string
+  ) {
+    const data = await this.offerService.getProductOffersForAdmin(productId);
+    return this.sendResponse(res, 200, 'Product offers retrieved successfully', data);
+  }
+
+  @httpPut('/users/:userId/offer-ban', TYPES.RequireAdmin)
+  public async banUserFromOffers(
+    @response() res: Response,
+    @requestParam('userId') userId: string,
+    @requestBody() payload: { reason: string; expiresAt?: string }
+  ) {
+    if (!payload?.reason?.trim()) {
+      throw new AppError('Reason is required for offer ban', 400);
+    }
+    const user = await this.adminService.banUserFromBidding(
+      userId,
+      payload.reason,
+      payload.expiresAt ? new Date(payload.expiresAt) : undefined
+    );
+    return this.sendResponse(res, 200, 'User banned from making offers successfully', user);
+  }
+
+  @httpPut('/users/:userId/offer-unban', TYPES.RequireAdmin)
+  public async unbanUserFromOffers(
+    @response() res: Response,
+    @requestParam('userId') userId: string
+  ) {
+    const user = await this.adminService.unbanUserFromBidding(userId);
+    return this.sendResponse(res, 200, 'User unbanned from making offers successfully', user);
+  }
+
+  // =====================================
+  // BID MANAGEMENT ENDPOINTS (deprecated — use /admin/offers)
+  // =====================================
+
+  private buildOfferFilters(params: {
+    status?: string;
+    productId?: string;
+    buyerId?: string;
+    sellerId?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Record<string, unknown> {
+    const filters: Record<string, unknown> = {};
+    if (params.status) filters.status = params.status;
+    if (params.productId) filters.product = params.productId;
+    if (params.buyerId) filters.buyer = params.buyerId;
+    if (params.sellerId) filters.seller = params.sellerId;
+    if (params.dateFrom || params.dateTo) {
+      filters.createdAt = {};
+      if (params.dateFrom) {
+        (filters.createdAt as Record<string, Date>).$gte = new Date(params.dateFrom);
+      }
+      if (params.dateTo) {
+        (filters.createdAt as Record<string, Date>).$lte = new Date(params.dateTo);
+      }
+    }
+    return filters;
+  }
 
   @httpGet('/bids', TYPES.RequireAdmin)
   public async getAllBids(
@@ -696,329 +920,49 @@ export class AdminController extends BaseController {
     @queryParam('buyerId') buyerId?: string,
     @queryParam('sellerId') sellerId?: string
   ) {
-    const pageNumber = parseInt(page || '1');
-    const limitNumber = parseInt(limit || '20');
-
-    const filters: any = {};
-
-    if (status) {
-      filters.status = status;
-    }
-
-    if (productId) {
-      filters.product = productId;
-    }
-
-    if (buyerId) {
-      filters.buyer = buyerId;
-    }
-
-    if (sellerId) {
-      filters.seller = sellerId;
-    }
-
-    if (dateFrom || dateTo) {
-      filters.createdAt = {};
-      if (dateFrom) filters.createdAt.$gte = new Date(dateFrom);
-      if (dateTo) filters.createdAt.$lte = new Date(dateTo);
-    }
-
-    const bids = await this.productBidService.getAllBidsForAdmin(filters, pageNumber, limitNumber, search);
-    
-    return this.sendResponse(res, 200, 'Bids retrieved successfully', bids);
+    res.setHeader('X-API-Deprecated', 'true');
+    const filters = this.buildOfferFilters({
+      status,
+      productId,
+      buyerId,
+      sellerId,
+      dateFrom,
+      dateTo,
+    });
+    const result = await this.offerService.getAllOffersForAdmin(
+      filters,
+      parseInt(page || '1', 10),
+      parseInt(limit || '20', 10),
+      search
+    );
+    return this.sendResponse(res, 200, 'Bids retrieved successfully (deprecated)', {
+      ...result,
+      bids: result.offers,
+    });
   }
 
   @httpGet('/bids/statistics', TYPES.RequireAdmin)
   public async getBidStatistics(@response() res: Response) {
-    const stats = await this.productBidService.getBidStatistics();
-    return this.sendResponse(res, 200, 'Bid statistics retrieved successfully', stats);
+    res.setHeader('X-API-Deprecated', 'true');
+    const stats = await this.offerService.getOfferStatistics();
+    return this.sendResponse(res, 200, 'Bid statistics retrieved successfully (deprecated)', {
+      ...stats,
+      totalBids: stats.totalOffers,
+      pendingBids: stats.pendingOffers,
+      acceptedBids: stats.acceptedOffers,
+      rejectedBids: stats.rejectedOffers,
+      avgBidPrice: stats.avgOfferAmount,
+    });
   }
 
   @httpGet('/bids/:bidId', TYPES.RequireAdmin)
   public async getBidDetails(@response() res: Response, @requestParam('bidId') bidId: string) {
-    const bid = await this.productBidService.getBidById(bidId);
-    
-    if (!bid) {
+    res.setHeader('X-API-Deprecated', 'true');
+    const offer = await this.offerService.getOfferById(bidId);
+    if (!offer) {
       throw new AppError('Bid not found', 404);
     }
-    
-    return this.sendResponse(res, 200, 'Bid details retrieved successfully', bid);
-  }
-
-  @httpPut('/bids/:bidId/accept', TYPES.RequireAdmin)
-  public async acceptBid(
-    @response() res: Response,
-    @requestParam('bidId') bidId: string,
-    @requestBody() payload: { reason?: string }
-  ) {
-    const { reason } = payload || {};
-    
-    const bid = await this.productBidService.forceAcceptBid(bidId, reason);
-    
-    // Create BID_ACCEPTED message in chat
-    if (bid.buyer && bid.product) {
-      try {
-        const buyerId = typeof bid.buyer === 'object' && (bid.buyer as any)._id 
-          ? (bid.buyer as any)._id.toString() 
-          : bid.buyer.toString();
-        
-        const productId = typeof bid.product === 'object' && (bid.product as any)._id 
-          ? (bid.product as any)._id.toString() 
-          : bid.product.toString();
-        
-        // Get product owner (seller) - need to fetch product to get owner
-        const product = await Product.findById(productId).populate('owner', '_id');
-        const sellerUserId = product?.owner?._id?.toString() || product?.owner?.toString() || res.locals.admin;
-        
-        const productName = typeof bid.product === 'object' && (bid.product as any).name
-          ? (bid.product as any).name
-          : 'Product';
-        
-        const message = reason 
-          ? `Your bid of $${bid.bidPrice} has been accepted! Reason: ${reason}`
-          : `Your bid of $${bid.bidPrice} has been accepted!`;
-        
-        // IMPORTANT: sender = seller/admin (who accepts), recipient = buyer (who receives the acceptance)
-        // Use seller's user ID if available, otherwise use admin ID
-        await this.bidMessageService.createBidAcceptedMessage(
-          sellerUserId, // sender: seller's user ID or admin ID
-          buyerId, // recipient: buyer
-          productId,
-          bidId,
-          message
-        );
-        
-        console.log(`✅ Created BID_ACCEPTED message for bid ${bidId}: sender=${sellerUserId}, recipient=${buyerId}, productId=${productId}`);
-      } catch (error) {
-        console.error('❌ Failed to create bid accepted message:', error);
-        // Don't fail the request if message creation fails
-      }
-    }
-    
-    // Generate add-to-cart link for the buyer
-    const addToCartLink = `/api/v1/bids/${bidId}/add-to-cart`;
-    
-    return this.sendResponse(res, 200, 'Bid accepted successfully', {
-      bid: bid,
-      addToCartLink,
-      expiresAt: bid.expiresAt
-    });
-  }
-
-  @httpPut('/bids/:bidId/force-accept', TYPES.RequireAdmin)
-  public async forceAcceptBid(
-    @response() res: Response,
-    @requestParam('bidId') bidId: string,
-    @requestBody() payload: { reason?: string }
-  ) {
-    try {
-      const { reason } = payload || {};
-      
-      const bid = await this.productBidService.forceAcceptBid(bidId, reason);
-      
-      // Send notification to buyer - same as seller acceptance
-      if (bid.seller && bid.buyer) {
-        try {
-          const message = reason 
-            ? `Your bid of $${bid.bidPrice} has been accepted by admin! Reason: ${reason}`
-            : `Your bid of $${bid.bidPrice} has been accepted by admin!`;
-          
-          await this.bidMessageService.createBidAcceptedMessage(
-            bid.seller.toString(),
-            bid.buyer.toString(),
-            bid.product.toString(),
-            bidId,
-            message
-          );
-        } catch (messageError) {
-          // Log error but don't fail the bid acceptance
-          console.error('Failed to create bid accepted message:', messageError);
-        }
-      }
-      
-      // Generate add-to-cart link for the buyer (same as seller acceptance)
-      const addToCartLink = `/api/v1/bids/${bidId}/add-to-cart`;
-      
-      return this.sendResponse(res, 200, 'Bid force accepted successfully', {
-        bid: bid,
-        addToCartLink,
-        expiresAt: bid.expiresAt
-      });
-    } catch (error: any) {
-      console.error('Error in forceAcceptBid:', error);
-      throw error;
-    }
-  }
-
-  @httpPut('/bids/:bidId/reject', TYPES.RequireAdmin)
-  public async rejectBid(
-    @response() res: Response,
-    @requestParam('bidId') bidId: string,
-    @requestBody() payload: { reason?: string; messageId?: string }
-  ) {
-    const { reason, messageId } = payload || {};
-    
-    const bid = await this.productBidService.forceRejectBid(bidId, reason);
-    
-    // Create BID_REJECTED message in chat
-    if (bid.buyer && bid.product) {
-      try {
-        const buyerId = typeof bid.buyer === 'object' && (bid.buyer as any)._id 
-          ? (bid.buyer as any)._id.toString() 
-          : bid.buyer.toString();
-        
-        const productId = typeof bid.product === 'object' && (bid.product as any)._id 
-          ? (bid.product as any)._id.toString() 
-          : bid.product.toString();
-        
-        // Get product owner (seller) - need to fetch product to get owner
-        const product = await Product.findById(productId).populate('owner', '_id');
-        const sellerUserId = product?.owner?._id?.toString() || product?.owner?.toString() || res.locals.admin;
-        
-        const productName = typeof bid.product === 'object' && (bid.product as any).name
-          ? (bid.product as any).name
-          : 'Product';
-        
-        // Always include reason in message if provided
-        const message = reason && reason.trim()
-          ? `Your offer has been declined. Reason: ${reason}`
-          : `Your offer has been declined.`;
-        
-        // IMPORTANT: sender = seller/admin (who rejects), recipient = buyer (who receives the rejection)
-        await this.bidMessageService.createBidRejectedMessage(
-          sellerUserId, // sender: seller's user ID or admin ID
-          buyerId, // recipient: buyer
-          productId,
-          bidId,
-          message
-        );
-        
-        console.log(`✅ Created BID_REJECTED message for bid ${bidId}: sender=${sellerUserId}, recipient=${buyerId}, reason=${reason || 'none'}`);
-      } catch (error) {
-        console.error('❌ Failed to create bid rejected message:', error);
-        // Don't fail the request if message creation fails
-      }
-    }
-    
-    return this.sendResponse(res, 200, 'Bid rejected successfully', {
-      bid,
-      messageId // Return messageId if provided for frontend update
-    });
-  }
-
-  @httpPut('/bids/:bidId/force-reject', TYPES.RequireAdmin)
-  public async forceRejectBid(
-    @response() res: Response,
-    @requestParam('bidId') bidId: string,
-    @requestBody() payload: { reason?: string }
-  ) {
-    // Alias to rejectBid for backward compatibility
-    return this.rejectBid(res, bidId, payload);
-  }
-
-  @httpPut('/bids/:bidId/cancel', TYPES.RequireAdmin)
-  public async cancelBid(
-    @response() res: Response,
-    @requestParam('bidId') bidId: string,
-    @requestBody() payload: { reason: string }
-  ) {
-    const { reason } = payload;
-    
-    if (!reason?.trim()) {
-      throw new AppError('Reason is required for bid cancellation', 400);
-    }
-    
-    const bid = await this.productBidService.cancelBid(bidId, reason);
-    
-    // Create SYSTEM message in chat for both buyer and seller
-    if (bid.buyer && bid.product) {
-      try {
-        const buyerId = typeof bid.buyer === 'object' && (bid.buyer as any)._id 
-          ? (bid.buyer as any)._id.toString() 
-          : bid.buyer.toString();
-        
-        const productId = typeof bid.product === 'object' && (bid.product as any)._id 
-          ? (bid.product as any)._id.toString() 
-          : bid.product.toString();
-        
-        // Get product owner (seller) - need to fetch product to get owner
-        const product = await Product.findById(productId).populate('owner', '_id');
-        const sellerUserId = product?.owner?._id?.toString() || product?.owner?.toString() || res.locals.admin;
-        
-        // Create message for buyer (admin -> buyer)
-        await this.bidMessageService.createSystemMessage(
-          res.locals.admin, // sender: admin
-          buyerId, // recipient: buyer
-          productId,
-          bidId,
-          `This bid has been cancelled by admin. Reason: ${reason}`
-        );
-        
-        // Also create message for seller (admin -> seller) if seller is different from admin
-        if (sellerUserId !== res.locals.admin) {
-          await this.bidMessageService.createSystemMessage(
-            res.locals.admin, // sender: admin
-            sellerUserId, // recipient: seller
-            productId,
-            bidId,
-            `This bid has been cancelled by admin. Reason: ${reason}`
-          );
-        }
-        
-        console.log(`✅ Created CANCELLED messages for bid ${bidId}: reason=${reason}`);
-      } catch (error) {
-        console.error('❌ Failed to create bid cancelled message:', error);
-        // Don't fail the request if message creation fails
-      }
-    }
-    
-    return this.sendResponse(res, 200, 'Bid cancelled successfully', bid);
-  }
-
-  @httpPost('/bids/:bidId/counter-offer', TYPES.RequireAdmin)
-  public async createCounterOffer(
-    @response() res: Response,
-    @requestParam('bidId') bidId: string,
-    @requestBody() payload: { counterPrice: number; reason?: string }
-  ) {
-    const { counterPrice, reason } = payload || {};
-    
-    if (!counterPrice || counterPrice <= 0) {
-      return this.sendResponse(res, 400, 'Counter price is required and must be greater than 0');
-    }
-    
-    const counterBid = await this.productBidService.createCounterOffer(bidId, counterPrice, reason);
-    
-    // Create counter offer message
-    const originalBid = await this.productBidService.getBidById(bidId);
-    if (originalBid && originalBid.buyer) {
-      try {
-        const buyerId = typeof originalBid.buyer === 'object' && (originalBid.buyer as any)._id 
-          ? (originalBid.buyer as any)._id.toString() 
-          : originalBid.buyer.toString();
-        
-        const message = reason 
-          ? `We counter your offer with $${counterPrice.toFixed(2)}. Reason: ${reason}`
-          : `We counter your offer with $${counterPrice.toFixed(2)}.`;
-        
-        await this.bidMessageService.createCounterOfferMessage(
-          originalBid.seller?.toString() || '',
-          buyerId,
-          originalBid.product.toString(),
-          bidId,
-          counterBid._id.toString(),
-          counterPrice,
-          message
-        );
-      } catch (error) {
-        console.error('Failed to create counter offer message:', error);
-      }
-    }
-    
-    return this.sendResponse(res, 200, 'Counter offer created successfully', {
-      counterBid,
-      originalBidId: bidId
-    });
+    return this.sendResponse(res, 200, 'Bid details retrieved successfully (deprecated)', offer);
   }
 
   @httpGet('/bid-messages', TYPES.RequireAdmin)
@@ -1029,16 +973,13 @@ export class AdminController extends BaseController {
     @queryParam('productId') productId?: string,
     @queryParam('type') type?: string
   ) {
-    const pageNumber = parseInt(page || '1');
-    const limitNumber = parseInt(limit || '50');
-
-    const messages = await this.bidMessageService.getAllMessagesForAdmin(
+    res.setHeader('X-API-Deprecated', 'true');
+    const messages = await this.messageService.getAllMessagesForAdmin(
       { productId, type },
-      pageNumber,
-      limitNumber
+      parseInt(page || '1', 10),
+      parseInt(limit || '50', 10)
     );
-    
-    return this.sendResponse(res, 200, 'Bid messages retrieved successfully', messages);
+    return this.sendResponse(res, 200, 'Bid messages retrieved successfully (deprecated)', messages);
   }
 
   @httpPut('/users/:userId/bid-ban', TYPES.RequireAdmin)
@@ -1071,18 +1012,18 @@ export class AdminController extends BaseController {
   @httpGet('/bid-analytics', TYPES.RequireAdmin)
   public async getBidAnalytics(
     @response() res: Response,
-    @queryParam('period') period?: string, // 'daily', 'weekly', 'monthly'
+    @queryParam('period') period?: string,
     @queryParam('dateFrom') dateFrom?: string,
     @queryParam('dateTo') dateTo?: string
   ) {
-    const analytics = await this.productBidService.getBidAnalytics(period || 'weekly', dateFrom, dateTo);
-    
-    return this.sendResponse(res, 200, 'Bid analytics retrieved successfully', analytics);
+    res.setHeader('X-API-Deprecated', 'true');
+    const analytics = await this.offerService.getOfferAnalytics(
+      period || 'weekly',
+      dateFrom,
+      dateTo
+    );
+    return this.sendResponse(res, 200, 'Bid analytics retrieved successfully (deprecated)', analytics);
   }
-
-  // =====================================
-  // PRODUCT-CENTRIC BID MANAGEMENT ENDPOINTS
-  // =====================================
 
   @httpGet('/products/with-bids', TYPES.RequireAdmin)
   public async getProductsWithBids(
@@ -1091,16 +1032,13 @@ export class AdminController extends BaseController {
     @queryParam('limit') limit?: string,
     @queryParam('search') search?: string
   ) {
-    const pageNumber = parseInt(page || '1');
-    const limitNumber = parseInt(limit || '10');
-
-    const products = await this.productBidService.getProductsWithBids(
+    res.setHeader('X-API-Deprecated', 'true');
+    const products = await this.offerService.getProductsWithOffers(
       { search },
-      pageNumber,
-      limitNumber
+      parseInt(page || '1', 10),
+      parseInt(limit || '10', 10)
     );
-    
-    return this.sendResponse(res, 200, 'Products with bids retrieved successfully', products);
+    return this.sendResponse(res, 200, 'Products with bids retrieved successfully (deprecated)', products);
   }
 
   @httpGet('/products/:productId/bids', TYPES.RequireAdmin)
@@ -1108,15 +1046,11 @@ export class AdminController extends BaseController {
     @response() res: Response,
     @requestParam('productId') productId: string
   ) {
-    const productBids = await this.productBidService.getProductBidsForAdmin(productId);
-    
-    return this.sendResponse(res, 200, 'Product bids retrieved successfully', productBids);
-  }
-
-  @httpGet('/debug/bid-counts', TYPES.RequireAdmin)
-  public async getDebugBidCounts(@response() res: Response) {
-    const bidCounts = await this.productBidService.getDebugBidCounts();
-    
-    return this.sendResponse(res, 200, 'Debug bid counts retrieved successfully', bidCounts);
+    res.setHeader('X-API-Deprecated', 'true');
+    const data = await this.offerService.getProductOffersForAdmin(productId);
+    return this.sendResponse(res, 200, 'Product bids retrieved successfully (deprecated)', {
+      ...data,
+      bids: data.offers,
+    });
   }
 }

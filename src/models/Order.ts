@@ -4,27 +4,38 @@ import { IUser } from './User';
 import { IPaymentOption, PaymentMethodType } from './PaymentOption';
 import constants from '../utils/constants';
 
-const { ORDER, PRODUCT, USER, PAYMENT_OPTION, PAYMENT } = constants.mongooseModels;
+const { ORDER, PRODUCT, USER, PAYMENT_OPTION, PAYMENT, PRODUCT_VARIANT } = constants.mongooseModels;
 
-export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'OUT_FOR_DELIVERY' | 'COMPLETE' | 'CANCELLED';
+export type OrderStatus =
+  | 'PENDING'
+  | 'CONFIRMED'
+  | 'OUT_FOR_DELIVERY'
+  | 'COMPLETE'
+  | 'CANCELLED'
+  | 'CANCELLED_BY_BUYER';
 export type OrderPaymentStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
+export type OrderApprovalActor = 'ADMIN' | 'SELLER';
+export type OrderCancellationActor = 'BUYER' | 'SELLER' | 'ADMIN';
 
 export interface IOrderItem {
   _id: string;
   product: Schema.Types.ObjectId | IProduct;
   quantity: number;
+  variantId?: string;
   sku?: string;
   size?: string;
   color?: string;
   price: number;
   bidId?: Schema.Types.ObjectId;
+  offerId?: Schema.Types.ObjectId;
 }
 
 export interface IShippingAddress {
   fullName: string;
   phoneNumber: string;
   homeAddress: string;
-  state: string;
+  neighborhood: string;
+  state?: string;
   city: string;
   postalCode: string;
   country: string;
@@ -40,19 +51,32 @@ export interface IOrder extends Document {
   totalPrice: number;
   shippingFee: number;
   finalPrice: number;
+  discountAmount?: number;
+  campaignId?: Schema.Types.ObjectId;
+  couponCode?: string;
   orderNumber: string;
   paymentReference?: string;
   notes?: string;
   cartItemIds?: string[]; // Store original cart item IDs for clearing
-  currency?: string; // e.g. XAF, USD - set from payment when completed
-  
+
+  approvedBy?: Schema.Types.ObjectId | IUser;
+  approvedAt?: Date;
+  approvedByActor?: OrderApprovalActor;
+  rejectedBy?: Schema.Types.ObjectId | IUser;
+  rejectedAt?: Date;
+  rejectedByActor?: OrderApprovalActor;
+  paymentMarkedPaidBy?: Schema.Types.ObjectId | IUser;
+  paymentMarkedPaidAt?: Date;
+  paymentMarkedPaidByActor?: OrderApprovalActor;
+  cancelledAt?: Date;
+  cancelledBy?: Schema.Types.ObjectId | IUser;
+  cancelledByActor?: OrderCancellationActor;
+  cancellationReason?: string;
+
   // Payment tracking
   payments: Schema.Types.ObjectId[]; // Reference to Payment documents
   activePayment?: Schema.Types.ObjectId; // Current active payment attempt
-
-  /** Set when the buyer finishes the post-delivery review flow for this order */
-  buyerReviewCompletedAt?: Date;
-
+  
   createdAt: Date;
   updatedAt: Date;
 }
@@ -67,6 +91,11 @@ const orderItemSchema: Schema<IOrderItem> = new Schema({
     type: Number,
     required: true,
     min: 1,
+  },
+  variantId: {
+    type: Schema.Types.ObjectId,
+    ref: PRODUCT_VARIANT,
+    required: false,
   },
   sku: {
     type: String,
@@ -89,6 +118,11 @@ const orderItemSchema: Schema<IOrderItem> = new Schema({
     ref: 'Bid',
     required: false,
   },
+  offerId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Offer',
+    required: false,
+  },
 });
 
 const shippingAddressSchema: Schema<IShippingAddress> = new Schema({
@@ -107,9 +141,13 @@ const shippingAddressSchema: Schema<IShippingAddress> = new Schema({
     required: true,
     trim: true,
   },
-  state: {
+  neighborhood: {
     type: String,
     required: true,
+    trim: true,
+  },
+  state: {
+    type: String,
     trim: true,
   },
   city: {
@@ -155,7 +193,14 @@ const orderSchema: Schema<IOrder> = new Schema({
   orderStatus: {
     type: String,
     required: true,
-    enum: ['PENDING', 'CONFIRMED', 'OUT_FOR_DELIVERY', 'COMPLETE', 'CANCELLED'],
+    enum: [
+      'PENDING',
+      'CONFIRMED',
+      'OUT_FOR_DELIVERY',
+      'COMPLETE',
+      'CANCELLED',
+      'CANCELLED_BY_BUYER',
+    ],
     default: 'PENDING',
   },
   totalPrice: {
@@ -170,6 +215,22 @@ const orderSchema: Schema<IOrder> = new Schema({
   finalPrice: {
     type: Number,
     required: true,
+  },
+  discountAmount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  campaignId: {
+    type: Schema.Types.ObjectId,
+    ref: 'MarketingCampaign',
+    required: false,
+  },
+  couponCode: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    required: false,
   },
   orderNumber: {
     type: String,
@@ -188,8 +249,66 @@ const orderSchema: Schema<IOrder> = new Schema({
     type: [String],
     required: false,
   },
-  currency: {
+  approvedBy: {
+    type: Schema.Types.ObjectId,
+    ref: USER,
+    required: false,
+  },
+  approvedAt: {
+    type: Date,
+    required: false,
+  },
+  approvedByActor: {
     type: String,
+    enum: ['ADMIN', 'SELLER'],
+    required: false,
+  },
+  rejectedBy: {
+    type: Schema.Types.ObjectId,
+    ref: USER,
+    required: false,
+  },
+  rejectedAt: {
+    type: Date,
+    required: false,
+  },
+  rejectedByActor: {
+    type: String,
+    enum: ['ADMIN', 'SELLER'],
+    required: false,
+  },
+  paymentMarkedPaidBy: {
+    type: Schema.Types.ObjectId,
+    ref: USER,
+    required: false,
+  },
+  paymentMarkedPaidAt: {
+    type: Date,
+    required: false,
+  },
+  paymentMarkedPaidByActor: {
+    type: String,
+    enum: ['ADMIN', 'SELLER'],
+    required: false,
+  },
+  cancelledAt: {
+    type: Date,
+    required: false,
+  },
+  cancelledBy: {
+    type: Schema.Types.ObjectId,
+    ref: USER,
+    required: false,
+  },
+  cancelledByActor: {
+    type: String,
+    enum: ['BUYER', 'SELLER', 'ADMIN'],
+    required: false,
+  },
+  cancellationReason: {
+    type: String,
+    trim: true,
+    maxlength: 500,
     required: false,
   },
   payments: [{
@@ -199,10 +318,6 @@ const orderSchema: Schema<IOrder> = new Schema({
   activePayment: {
     type: Schema.Types.ObjectId,
     ref: PAYMENT,
-    required: false,
-  },
-  buyerReviewCompletedAt: {
-    type: Date,
     required: false,
   },
 }, { timestamps: true });

@@ -9,7 +9,6 @@ export interface IBidMessageService {
   createBidProposalMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
   createBidAcceptedMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
   createBidRejectedMessage(senderId: string, recipientId: string, productId: string, bidId: string, message: string): Promise<IBidMessages>;
-  createCounterOfferMessage(senderId: string, recipientId: string, productId: string, originalBidId: string, counterBidId: string, counterPrice: number, message: string): Promise<IBidMessages>;
   createSystemMessage(senderId: string, recipientId: string, productId: string, bidId: string | null, message: string): Promise<IBidMessages>;
   createProductInquiryMessage(senderId: string, recipientId: string, productId: string, message: string, product: any): Promise<IBidMessages>;
   getBidMessages(userId: string, productId?: string): Promise<IBidMessages[]>;
@@ -141,20 +140,6 @@ export class BidMessageService extends BaseService implements IBidMessageService
     bidId: string, 
     message: string
   ): Promise<IBidMessages> {
-    // Validate ObjectId formats
-    if (!this.isValidObjectId(senderId)) {
-      throw new Error(`Invalid senderId format: ${senderId}`);
-    }
-    if (!this.isValidObjectId(recipientId)) {
-      throw new Error(`Invalid recipientId format: ${recipientId}`);
-    }
-    if (!this.isValidObjectId(productId)) {
-      throw new Error(`Invalid productId format: ${productId}`);
-    }
-    if (!this.isValidObjectId(bidId)) {
-      throw new Error(`Invalid bidId format: ${bidId}`);
-    }
-
     const newBidMessage = await this.BidMessage.create({
       sender: senderId,
       recipient: recipientId,
@@ -186,44 +171,6 @@ export class BidMessageService extends BaseService implements IBidMessageService
     return newBidMessage;
   }
 
-  async createCounterOfferMessage(
-    senderId: string, 
-    recipientId: string, 
-    productId: string, 
-    originalBidId: string,
-    counterBidId: string,
-    counterPrice: number,
-    message: string
-  ): Promise<IBidMessages> {
-    // Validate ObjectId formats
-    if (!this.isValidObjectId(senderId)) {
-      throw new Error(`Invalid senderId format: ${senderId}`);
-    }
-    if (!this.isValidObjectId(recipientId)) {
-      throw new Error(`Invalid recipientId format: ${recipientId}`);
-    }
-    if (!this.isValidObjectId(productId)) {
-      throw new Error(`Invalid productId format: ${productId}`);
-    }
-    if (!this.isValidObjectId(originalBidId)) {
-      throw new Error(`Invalid originalBidId format: ${originalBidId}`);
-    }
-    if (!this.isValidObjectId(counterBidId)) {
-      throw new Error(`Invalid counterBidId format: ${counterBidId}`);
-    }
-
-    const newBidMessage = await this.BidMessage.create({
-      sender: senderId,
-      recipient: recipientId,
-      product: productId,
-      bid: counterBidId, // The counter offer bid
-      type: 'COUNTER_OFFER',
-      message: message || `Counter offer: $${counterPrice.toFixed(2)}`
-    });
-
-    return newBidMessage;
-  }
-
   async getBidMessages(userId: string, productId?: string): Promise<IBidMessages[]> {
     try {
       const filter: any = {
@@ -241,27 +188,8 @@ export class BidMessageService extends BaseService implements IBidMessageService
         .populate('sender', 'firstName lastName email')
         .populate('recipient', 'firstName lastName email')
         .populate('product', 'name images price')
-        .populate({
-          path: 'bid',
-          select: 'bidPrice bidAmount status convertedToCart expiresAt createdAt product user'
-        })
+        .populate('bid')
         .sort({ createdAt: 1 }); // 1 = ascending (oldest first, newest last)
-
-      // Log bid status for BID_ACCEPTED messages for debugging
-      messages.forEach((msg: any) => {
-        if (msg.type === 'BID_ACCEPTED') {
-          console.log(`[getBidMessages] 🔍 BID_ACCEPTED message found:`, {
-            messageId: msg._id || msg.id,
-            hasBid: !!msg.bid,
-            bidType: typeof msg.bid,
-            bidId: msg.bid?._id || msg.bid?.id || msg.bid,
-            bidStatus: msg.bid?.status,
-            convertedToCart: msg.bid?.convertedToCart,
-            expiresAt: msg.bid?.expiresAt,
-            fullBid: msg.bid
-          });
-        }
-      });
 
       return messages || [];
     } catch (error) {
@@ -529,10 +457,7 @@ export class BidMessageService extends BaseService implements IBidMessageService
       .populate('sender', 'firstName lastName email')
       .populate('recipient', 'firstName lastName email')
       .populate('product', 'name images price')
-      .populate({
-        path: 'bid',
-        select: 'bidPrice bidAmount status convertedToCart expiresAt createdAt product user'
-      })
+      .populate('bid')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);

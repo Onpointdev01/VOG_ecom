@@ -1,7 +1,6 @@
 export interface LoginDTO {
   email: string;
   password: string;
-  type?: 'user' | 'seller' | 'admin'; // Optional: specify login type for access control
 }
 
 export interface SignUpUserDTO extends LoginDTO {
@@ -10,7 +9,6 @@ export interface SignUpUserDTO extends LoginDTO {
   nationality: string;
   phoneNumber: string;
   currentLocation: string;
-  role?: 'user' | 'seller'; // Optional, defaults to 'user', cannot be 'admin'
 }
 
 export interface SignUpSellerDTO {
@@ -97,7 +95,6 @@ export interface getAllProductsQuery {
   isRecommended?: string | boolean;
   category?: string;
   search?: string;
-  q?: string; // Frontend parameter (alias for search)
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
   minPrice?: string;
@@ -114,6 +111,7 @@ export interface addressDTO {
   fullName?: string;
   phoneNumber?: string;
   homeAddress?: string;
+  neighborhood?: string;
   state?: string;
   city?: string;
   postalCode?: string;
@@ -147,6 +145,7 @@ export interface CartItemResponse {
     price: number;
   };
   quantity: number;
+  variantId?: string;
   size: string;
   color: string;
   price: number;

@@ -1,6 +1,5 @@
 import { injectable } from 'inversify';
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
 import { BaseService } from './BaseService';
 import { Admin, IAdmin } from '../models/Admin';
 import { User, IUser } from '../models/User';
@@ -11,6 +10,9 @@ import { Order, IOrder } from '../models/Order';
 import { Seller, ISeller } from '../models/Seller';
 import AppError from '../utils/errors/AppError';
 import { env } from '../config';
+import { resolveSellerUserId } from '../utils/resolveSellerUser';
+import { boutiqueFeedSortStages, PLATFORM_STORE_NAME } from '../utils/sellerPromotion';
+import { applyExcludeCancelledFromOrderList } from '../utils/orderListFilters';
 
 export interface IAdminService {
   createAdmin(data: CreateAdminRequest): Promise<IAdmin>;
@@ -23,11 +25,16 @@ export interface IAdminService {
   
   // User Management
   getAllUsers(filters: any, page: number, limit: number): Promise<{ users: IUser[]; total: number; totalPages: number; currentPage: number }>;
-  getUserDetails(userId: string): Promise<{ user: IUser; seller: ISeller | null }>;
-  updateUserDetails(userId: string, payload: AdminUpdateUserPayload): Promise<IUser>;
-  updateSellerByUserId(userId: string, payload: AdminUpdateSellerPayload): Promise<ISeller>;
-  resetUserPassword(userId: string, newPassword: string): Promise<void>;
   updateUserBanStatus(userId: string, banned: boolean, banReason?: string, banExpires?: Date): Promise<IUser>;
+  getUserById(userId: string): Promise<IUser>;
+  updateUserById(userId: string, data: Partial<IUser>): Promise<IUser>;
+  updateSellerForUser(userId: string, data: Record<string, unknown>): Promise<ISeller>;
+  listSellersForAdmin(
+    page: number,
+    limit: number,
+    search?: string
+  ): Promise<{ sellers: Record<string, unknown>[]; total: number; totalPages: number; currentPage: number }>;
+  updateSellerById(sellerId: string, data: Record<string, unknown>): Promise<ISeller>;
   
   // Category Management
   getAllCategories(): Promise<ICategory[]>;
@@ -50,10 +57,25 @@ export interface IAdminService {
   
   // Order Management
   getAllOrders(filters: any, page: number, limit: number): Promise<{ orders: IOrder[]; total: number; totalPages: number; currentPage: number }>;
-  getOrderStats(): Promise<{ total: number; pending: number; confirmed: number; outForDelivery: number; complete: number; cancelled: number }>;
   updateOrderStatus(orderId: string, orderStatus: string): Promise<IOrder>;
   updateOrderPaymentStatus(orderId: string, paymentStatus: string): Promise<IOrder>;
   getOrderDetails(orderId: string): Promise<IOrder>;
+  getOrderPaymentStats(): Promise<{
+    totalPayments: number;
+    totalAmount: number;
+    completedPayments: number;
+    failedPayments: number;
+    pendingPayments: number;
+    byMethod: { _id: string; count: number; totalAmount: number; successCount: number }[];
+  }>;
+  getOrderStats(): Promise<{
+    total: number;
+    pending: number;
+    confirmed: number;
+    outForDelivery: number;
+    complete: number;
+    cancelled: number;
+  }>;
   
   // Bid-related User Management
   banUserFromBidding(userId: string, reason: string, expiresAt?: Date): Promise<IUser>;
@@ -66,28 +88,6 @@ export interface CreateAdminRequest {
   email: string;
   password: string;
   role?: 'SUPER_ADMIN' | 'ADMIN';
-}
-
-/** Allowed fields for admin to update on a user (no password, no ban – use ban endpoint) */
-export interface AdminUpdateUserPayload {
-  firstName?: string;
-  lastName?: string;
-  email?: string;
-  phoneNumber?: string;
-  nationality?: string;
-  currentLocation?: string;
-  profileImageUrl?: string;
-  role?: string;
-  verified?: boolean;
-}
-
-/** Allowed fields for admin to update on a seller */
-export interface AdminUpdateSellerPayload {
-  name?: string;
-  logo?: string;
-  type?: string;
-  official?: boolean;
-  status?: string;
 }
 
 @injectable()
@@ -236,7 +236,10 @@ export class AdminService extends BaseService implements IAdminService {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('seller', 'name type official')
+      .populate(
+        'seller',
+        'name type official logo status rating noOfRating isPinned isPlatformStore promotionActive promotionStartsAt promotionExpiresAt promotionActivatedAt promotionTier'
+      )
       .lean();
 
     const total = await User.countDocuments(filters);
@@ -252,81 +255,213 @@ export class AdminService extends BaseService implements IAdminService {
 
   async updateUserBanStatus(userId: string, banned: boolean, banReason?: string, banExpires?: Date): Promise<IUser> {
     const user = await this.verifyDoc(userId, User);
-
+    
     user.banned = banned;
     user.banReason = banned ? banReason || null : null;
     user.banExpires = banned && banExpires ? banExpires : null;
-
+    
     await user.save();
     return user;
   }
 
-  async getUserDetails(userId: string): Promise<{ user: IUser; seller: ISeller | null }> {
+  async getUserById(userId: string): Promise<IUser> {
     const user = await User.findById(userId)
       .select('-password -refreshToken -verifyCode -passwordResetToken')
+      .populate(
+        'seller',
+        'name type official logo status rating noOfRating isPinned isPlatformStore promotionActive promotionStartsAt promotionExpiresAt promotionActivatedAt promotionTier'
+      )
       .lean();
+
     if (!user) {
       throw new AppError('User not found', 404);
     }
-    const seller = await Seller.findOne({ user: userId }).lean();
-    return {
-      user: user as IUser,
-      seller: seller ? (seller as ISeller) : null,
-    };
+
+    return user as IUser;
   }
 
-  async updateUserDetails(userId: string, payload: AdminUpdateUserPayload): Promise<IUser> {
+  async updateUserById(userId: string, data: Partial<IUser>): Promise<IUser> {
     const user = await this.verifyDoc(userId, User);
-    const allowed = ['firstName', 'lastName', 'email', 'phoneNumber', 'nationality', 'currentLocation', 'profileImageUrl', 'role', 'verified'];
-    const userRecord = user as unknown as Record<string, unknown>;
+    const allowed = [
+      'firstName',
+      'lastName',
+      'phoneNumber',
+      'nationality',
+      'currentLocation',
+      'profileImageUrl',
+      'verified',
+    ] as const;
+
     for (const key of allowed) {
-      const value = (payload as Record<string, unknown>)[key];
-      if (value !== undefined) {
-        userRecord[key] = value;
+      if (data[key] !== undefined) {
+        (user as unknown as Record<string, unknown>)[key] = data[key];
       }
     }
+
     await user.save();
     return user;
   }
 
-  async updateSellerByUserId(userId: string, payload: AdminUpdateSellerPayload): Promise<ISeller> {
-    const seller = await Seller.findOne({ user: userId });
-    if (!seller) {
-      throw new AppError('Seller profile not found for this user', 404);
-    }
-    const allowed = ['name', 'logo', 'type', 'official', 'status'];
-    const sellerRecord = seller as unknown as Record<string, unknown>;
-    for (const key of allowed) {
-      const value = (payload as Record<string, unknown>)[key];
-      if (value !== undefined) {
-        sellerRecord[key] = value;
+  private async applySellerAdminPatch(seller: ISeller, data: Record<string, unknown>): Promise<ISeller> {
+    if (seller.isPlatformStore) {
+      if (data.isPinned === false || data.promotionActive === true) {
+        throw new AppError('Platform store pinning cannot be changed from promotion settings', 400);
       }
     }
+
+    if (data.name !== undefined) {
+      const name = String(data.name).trim();
+      if (!name) throw new AppError('Shop name is required', 400);
+      seller.name = name;
+    }
+    if (data.type !== undefined) {
+      const type = String(data.type).toLowerCase();
+      seller.type = type === 'company' || type === 'enterprise' ? 'company' : 'individual';
+    }
+    if (data.logo !== undefined) seller.logo = String(data.logo);
+    if (data.status !== undefined) seller.status = String(data.status);
+    if (data.official !== undefined) seller.official = Boolean(data.official);
+
+    if (data.isPinned !== undefined && !seller.isPlatformStore) {
+      seller.isPinned = Boolean(data.isPinned);
+    }
+
+    const activatingPromotion =
+      data.promotionActive === true && !seller.promotionActive;
+
+    if (data.promotionActive !== undefined && !seller.isPlatformStore) {
+      seller.promotionActive = Boolean(data.promotionActive);
+    }
+    if (data.promotionStartsAt !== undefined) {
+      seller.promotionStartsAt = data.promotionStartsAt
+        ? new Date(String(data.promotionStartsAt))
+        : undefined;
+    }
+    if (data.promotionExpiresAt !== undefined) {
+      seller.promotionExpiresAt = data.promotionExpiresAt
+        ? new Date(String(data.promotionExpiresAt))
+        : undefined;
+    }
+    if (data.promotionTier !== undefined) {
+      seller.promotionTier = Math.max(1, Number(data.promotionTier) || 1);
+    }
+
+    if (activatingPromotion) {
+      seller.promotionActivatedAt = new Date();
+    }
+
+    if (seller.promotionExpiresAt && seller.promotionExpiresAt <= new Date()) {
+      seller.promotionActive = false;
+    }
+
     await seller.save();
     return seller;
   }
 
-  async resetUserPassword(userId: string, newPassword: string): Promise<void> {
-    if (!newPassword || newPassword.trim().length < 6) {
-      throw new AppError('Password must be at least 6 characters', 400);
+  async updateSellerForUser(userId: string, data: Record<string, unknown>): Promise<ISeller> {
+    const user = await this.verifyDoc(userId, User);
+    const seller = user.seller
+      ? await Seller.findById(user.seller)
+      : await Seller.findOne({ user: userId });
+
+    if (!seller) {
+      throw new AppError('Seller profile not found for this user', 404);
     }
-    const user = await User.findById(userId).select('+password');
-    if (!user) {
-      throw new AppError('User not found', 404);
+
+    return this.applySellerAdminPatch(seller, data);
+  }
+
+  async updateSellerById(sellerId: string, data: Record<string, unknown>): Promise<ISeller> {
+    const seller = await Seller.findById(sellerId);
+    if (!seller) {
+      throw new AppError('Seller not found', 404);
     }
-    const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
-    (user as any).password = hashedPassword;
-    await user.save();
+    return this.applySellerAdminPatch(seller, data);
+  }
+
+  async listSellersForAdmin(page: number, limit: number, search?: string) {
+    const pageNumber = Math.max(1, page);
+    const limitNumber = Math.min(100, Math.max(1, limit));
+    const skip = (pageNumber - 1) * limitNumber;
+
+    await Seller.updateMany(
+      { promotionActive: true, promotionExpiresAt: { $lte: new Date() } },
+      { $set: { promotionActive: false } }
+    );
+
+    const filter: Record<string, unknown> = { status: { $in: ['active', ''] } };
+    if (search?.trim()) {
+      filter.name = new RegExp(search.trim(), 'i');
+    }
+
+    const [total, rows] = await Promise.all([
+      Seller.countDocuments(filter),
+      Seller.aggregate([
+        { $match: filter },
+        ...boutiqueFeedSortStages(),
+        { $skip: skip },
+        { $limit: limitNumber },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'user',
+            foreignField: '_id',
+            as: 'userDoc',
+          },
+        },
+        { $unwind: { path: '$userDoc', preserveNullAndEmptyArrays: true } },
+      ]),
+    ]);
+
+    const sellers = rows.map((row) => {
+      const doc = row as Record<string, unknown>;
+      const userDoc = doc.userDoc as Record<string, unknown> | undefined;
+      return {
+        id: String(doc._id),
+        name: doc.name,
+        logo: doc.logo,
+        rating: doc.rating,
+        noOfRating: doc.noOfRating,
+        official: doc.official,
+        status: doc.status,
+        isPinned: doc.isPinned,
+        isPlatformStore: doc.isPlatformStore,
+        promotionActive: doc.promotionActive,
+        promotionStartsAt: doc.promotionStartsAt,
+        promotionExpiresAt: doc.promotionExpiresAt,
+        promotionActivatedAt: doc.promotionActivatedAt,
+        promotionTier: doc.promotionTier,
+        ownerEmail: userDoc?.email,
+        ownerName: userDoc
+          ? `${userDoc.firstName || ''} ${userDoc.lastName || ''}`.trim()
+          : undefined,
+      };
+    });
+
+    return {
+      sellers,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limitNumber)),
+      currentPage: pageNumber,
+    };
   }
 
   // Category Management Methods
   async getAllCategories(): Promise<ICategory[]> {
-    return Category.find()
+    const categories = await Category.find()
       .populate('parent', 'name')
       .sort({ parent: 1, displayOrder: 1, createdAt: -1 });
+    return categories.map((c) => c.toJSON() as ICategory);
   }
 
-  async createCategory(data: { name: string; description?: string; parent?: string | null; isActive?: boolean; imageUrl?: string }): Promise<ICategory> {
+  async createCategory(data: {
+    name: string;
+    description?: string;
+    parent?: string | null;
+    isActive?: boolean;
+    imageUrl?: string;
+    attributes?: Array<{ attribute: string; isRequired?: boolean; displayOrder?: number }>;
+  }): Promise<ICategory> {
     const existingCategory = await Category.findOne({ 
       name: { $regex: new RegExp(`^${data.name}$`, 'i') } 
     });
@@ -345,17 +480,28 @@ export class AdminService extends BaseService implements IAdminService {
 
     const category = new Category({
       name: data.name.trim(),
-      description: data.description?.trim(),
-      parent: data.parent ? data.parent as any : null,
+      description: data.description?.trim() ?? '',
+      parent: data.parent ? (data.parent as any) : null,
       isActive: data.isActive !== undefined ? data.isActive : true,
-      imageUrl: data.imageUrl?.trim(),
+      imageUrl: data.imageUrl?.trim() ?? '',
+      attributes: Array.isArray(data.attributes) ? data.attributes : [],
     });
 
     await category.save();
-    return category;
+    return category.toJSON() as ICategory;
   }
 
-  async updateCategory(categoryId: string, data: { name?: string; description?: string; parent?: string | null; isActive?: boolean; imageUrl?: string }): Promise<ICategory> {
+  async updateCategory(
+    categoryId: string,
+    data: {
+      name?: string;
+      description?: string;
+      parent?: string | null;
+      isActive?: boolean;
+      imageUrl?: string;
+      attributes?: Array<{ attribute: string; isRequired?: boolean; displayOrder?: number }>;
+    }
+  ): Promise<ICategory> {
     const category = await this.verifyDoc(categoryId, Category);
     
     if (data.name) {
@@ -403,11 +549,15 @@ export class AdminService extends BaseService implements IAdminService {
     }
 
     if (data.imageUrl !== undefined) {
-      category.imageUrl = data.imageUrl?.trim();
+      category.imageUrl = data.imageUrl?.trim() ?? '';
+    }
+
+    if (data.attributes !== undefined) {
+      category.attributes = data.attributes as any;
     }
 
     await category.save();
-    return category;
+    return category.toJSON() as ICategory;
   }
 
   // Helper method to check for circular references in category hierarchy
@@ -435,7 +585,8 @@ export class AdminService extends BaseService implements IAdminService {
 
   // Brand Management Methods
   async getAllBrands(): Promise<IBrand[]> {
-    return Brand.find().sort({ createdAt: -1 });
+    const brands = await Brand.find().sort({ createdAt: -1 });
+    return brands.map((b) => b.toJSON() as IBrand);
   }
 
   async createBrand(data: { name: string; description?: string; logoUrl?: string; website?: string; isActive?: boolean }): Promise<IBrand> {
@@ -456,7 +607,7 @@ export class AdminService extends BaseService implements IAdminService {
     });
 
     await brand.save();
-    return brand;
+    return brand.toJSON() as IBrand;
   }
 
   async updateBrand(brandId: string, data: { name?: string; description?: string; logoUrl?: string; website?: string; isActive?: boolean }): Promise<IBrand> {
@@ -492,7 +643,7 @@ export class AdminService extends BaseService implements IAdminService {
     }
 
     await brand.save();
-    return brand;
+    return brand.toJSON() as IBrand;
   }
 
   async deleteBrand(brandId: string): Promise<void> {
@@ -523,91 +674,130 @@ export class AdminService extends BaseService implements IAdminService {
     };
   }
 
-  async createProduct(data: any): Promise<IProduct> {
-    // For admin-created products, we need to find or create a system seller
-    let systemSeller = await Seller.findOne({ name: 'System Admin Store', type: 'company' });
-    
+  private async getOrCreateSystemSeller(adminUserId?: string): Promise<ISeller> {
+    let systemSeller = await Seller.findOne({ name: PLATFORM_STORE_NAME, type: 'company' });
+
     if (!systemSeller) {
-      // Create a system seller if it doesn't exist
-      // Note: This requires a user account, so we'll create a minimal seller entry
-      // In a real implementation, you might want to create a dedicated admin user first
-      systemSeller = new Seller({
-        user: data.adminUserId || null, // You might need to pass admin user ID
+      if (!adminUserId) {
+        throw new AppError('Admin account required to initialize the platform store', 400);
+      }
+      systemSeller = await Seller.create({
+        user: adminUserId,
         type: 'company',
-        name: 'System Admin Store',
+        name: PLATFORM_STORE_NAME,
         logo: '',
         official: true,
+        isPinned: true,
+        isPlatformStore: true,
+        promotionActive: false,
         status: 'active',
-        products: []
+        products: [],
       });
+    } else if (adminUserId && !systemSeller.user) {
+      await Seller.updateOne({ _id: systemSeller._id }, { user: adminUserId });
+      systemSeller = await Seller.findById(systemSeller._id);
+      if (!systemSeller) {
+        throw new AppError('Platform store could not be loaded', 500);
+      }
+    }
+
+    if (!systemSeller.isPinned || !systemSeller.isPlatformStore) {
+      systemSeller.isPinned = true;
+      systemSeller.isPlatformStore = true;
+      systemSeller.promotionActive = false;
       await systemSeller.save();
     }
-    
-    const product = new Product({
+
+    // Repair seller ↔ user link when possible; do not block product creation on failure.
+    try {
+      await resolveSellerUserId(systemSeller, User, Admin);
+    } catch {
+      // Legacy stores may have an invalid user ref; product creation can still proceed.
+    }
+
+    return systemSeller;
+  }
+
+  async createProduct(data: any): Promise<IProduct> {
+    const systemSeller = await this.getOrCreateSystemSeller(data.adminUserId);
+
+    if (data.productType === 'variable') {
+      throw new AppError(
+        'Variable products must be created from the seller dashboard with size/color variants',
+        400
+      );
+    }
+
+    const images = Array.isArray(data.images) ? data.images.filter(Boolean) : [];
+    if (images.length === 0) {
+      throw new AppError('At least one product image is required', 400);
+    }
+
+    const price = Number(data.price);
+    if (!Number.isFinite(price) || price < 0) {
+      throw new AppError('A valid price is required for simple products', 400);
+    }
+
+    const quantityAvailable = Number(data.quantityAvailable);
+    if (!Number.isFinite(quantityAvailable) || quantityAvailable < 0) {
+      throw new AppError('A valid quantity is required for simple products', 400);
+    }
+
+    const originalPriceRaw = data.originalPrice ?? price;
+    const originalPrice = Number(originalPriceRaw);
+    const condition = data.condition || 'Brand New';
+
+    const product = await Product.create({
       name: data.name,
       description: data.description,
-      productType: data.productType,
+      productType: 'simple',
       category: data.category,
       brand: data.brand,
-      price: data.price,
-      originalPrice: data.originalPrice,
-      condition: data.condition,
-      color: data.color,
-      quantityAvailable: data.quantityAvailable,
-      images: data.images,
-      isActive: data.isActive,
-      isFlash: data.isFlash,
-      isRecommended: data.isRecommended,
+      price,
+      originalPrice: Number.isFinite(originalPrice) && originalPrice >= 0 ? originalPrice : price,
+      condition,
+      color: data.color || undefined,
+      quantityAvailable,
+      images,
+      attributes: data.attributes,
+      isActive: data.isActive !== false,
+      isFlash: Boolean(data.isFlash),
+      isRecommended: Boolean(data.isRecommended),
       rating: 0,
       noOfReviews: 0,
       reviews: [],
-      owner: systemSeller._id, // Use the system seller as owner
+      owner: systemSeller._id,
     });
 
-    await product.save();
-    
-    // Add product to seller's products list
-    systemSeller.products.push(product._id as any);
-    await systemSeller.save();
-    
+    await Seller.updateOne(
+      { _id: systemSeller._id },
+      { $addToSet: { products: product._id } }
+    );
+
     return product;
   }
 
   async updateProductStatus(productId: string, isActive: boolean): Promise<IProduct> {
-    const product = await Product.findByIdAndUpdate(
-      productId,
-      { isActive },
-      { new: true, runValidators: true }
-    );
+    const product = await this.verifyDoc(productId, Product);
     
-    if (!product) {
-      throw new AppError('Product not found', 404);
-    }
+    product.isActive = isActive;
+    await product.save();
     
     return product;
   }
 
   async updateProductFeatured(productId: string, data: { isRecommended?: boolean; isFlash?: boolean }): Promise<IProduct> {
-    const updateData: any = {};
+    const product = await this.verifyDoc(productId, Product);
     
     if (data.isRecommended !== undefined) {
-      updateData.isRecommended = data.isRecommended;
+      product.isRecommended = data.isRecommended;
     }
     
     if (data.isFlash !== undefined) {
-      updateData.isFlash = data.isFlash;
+      product.isFlash = data.isFlash;
     }
     
-    const product = await Product.findByIdAndUpdate(
-      productId,
-      updateData,
-      { new: true, runValidators: true }
-    );
-    
-    if (!product) {
-      throw new AppError('Product not found', 404);
-    }
-    
+    await product.save();
     return product;
   }
 
@@ -618,97 +808,27 @@ export class AdminService extends BaseService implements IAdminService {
 
   // Order Management Methods
   async getAllOrders(filters: any, page: number, limit: number): Promise<{ orders: IOrder[]; total: number; totalPages: number; currentPage: number }> {
-    try {
-      const skip = (page - 1) * limit;
+    const skip = (page - 1) * limit;
+    const listFilters = applyExcludeCancelledFromOrderList(filters);
 
-      const orders = await Order.find(filters)
-        .populate('user', 'firstName lastName email')
-        .populate({
-          path: 'items.product',
-          select: 'name price images owner',
-          options: { strictPopulate: false },
-          populate: {
-            path: 'owner',
-            model: 'Seller',
-            select: 'name logo',
-            options: { strictPopulate: false },
-          },
-        })
-        .populate({
-          path: 'payments',
-          select: 'transactionId paymentMethod status amount providerTransactionId createdAt',
-          options: { strictPopulate: false }
-        })
-        .populate({
-          path: 'activePayment',
-          select: 'transactionId paymentMethod status amount providerTransactionId createdAt',
-          options: { strictPopulate: false }
-        })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean();
+    const orders = await Order.find(listFilters)
+      .populate('user', 'firstName lastName email')
+      .populate('items.product', 'name price images')
+      .populate('payments', 'transactionId paymentMethod status amount providerTransactionId createdAt')
+      .populate('activePayment', 'transactionId paymentMethod status amount providerTransactionId createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
-      const ordersWithSellerInfo = (orders as any[]).map((order) => {
-        const firstItem = order.items && order.items[0];
-        const product = firstItem?.product;
-        const owner = product?.owner;
-        const sellerId = owner?._id?.toString?.() ?? owner?.id ?? (typeof owner === 'string' ? owner : null);
-        const sellerName = owner?.name ?? null;
-        const sellerLogo = owner?.logo ?? null;
-        return {
-          ...order,
-          ...(sellerId && { seller_id: sellerId }),
-          ...(sellerName && { seller_name: sellerName, shop_name: sellerName }),
-          ...(sellerLogo && { shop_logo: sellerLogo }),
-        };
-      });
+    const total = await Order.countDocuments(listFilters);
+    const totalPages = Math.ceil(total / limit);
 
-      const ordersWithUsers = ordersWithSellerInfo.filter(order => {
-        if (!order.user) {
-          console.log(`⚠️ [AdminService] Filtering out order ${order._id || order.orderNumber} - user is deleted`);
-          return false;
-        }
-        return true;
-      });
-
-      const totalWithUsers = await Order.countDocuments({
-        ...filters,
-        user: { $exists: true, $ne: null }
-      });
-      const totalPages = Math.ceil(totalWithUsers / limit);
-
-      return {
-        orders: ordersWithUsers as IOrder[],
-        total: totalWithUsers,
-        totalPages,
-        currentPage: page,
-      };
-    } catch (error: any) {
-      console.error('Error in getAllOrders:', error);
-      console.error('Error stack:', error.stack);
-      console.error('Filters:', JSON.stringify(filters, null, 2));
-      throw new AppError(error.message || 'Failed to fetch orders', 500);
-    }
-  }
-
-  async getOrderStats(): Promise<{ total: number; pending: number; confirmed: number; outForDelivery: number; complete: number; cancelled: number }> {
-    const [
+    return {
+      orders: orders as IOrder[],
       total,
-      pending,
-      confirmed,
-      outForDelivery,
-      complete,
-      cancelled
-    ] = await Promise.all([
-      Order.countDocuments().catch(() => 0),
-      Order.countDocuments({ orderStatus: 'PENDING' }).catch(() => 0),
-      Order.countDocuments({ orderStatus: 'CONFIRMED' }).catch(() => 0),
-      Order.countDocuments({ orderStatus: 'OUT_FOR_DELIVERY' }).catch(() => 0),
-      Order.countDocuments({ orderStatus: 'COMPLETE' }).catch(() => 0),
-      Order.countDocuments({ orderStatus: 'CANCELLED' }).catch(() => 0)
-    ]);
-    return { total, pending, confirmed, outForDelivery, complete, cancelled };
+      totalPages,
+      currentPage: page,
+    };
   }
 
   async updateOrderStatus(orderId: string, orderStatus: string): Promise<IOrder> {
@@ -729,128 +849,132 @@ export class AdminService extends BaseService implements IAdminService {
     return order;
   }
 
-  async getOrderDetails(orderId: string): Promise<IOrder> {
-    try {
-      const orderDoc = await Order.findById(orderId);
-      if (!orderDoc) {
-        throw new AppError('Order not found', 404);
-      }
+  async getOrderStats(): Promise<{
+    total: number;
+    pending: number;
+    confirmed: number;
+    outForDelivery: number;
+    complete: number;
+    cancelled: number;
+  }> {
+    const rows = await Order.aggregate([
+      {
+        $group: {
+          _id: '$orderStatus',
+          count: { $sum: 1 },
+        },
+      },
+    ]);
 
-      // Now populate with proper error handling
-      const order = await Order.findById(orderId)
-        .populate({
-          path: 'user',
-          select: 'firstName lastName email phoneNumber',
-          options: { strictPopulate: false }
-        })
-        .populate({
-          path: 'items.product',
-          select: 'name price images brand description owner',
-          options: { strictPopulate: false },
-          populate: {
-            path: 'owner',
-            model: 'Seller',
-            select: 'name logo',
-            options: { strictPopulate: false },
+    const byStatus = rows.reduce<Record<string, number>>((acc, row) => {
+      if (row._id) acc[String(row._id)] = row.count;
+      return acc;
+    }, {});
+
+    const pending = byStatus.PENDING ?? 0;
+    const confirmed = byStatus.CONFIRMED ?? 0;
+    const outForDelivery = byStatus.OUT_FOR_DELIVERY ?? 0;
+    const complete = byStatus.COMPLETE ?? 0;
+    const cancelled =
+      (byStatus.CANCELLED ?? 0) + (byStatus.CANCELLED_BY_BUYER ?? 0);
+
+    return {
+      total: pending + confirmed + outForDelivery + complete + cancelled,
+      pending,
+      confirmed,
+      outForDelivery,
+      complete,
+      cancelled,
+    };
+  }
+
+  async getOrderPaymentStats(): Promise<{
+    totalPayments: number;
+    totalAmount: number;
+    completedPayments: number;
+    failedPayments: number;
+    pendingPayments: number;
+    byMethod: { _id: string; count: number; totalAmount: number; successCount: number }[];
+  }> {
+    const empty = {
+      totalPayments: 0,
+      totalAmount: 0,
+      completedPayments: 0,
+      failedPayments: 0,
+      pendingPayments: 0,
+      byMethod: [] as { _id: string; count: number; totalAmount: number; successCount: number }[],
+    };
+
+    const [overall] = await Order.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalPayments: { $sum: 1 },
+          totalAmount: { $sum: { $ifNull: ['$finalPrice', '$totalPrice'] } },
+          completedPayments: {
+            $sum: { $cond: [{ $eq: ['$paymentStatus', 'COMPLETED'] }, 1, 0] },
           },
-        })
-        .populate({
-          path: 'payments',
-          select: 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt',
-          options: { strictPopulate: false }
-        })
-        .populate({
-          path: 'activePayment',
-          select: 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt',
-          options: { strictPopulate: false }
-        })
-        .lean(); // Use lean() to get plain JavaScript object
+          failedPayments: {
+            $sum: { $cond: [{ $eq: ['$paymentStatus', 'FAILED'] }, 1, 0] },
+          },
+          pendingPayments: {
+            $sum: {
+              $cond: [
+                {
+                  $in: [
+                    { $ifNull: ['$paymentStatus', 'PENDING'] },
+                    ['PENDING', 'PROCESSING'],
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]);
 
-      if (!order) {
-        throw new AppError('Order not found', 404);
-      }
+    const byMethod = await Order.aggregate([
+      {
+        $group: {
+          _id: '$paymentMethod',
+          count: { $sum: 1 },
+          totalAmount: { $sum: { $ifNull: ['$finalPrice', '$totalPrice'] } },
+          successCount: {
+            $sum: { $cond: [{ $eq: ['$paymentStatus', 'COMPLETED'] }, 1, 0] },
+          },
+        },
+      },
+      { $sort: { count: -1 } },
+    ]);
 
-      // Don't return order if user is deleted
-      if (!order.user) {
-        throw new AppError('Order not found or user deleted', 404);
-      }
-
-      // Ensure user is properly handled
-      const orderData = order as any;
-      
-      // Handle case where user might be null/undefined or missing _id
-      if (!orderData.user) {
-        // If user is null/undefined, get the user ID from the original document
-        const userId = orderDoc.user?.toString() || orderDoc.user;
-        if (userId) {
-          // Try to fetch user data
-          try {
-            const user = await User.findById(userId).select('firstName lastName email phoneNumber').lean();
-            orderData.user = user || {
-              _id: userId,
-              id: userId,
-              firstName: 'Unknown',
-              lastName: 'User',
-              email: 'unknown@example.com'
-            };
-          } catch (userError) {
-            // If user fetch fails, create a placeholder
-            orderData.user = {
-              _id: userId,
-              id: userId,
-              firstName: 'Unknown',
-              lastName: 'User',
-              email: 'unknown@example.com'
-            };
-          }
-        } else {
-          // No user reference at all
-          orderData.user = {
-            _id: null,
-            id: null,
-            firstName: 'Unknown',
-            lastName: 'User',
-            email: 'unknown@example.com'
-          };
-        }
-      } else if (orderData.user && typeof orderData.user === 'object') {
-        // Ensure user has _id and id fields
-        if (!orderData.user._id && !orderData.user.id) {
-          const userId = orderDoc.user?.toString() || orderDoc.user;
-          if (userId) {
-            orderData.user._id = userId;
-            orderData.user.id = userId;
-          }
-        } else if (orderData.user._id && !orderData.user.id) {
-          orderData.user.id = orderData.user._id.toString();
-        } else if (orderData.user.id && !orderData.user._id) {
-          orderData.user._id = orderData.user.id;
-        }
-      }
-
-      // Attach seller/shop info from first item's product owner (for admin UI)
-      const firstItem = orderData.items && orderData.items[0];
-      const product = firstItem?.product;
-      const owner = product?.owner;
-      if (owner) {
-        const sid = owner._id?.toString?.() ?? owner.id ?? (typeof owner === 'string' ? owner : null);
-        const sname = owner.name ?? null;
-        const slogo = owner.logo ?? null;
-        if (sid) orderData.seller_id = sid;
-        if (sname) {
-          orderData.seller_name = sname;
-          orderData.shop_name = sname;
-        }
-        if (slogo) orderData.shop_logo = slogo;
-      }
-
-      return orderData as IOrder;
-    } catch (error: any) {
-      console.error('Error in getOrderDetails:', error);
-      console.error('Error stack:', error.stack);
-      console.error('OrderId:', orderId);
-      throw new AppError(error.message || 'Failed to fetch order details', 500);
+    if (!overall) {
+      return empty;
     }
+
+    return {
+      totalPayments: overall.totalPayments ?? 0,
+      totalAmount: overall.totalAmount ?? 0,
+      completedPayments: overall.completedPayments ?? 0,
+      failedPayments: overall.failedPayments ?? 0,
+      pendingPayments: overall.pendingPayments ?? 0,
+      byMethod: byMethod.filter((m) => m._id),
+    };
+  }
+
+  async getOrderDetails(orderId: string): Promise<IOrder> {
+    const order = await Order.findById(orderId)
+      .populate('user', 'firstName lastName email phoneNumber')
+      .populate('items.product', 'name price images brand description')
+      .populate('payments', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt')
+      .populate('activePayment', 'transactionId paymentMethod paymentType status amount currency providerTransactionId providerReference phoneNumber failureReason failureCode attemptedAt processedAt completedAt failedAt createdAt updatedAt');
+
+    if (!order) {
+      throw new AppError('Order not found', 404);
+    }
+
+    return order as IOrder;
   }
 
   // =====================================
@@ -867,13 +991,13 @@ export class AdminService extends BaseService implements IAdminService {
       throw new AppError('User not found', 404);
     }
 
-    // Add bidBan fields to user (using any type for flexibility)
-    (user as any).bidBan = {
+    user.offerBan = {
       isBanned: true,
       reason: reason,
       bannedAt: new Date(),
-      expiresAt: expiresAt || null
+      expiresAt: expiresAt || null,
     };
+    user.bidBan = user.offerBan;
 
     await user.save();
     return user;
@@ -889,14 +1013,14 @@ export class AdminService extends BaseService implements IAdminService {
       throw new AppError('User not found', 404);
     }
 
-    // Remove bidBan or set it to inactive
-    (user as any).bidBan = {
+    user.offerBan = {
       isBanned: false,
       reason: null,
       bannedAt: null,
       expiresAt: null,
-      unbannedAt: new Date()
+      unbannedAt: new Date(),
     };
+    user.bidBan = user.offerBan;
 
     await user.save();
     return user;

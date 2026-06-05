@@ -10,9 +10,7 @@ const { MONGO_URL } = env;
 //Connection to mongoDb Database
 const connectToDB = async (): Promise<void> => {
   try {
-    await mongoose.connect(MONGO_URL as string, {
-      serverSelectionTimeoutMS: 5000, // fail fast if DNS fails
-    });
+    await mongoose.connect(MONGO_URL as string);
     logger.info('Database connected successfully!');
     
     // Fix category slug index after connection
@@ -29,6 +27,7 @@ const connectToDB = async (): Promise<void> => {
     
   } catch (err) {
     logger.error(err);
+    throw err;
   }
 };
 

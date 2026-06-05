@@ -17,118 +17,30 @@ import { FilterQuery } from 'mongoose';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
-import { IProductBidService, IProductService, IReviewService, IViewTrackingService, IBidMessageService, ITranslationService } from '../services';
-import { IProduct } from '../models';
+import {
+  IProductService,
+  IReviewService,
+  IViewTrackingService,
+  IOfferService,
+  IConversationService,
+  IMessageService,
+} from '../services';
+import { IProduct, IUser } from '../models';
 import { createProductDTO, createReviewDTO, getAllProductsQuery } from '../utils/dtos';
+import { toIdString } from '../utils/mongoId';
 import { getAllProductsSchema } from '../validators';
 
 @controller('/api/v1/products')
 export class ProductController extends BaseController {
   constructor(
     @inject(TYPES.ProductService) private productService: IProductService,
-    @inject(TYPES.ProductBidService) private productBidService: IProductBidService,
+    @inject(TYPES.OfferService) private offerService: IOfferService,
+    @inject(TYPES.ConversationService) private conversationService: IConversationService,
+    @inject(TYPES.MessageService) private messageService: IMessageService,
     @inject(TYPES.ReviewService) private reviewService: IReviewService,
-    @inject(TYPES.ViewTrackingService) private viewTrackingService: IViewTrackingService,
-    @inject(TYPES.BidMessageService) private bidMessageService: IBidMessageService,
-    @inject(TYPES.TranslationService) private translationService: ITranslationService
+    @inject(TYPES.ViewTrackingService) private viewTrackingService: IViewTrackingService
   ) {
     super();
-  }
-
-  /**
-   * Get target language from Accept-Language header
-   * Defaults to 'fr' if not specified
-   */
-  private getTargetLanguage(req: Request): string {
-    const acceptLanguage = req.headers['accept-language'];
-    if (acceptLanguage) {
-      // Parse Accept-Language header (e.g., "fr-FR,fr;q=0.9,en;q=0.8")
-      const languages = acceptLanguage.split(',').map(lang => {
-        const parts = lang.split(';');
-        return parts[0].trim().toLowerCase().split('-')[0]; // Get language code (fr, en, etc.)
-      });
-      // Return first language if it's 'fr' or 'en', otherwise default to 'fr'
-      const lang = languages[0];
-      return (lang === 'fr' || lang === 'en') ? lang : 'fr';
-    }
-    return 'fr'; // Default to French
-  }
-
-  /**
-   * Translate product data using Microsoft Translator API
-   */
-  private async translateProductData(product: any, targetLanguage: string): Promise<any> {
-    // If target language is French (default), no translation needed
-    if (targetLanguage === 'fr') {
-      return product;
-    }
-
-    try {
-      // Collect all text fields that need translation
-      const textsToTranslate: string[] = [];
-      const textFields: string[] = [];
-
-      if (product.name) {
-        textsToTranslate.push(product.name);
-        textFields.push('name');
-      }
-      if (product.description) {
-        textsToTranslate.push(product.description);
-        textFields.push('description');
-      }
-      if (product.brand) {
-        textsToTranslate.push(product.brand);
-        textFields.push('brand');
-      }
-      if (product.category?.name) {
-        textsToTranslate.push(product.category.name);
-        textFields.push('category.name');
-      }
-      if (product.owner?.name) {
-        textsToTranslate.push(product.owner.name);
-        textFields.push('owner.name');
-      }
-
-      // Translate all texts in batch
-      if (textsToTranslate.length > 0) {
-        const translations = await this.translationService.translateBatch(textsToTranslate, targetLanguage, 'fr');
-
-        // Apply translations to product
-        let translationIndex = 0;
-        if (product.name) {
-          product.name = translations[translationIndex++];
-        }
-        if (product.description) {
-          product.description = translations[translationIndex++];
-        }
-        if (product.brand) {
-          product.brand = translations[translationIndex++];
-        }
-        if (product.category?.name) {
-          product.category.name = translations[translationIndex++];
-        }
-        if (product.owner?.name) {
-          product.owner.name = translations[translationIndex++];
-        }
-      }
-    } catch (error) {
-      console.error('Error translating product:', error);
-      // Return original product if translation fails
-    }
-
-    return product;
-  }
-
-  /**
-   * Translate array of products
-   */
-  private async translateProducts(products: any[], targetLanguage: string): Promise<any[]> {
-    if (targetLanguage === 'fr') {
-      return products;
-    }
-
-    // Translate all products in parallel
-    return Promise.all(products.map(product => this.translateProductData(product, targetLanguage)));
   }
 
   @httpPost('/', TYPES.RequireSignIn, TYPES.RequireSeller)
@@ -170,7 +82,7 @@ export class ProductController extends BaseController {
   }
 
   @httpGet('/:id', TYPES.OptionalAuth)
-  async getProductById(@request() req: Request, @response() res: Response, @requestParam('id') id: string) {
+  async getProductById(@response() res: Response, @requestParam('id') id: string) {
     const product = await this.productService.getProductById(id);
     
     // Track product view if user is authenticated
@@ -183,11 +95,7 @@ export class ProductController extends BaseController {
       }
     }
     
-    // Translate product based on Accept-Language header
-    const targetLanguage = this.getTargetLanguage(req);
-    const translatedProduct = await this.translateProductData(product, targetLanguage);
-    
-    return this.sendResponse(res, 200, 'Product retrieved successfully', translatedProduct);
+    return this.sendResponse(res, 200, 'Product retrieved successfully', product);
   }
 
   @httpGet('/', joiMiddleware(getAllProductsSchema, 'query'), TYPES.OptionalAuth)
@@ -197,7 +105,6 @@ export class ProductController extends BaseController {
       isRecommended,
       category,
       search,
-      q, // Also accept 'q' for search query (for compatibility)
       sortBy,
       sortOrder,
       minPrice,
@@ -207,14 +114,6 @@ export class ProductController extends BaseController {
       page,
       limit
     } = query;
-    
-    // Use 'search' or 'q' parameter (q takes precedence if both are provided)
-    const searchQuery = q || search;
-    
-    // Debug logging
-    if (searchQuery) {
-      console.log('[ProductController] Search query received:', searchQuery);
-    }
 
     const filter: FilterQuery<IProduct> = {};
     if (isFlash) {
@@ -235,43 +134,19 @@ export class ProductController extends BaseController {
       if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
     }
     
-    // Map frontend sort values to backend sort values
-    let backendSortBy = sortBy || 'createdAt';
-    let backendSortOrder = sortOrder || 'desc';
-    
-    // Handle frontend sort options
-    if (sortBy === 'price_asc') {
-      backendSortBy = 'price';
-      backendSortOrder = 'asc';
-    } else if (sortBy === 'price_desc') {
-      backendSortBy = 'price';
-      backendSortOrder = 'desc';
-    } else if (sortBy === 'popular') {
-      backendSortBy = 'popularity';
-    } else if (sortBy === 'newest') {
-      backendSortBy = 'createdAt';
-      backendSortOrder = 'desc';
-    }
-    
     const options = {
-      sortBy: backendSortBy,
-      sortOrder: backendSortOrder,
+      sortBy: sortBy || 'createdAt',
+      sortOrder: sortOrder || 'desc',
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 20
     };
 
-    const products = await this.productService.getAllProducts(filter, category, searchQuery, res.locals.user, options);
-    
-    // Translate products based on Accept-Language header
-    const targetLanguage = this.getTargetLanguage(req);
-    const translatedProducts = await this.translateProducts(products, targetLanguage);
-    
-    return this.sendResponse(res, 200, 'Products retrieved successfully', translatedProducts);
+    const products = await this.productService.getAllProducts(filter, category, search, res.locals.user, options);
+    return this.sendResponse(res, 200, 'Products retrieved successfully', products);
   }
 
   @httpGet('/category/:categoryId')
   async getProductsByCategory(
-    @request() req: Request,
     @response() res: Response,
     @requestParam('categoryId') categoryId: string,
     @queryParam('includeSubcategories') includeSubcategories: string = 'false',
@@ -282,26 +157,18 @@ export class ProductController extends BaseController {
     const pageNumber = Math.max(1, parseInt(page) || 1);
     const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 20));
 
-    const result = await this.productService.getProductsByCategoryId(
+    const products = await this.productService.getProductsByCategoryId(
       categoryId,
       includeSubcats,
       pageNumber,
       limitNumber
     );
 
-    // Translate products based on Accept-Language header
-    const targetLanguage = this.getTargetLanguage(req);
-    const translatedProducts = await this.translateProducts(result.products, targetLanguage);
-
-    return this.sendResponse(res, 200, 'Category products retrieved successfully', {
-      ...result,
-      products: translatedProducts
-    });
+    return this.sendResponse(res, 200, 'Category products retrieved successfully', products);
   }
 
   @httpGet('/seller/:sellerId')
   async getProductsBySeller(
-    @request() req: Request,
     @response() res: Response,
     @requestParam('sellerId') sellerId: string,
     @queryParam('page') page: string = '1',
@@ -310,20 +177,13 @@ export class ProductController extends BaseController {
     const pageNumber = Math.max(1, parseInt(page) || 1);
     const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 20));
 
-    const result = await this.productService.getProductsBySellerId(
+    const products = await this.productService.getProductsBySellerId(
       sellerId,
       pageNumber,
       limitNumber
     );
 
-    // Translate products based on Accept-Language header
-    const targetLanguage = this.getTargetLanguage(req);
-    const translatedProducts = await this.translateProducts(result.products, targetLanguage);
-
-    return this.sendResponse(res, 200, 'Seller products retrieved successfully', {
-      ...result,
-      products: translatedProducts
-    });
+    return this.sendResponse(res, 200, 'Seller products retrieved successfully', products);
   }
 
   @httpPut('/:id')
@@ -364,126 +224,86 @@ export class ProductController extends BaseController {
     return this.sendResponse(res, 200, 'Product reviews retrieved successfully', reviews);
   }
 
-  //bid for a product
+  /** @deprecated Use POST /api/v1/products/:productId/offers */
   @httpPost('/:id/bid', TYPES.RequireSignIn)
   async bidForProduct(
     @response() res: Response,
-    @request() req: any,
+    @request() req: Request,
     @requestParam('id') id: string,
     @requestBody() payload: { bidAmount: number }
   ) {
-    // Check if we have a valid user with ID
-    const authenticatedUser = req.user || res.locals.user;
-    if (!authenticatedUser || !authenticatedUser._id) {
+    res.setHeader('X-API-Deprecated', 'true');
+    const authenticatedUser = req.user || (res.locals as { user?: IUser }).user;
+    if (!authenticatedUser?._id) {
       return this.sendResponse(res, 401, 'User not authenticated');
     }
-    
-    const bid = await this.productBidService.createBid(id, authenticatedUser._id.toString(), payload.bidAmount);
-    
-    // Get the product to find the seller/owner for message creation
-    const product = await this.productService.getProductById(id);
-    
-    // Create bid proposal message - this will appear in the chat
-    if (product && product.owner) {
-      // Handle both populated owner object (with id field) and direct ObjectId
-      const sellerId = product.owner.id || product.owner._id || product.owner;
-      
-      // Validate all required IDs before proceeding
-      if (!authenticatedUser || !authenticatedUser._id) {
-        return this.sendResponse(res, 200, 'Bid placed successfully', bid);
-      }
-      
-      if (!sellerId) {
-        return this.sendResponse(res, 200, 'Bid placed successfully', bid);
-      }
-      
-      if (!bid || !bid._id) {
-        return this.sendResponse(res, 200, 'Bid placed successfully', bid);
-      }
-      
-      try {
-        // Create the bid proposal message from user (actual bid amount)
-        await this.bidMessageService.createBidProposalMessage(
-          authenticatedUser._id.toString(),
-          sellerId.toString(),
-          id,
-          bid._id.toString(),
-          `$${payload.bidAmount.toFixed(2)}`
-        );
 
-        // Create automatic system response message (from seller to user)
-        await this.bidMessageService.createSystemMessage(
-          sellerId.toString(),
-          authenticatedUser._id.toString(),
-          id,
-          bid._id.toString(),
-          'Please wait for us to confirm or decline your offer'
-        );
-      } catch (messageError) {
-        // Don't fail the bid creation, just silently handle the error
-      }
-    }
-    
-    return this.sendResponse(res, 200, 'Bid placed successfully', bid);
+    const result = await this.offerService.createOffer(
+      id,
+      authenticatedUser._id.toString(),
+      payload.bidAmount
+    );
+    return this.sendResponse(res, 200, 'Bid placed successfully (deprecated)', {
+      bid: result.offer,
+      offer: result.offer,
+      conversation: result.conversation,
+    });
   }
 
-  //initiate conversation for product inquiry
+  /** @deprecated Use POST /api/v1/conversations/product/:productId */
   @httpPost('/:id/inquiry', TYPES.RequireSignIn)
   async initiateProductInquiry(
     @response() res: Response,
-    @request() req: any,
+    @request() req: Request,
     @requestParam('id') id: string
   ) {
-    // Check if we have a valid user with ID
-    const authenticatedUser = req.user || res.locals.user;
-    if (!authenticatedUser || !authenticatedUser._id) {
+    res.setHeader('X-API-Deprecated', 'true');
+    const authenticatedUser = req.user || (res.locals as { user?: IUser }).user;
+    if (!authenticatedUser?._id) {
       return this.sendResponse(res, 401, 'User not authenticated');
     }
 
-    // Get the product to find the seller/owner
-    const product = await this.productService.getProductById(id);
-    if (!product || !product.owner) {
-      return this.sendResponse(res, 404, 'Product not found or has no owner');
-    }
+    const buyerId = authenticatedUser._id.toString();
+    const { sellerUserId } = await this.conversationService.resolveSellerContext(id);
+    const conversation = await this.conversationService.createOrGetConversation(id, buyerId);
 
-    // Handle both populated owner object (with id field) and direct ObjectId
-    const sellerId = product.owner.id || product.owner._id || product.owner;
-
-    try {
-      // Create initial product inquiry message (user shows interest)
-      const userName = authenticatedUser.firstName && authenticatedUser.lastName
+    const userName =
+      authenticatedUser.firstName && authenticatedUser.lastName
         ? `${authenticatedUser.firstName} ${authenticatedUser.lastName}`
-        : authenticatedUser.name || 'User';
+        : 'User';
 
-      await this.bidMessageService.createProductInquiryMessage(
-        authenticatedUser._id.toString(),
-        sellerId.toString(),
-        id,
-        `Hi! My name is ${userName}. I would love to make an offer for this item:`,
-        product
-      );
+    await this.messageService.createTypedMessage({
+      conversationId: toIdString(conversation),
+      senderId: buyerId,
+      recipientId: sellerUserId,
+      productId: id,
+      type: 'PRODUCT_INQUIRY',
+      text: `Hi! My name is ${userName}. I would love to make an offer for this item.`,
+    });
 
-      // Create automatic system response (seller responds)
-      await this.bidMessageService.createSystemMessage(
-        sellerId.toString(),
-        authenticatedUser._id.toString(),
-        id,
-        null, // No bid ID yet
-        'Hey there; please enter your bid amount'
-      );
+    await this.messageService.createTypedMessage({
+      conversationId: toIdString(conversation),
+      senderId: sellerUserId,
+      recipientId: buyerId,
+      productId: id,
+      type: 'SYSTEM',
+      text: 'Please enter your offer amount when you are ready.',
+    });
 
-      return this.sendResponse(res, 200, 'Conversation initiated successfully');
-    } catch (error) {
-      console.error('Error initiating product inquiry:', error);
-      return this.sendResponse(res, 500, 'Failed to initiate conversation');
-    }
+    return this.sendResponse(res, 200, 'Conversation initiated successfully (deprecated)', conversation);
   }
 
-  //get all bids for a product (sellers only)
   @httpGet('/:id/bids', TYPES.RequireSignIn, TYPES.RequireSeller)
   async getProductBids(@response() res: Response, @requestParam('id') id: string) {
-    const bids = await this.productBidService.getBidsForProduct(id);
-    return this.sendResponse(res, 200, 'Product bids retrieved successfully', bids);
+    res.setHeader('X-API-Deprecated', 'true');
+    const user = (res.locals as { user?: IUser }).user;
+    const sellerId = user?.seller?._id || user?.seller;
+    if (!sellerId) {
+      return this.sendResponse(res, 403, 'Only sellers can view product offers');
+    }
+    const result = await this.offerService.getSellerOffers(sellerId.toString(), 'PENDING', 1, 100);
+    const offers = result.offers.filter((o) => toIdString(o.product) === id);
+    return this.sendResponse(res, 200, 'Product bids retrieved successfully (deprecated)', offers);
   }
 
   // Admin helper endpoints

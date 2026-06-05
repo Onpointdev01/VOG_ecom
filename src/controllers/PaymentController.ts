@@ -14,29 +14,9 @@ export class PaymentController extends BaseController {
     super();
   }
 
-  @httpGet('/stats')
-  async getPaymentStats(req: Request, res: Response) {
-    try {
-      await this.paymentService.ensurePaymentsForCompletedOrders();
-
-      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
-      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
-
-      const stats = await this.paymentService.getPaymentStats(startDate, endDate);
-
-      return this.sendResponse(res, 200, 'Payment statistics retrieved successfully', stats);
-    } catch (error) {
-      console.error('Error fetching payment stats:', error);
-      return this.sendResponse(res, 500, 'Failed to fetch payment statistics');
-    }
-  }
-
   @httpGet('/')
   async getAllPayments(req: Request, res: Response) {
     try {
-      // Backfill Payment documents from orders that have paymentStatus COMPLETED but no Payment record
-      await this.paymentService.ensurePaymentsForCompletedOrders();
-
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 10;
       const search = req.query.search as string;
@@ -89,6 +69,49 @@ export class PaymentController extends BaseController {
     } catch (error) {
       console.error('Error fetching payments:', error);
       return this.sendResponse(res, 500, 'Failed to fetch payments');
+    }
+  }
+
+  @httpGet('/stats')
+  async getPaymentStats(req: Request, res: Response) {
+    try {
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+
+      const stats = await this.paymentService.getPaymentStats(startDate, endDate);
+      const overall = stats.overall || {
+        totalPayments: 0,
+        totalAmount: 0,
+        completedPayments: 0,
+        failedPayments: 0,
+        pendingPayments: 0,
+      };
+
+      return this.sendResponse(res, 200, 'Payment statistics retrieved successfully', {
+        totalPayments: overall.totalPayments,
+        totalAmount: overall.totalAmount,
+        completedPayments: overall.completedPayments,
+        failedPayments: overall.failedPayments,
+        pendingPayments: overall.pendingPayments,
+        byMethod: stats.byMethod || [],
+      });
+    } catch (error) {
+      console.error('Error fetching payment stats:', error);
+      return this.sendResponse(res, 500, 'Failed to fetch payment statistics');
+    }
+  }
+
+  @httpGet('/order/:orderId')
+  async getPaymentsByOrder(req: Request, res: Response) {
+    try {
+      const { orderId } = req.params;
+
+      const payments = await this.paymentService.getPaymentsByOrder(orderId);
+
+      return this.sendResponse(res, 200, 'Payments retrieved successfully', payments);
+    } catch (error) {
+      console.error('Error fetching payments by order:', error);
+      return this.sendResponse(res, 500, 'Failed to fetch payments for order');
     }
   }
 
@@ -151,17 +174,4 @@ export class PaymentController extends BaseController {
     }
   }
 
-  @httpGet('/order/:orderId')
-  async getPaymentsByOrder(req: Request, res: Response) {
-    try {
-      const { orderId } = req.params;
-      
-      const payments = await this.paymentService.getPaymentsByOrder(orderId);
-
-      return this.sendResponse(res, 200, 'Payments retrieved successfully', payments);
-    } catch (error) {
-      console.error('Error fetching payments by order:', error);
-      return this.sendResponse(res, 500, 'Failed to fetch payments for order');
-    }
-  }
 }

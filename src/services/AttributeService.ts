@@ -10,6 +10,7 @@ export interface CreateAttributeDTO {
   displayName: string;
   type: 'select' | 'color' | 'text';
   description?: string;
+  iconUrl?: string;
   isRequired?: boolean;
   displayOrder?: number;
 }
@@ -19,6 +20,7 @@ export interface UpdateAttributeDTO {
   displayName?: string;
   type?: 'select' | 'color' | 'text';
   description?: string;
+  iconUrl?: string;
   isRequired?: boolean;
   isActive?: boolean;
   displayOrder?: number;
@@ -53,15 +55,17 @@ export class AttributeService extends BaseService implements IAttributeService {
     });
 
     await attribute.save();
-    return attribute;
+    return attribute.toJSON() as IAttribute;
   }
 
   async getAllAttributes(): Promise<IAttribute[]> {
-    return await this.Attribute.find().sort({ displayOrder: 1, name: 1 });
+    const attributes = await this.Attribute.find().sort({ displayOrder: 1, name: 1 });
+    return attributes.map((a) => a.toJSON() as IAttribute);
   }
 
   async getActiveAttributes(): Promise<IAttribute[]> {
-    return await this.Attribute.find({ isActive: true }).sort({ displayOrder: 1, name: 1 });
+    const attributes = await this.Attribute.find({ isActive: true }).sort({ displayOrder: 1, name: 1 });
+    return attributes.map((a) => a.toJSON() as IAttribute);
   }
 
   async getAttributeById(id: string): Promise<IAttribute> {
@@ -71,7 +75,7 @@ export class AttributeService extends BaseService implements IAttributeService {
       throw new AppError('Attribute not found', 404);
     }
 
-    return attribute;
+    return attribute.toJSON() as IAttribute;
   }
 
   async getAttributeByName(name: string): Promise<IAttribute | null> {
@@ -102,7 +106,7 @@ export class AttributeService extends BaseService implements IAttributeService {
       throw new AppError('Attribute not found', 404);
     }
 
-    return attribute;
+    return attribute.toJSON() as IAttribute;
   }
 
   async deleteAttribute(id: string): Promise<void> {

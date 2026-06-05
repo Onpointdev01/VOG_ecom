@@ -11,6 +11,18 @@ import { IAuthService, IAdminService } from '../services';
 import { IUser, IAdmin } from '../models';
 import { env } from '../config';
 
+function extractBearerOrQueryToken(req: Request): string | null {
+  const authHeader = req.headers['authorization'] || '';
+  if (authHeader) {
+    return authHeader.replace(/^Bearer\s+/i, '');
+  }
+  const queryToken = req.query.token;
+  if (typeof queryToken === 'string' && queryToken.trim()) {
+    return queryToken.trim();
+  }
+  return null;
+}
+
 @injectable()
 export class RequireSignIn extends BaseMiddleware {
   constructor(@inject(TYPES.AuthService) private authService: IAuthService) {
@@ -22,34 +34,32 @@ export class RequireSignIn extends BaseMiddleware {
     next: NextFunction
   ): void {
     try {
-      const authHeader: string = req.headers['authorization'] || '';
-      if (!authHeader) {
+      const token = extractBearerOrQueryToken(req);
+      if (!token) {
         return next(new AppError('No token provided', 401));
       }
 
-      const token: string = authHeader.replace('Bearer ', '');
-      // console.log('token', token);
       //verify JWT
       jwt.verify(token, env.JWT_SECRET, async (err: any, decoded: any) => {
-        if (err) {
-          if (err instanceof TokenExpiredError) {
-            return next(new AppError('Token has expired. Please log in again.', 401));
-          }
-          return next(new AppError('Invalid token provided', 403));
-        }
-        // console.log(decoded);
-        const userId = decoded.id.toString();
-
-        if (!userId) return next(new AppError('Invalid token provided', 403));
-
         try {
-          //save user object in body if user isn't banned/deleted
+          if (err) {
+            if (err instanceof TokenExpiredError) {
+              return next(new AppError('Token has expired. Please log in again.', 401));
+            }
+            return next(new AppError('Invalid token provided', 403));
+          }
+          const userId = decoded.id.toString();
+
+          if (!userId) return next(new AppError('Invalid token provided', 403));
+
           const user = await this.authService.checkBannedOrDeleted(userId);
+
           req.user = user as IUser;
           res.locals.user = userId;
+
           next();
-        } catch (e) {
-          next(e);
+        } catch (authErr) {
+          next(authErr);
         }
       });
     } catch (err) {
@@ -104,94 +114,33 @@ export class RequireAdmin extends BaseMiddleware {
       
       // Verify JWT for admin
       jwt.verify(token, env.JWT_SECRET, async (err: any, decoded: any) => {
-        if (err) {
-          if (err instanceof TokenExpiredError) {
-            return next(new AppError('Token has expired. Please log in again.', 401));
+        try {
+          if (err) {
+            if (err instanceof TokenExpiredError) {
+              return next(new AppError('Token has expired. Please log in again.', 401));
+            }
+            return next(new AppError('Invalid token provided', 403));
           }
-          return next(new AppError('Invalid token provided', 403));
-        }
 
-        const adminId = decoded.id.toString();
-        const userType = decoded.userType; // Should be 'admin'
+          const adminId = decoded.id.toString();
+          const userType = decoded.userType; // Should be 'admin'
 
-        if (!adminId || userType !== 'admin') {
-          return next(new AppError('Admin access required', 403));
-        }
-
-        // Check if admin exists and is active
-        const admin = await this.adminService.checkAdminStatus(adminId);
-        if (!admin) {
-          return next(new AppError('Admin not found or inactive', 403));
-        }
-
-        req.admin = admin as IAdmin;
-        res.locals.admin = adminId;
-
-        next();
-      });
-    } catch (err) {
-      next(err);
-    }
-  }
-}
-
-@injectable()
-export class RequireAuth extends BaseMiddleware {
-  constructor(
-    @inject(TYPES.AuthService) private authService: IAuthService,
-    @inject(TYPES.AdminService) private adminService: IAdminService
-  ) {
-    super();
-  }
-
-  handler(
-    req: Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>,
-    res: Response<any, Record<string, any>>,
-    next: NextFunction
-  ): void {
-    try {
-      const authHeader: string = req.headers['authorization'] || '';
-      if (!authHeader) {
-        return next(new AppError('No token provided', 401));
-      }
-
-      const token: string = authHeader.replace('Bearer ', '');
-      
-      // Verify JWT token
-      jwt.verify(token, env.JWT_SECRET, async (err: any, decoded: any) => {
-        if (err) {
-          if (err instanceof TokenExpiredError) {
-            return next(new AppError('Token has expired. Please log in again.', 401));
+          if (!adminId || userType !== 'admin') {
+            return next(new AppError('Admin access required', 403));
           }
-          return next(new AppError('Invalid token provided', 403));
-        }
 
-        const id = decoded.id.toString();
-        const userType = decoded.userType;
-
-        if (!id) {
-          return next(new AppError('Invalid token provided', 403));
-        }
-
-        // Check if it's an admin token
-        if (userType === 'admin') {
-          const admin = await this.adminService.checkAdminStatus(id);
+          const admin = await this.adminService.checkAdminStatus(adminId);
           if (!admin) {
             return next(new AppError('Admin not found or inactive', 403));
           }
-          req.admin = admin as IAdmin;
-          res.locals.admin = id;
-          return next();
-        }
 
-        // Otherwise, it's a user token
-        const user = await this.authService.checkBannedOrDeleted(id);
-        if (!user) {
-          return next(new AppError('User not found or is banned', 403));
+          req.admin = admin as IAdmin;
+          res.locals.admin = adminId;
+
+          next();
+        } catch (authErr) {
+          next(authErr);
         }
-        req.user = user as IUser;
-        res.locals.user = id;
-        next();
       });
     } catch (err) {
       next(err);
@@ -215,29 +164,29 @@ export class OptionalAuth extends BaseMiddleware {
 
         // Verify JWT token
         jwt.verify(token, env.JWT_SECRET, async (err: any, decoded: any) => {
-          if (err) {
-            // For OptionalAuth, if token is invalid/expired, just ignore it and continue
-            // Don't return error - this allows public access even with invalid token
-            if (err instanceof TokenExpiredError) {
-              // Token expired - just continue without user context
-              return next();
-            }
-            // Invalid token format - just continue without user context
-            return next();
-          }
-
-          const userId = decoded.id.toString();
-
-          if (!userId) return next(new AppError('Invalid token provided', 403));
-
           try {
+            if (err) {
+              if (err instanceof TokenExpiredError) {
+                return next(new AppError('Token has expired. Please log in again.', 401));
+              }
+              return next(new AppError('Invalid token provided', 403));
+            }
+
+            const userId = decoded.id.toString();
+
+            if (!userId) return next(new AppError('Invalid token provided', 403));
+
             const user = await this.authService.checkBannedOrDeleted(userId);
+
+            if (!user) {
+              return next(new AppError('User not found or is banned', 403));
+            }
+
             req.user = user as IUser;
             res.locals.user = user as IUser;
             return next();
-          } catch (e) {
-            // OptionalAuth: user not found or banned – continue without attaching user
-            return next();
+          } catch (authErr) {
+            return next(authErr);
           }
         });
 

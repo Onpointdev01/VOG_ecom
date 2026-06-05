@@ -1,20 +1,40 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type NotificationChannel = 'websocket' | 'push' | 'email' | 'in-app';
+export type NotificationType =
+  | 'order'
+  | 'offer'
+  | 'bid'
+  | 'message'
+  | 'product'
+  | 'account'
+  | 'promotional'
+  | 'system';
+
+export type NotificationEntityType =
+  | 'order'
+  | 'offer'
+  | 'message'
+  | 'conversation'
+  | 'product'
+  | 'account';
+
+export type NotificationTarget = 'buyer' | 'seller' | 'both';
 
 export interface INotification extends Document {
-  user?: mongoose.Types.ObjectId; // Optional - for regular users
-  adminId?: mongoose.Types.ObjectId; // Optional - for admin users
-  type: 'order' | 'bid' | 'product' | 'account' | 'promotional' | 'admin_message';
+  user: mongoose.Types.ObjectId;
+  type: NotificationType;
+  target: NotificationTarget;
   title: string;
   message: string;
-  body?: string; // For backwards compatibility with push notifications
-  payload?: any; // JSON payload for structured data
-  data?: any; // Additional data (orderId, productId, etc.) - kept for backward compatibility
-  link?: string; // Deep link to navigate to
-  channel: NotificationChannel; // Channel through which notification was sent
+  body?: string;
+  actionUrl?: string;
+  link?: string;
+  entityType?: NotificationEntityType;
+  entityId?: string;
+  conversationId?: mongoose.Types.ObjectId | string;
+  dedupeKey?: string;
+  data?: Record<string, unknown>;
   isRead: boolean;
-  readAt?: Date; // When notification was read
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,20 +44,20 @@ const NotificationSchema: Schema = new Schema(
     user: {
       type: Schema.Types.ObjectId,
       ref: 'User',
-      required: false, // Made optional to support admin notifications
+      required: true,
       index: true,
     },
-    adminId: {
-      type: Schema.Types.ObjectId,
-      ref: 'Admin',
-      required: false, // For admin notifications
+    target: {
+      type: String,
+      enum: ['buyer', 'seller', 'both'],
+      default: 'buyer',
       index: true,
     },
     type: {
       type: String,
-      enum: ['order', 'bid', 'product', 'account', 'promotional', 'admin_message'],
+      enum: ['order', 'offer', 'bid', 'message', 'product', 'account', 'promotional', 'system'],
       required: true,
-      default: 'account',
+      default: 'system',
     },
     title: {
       type: String,
@@ -49,33 +69,37 @@ const NotificationSchema: Schema = new Schema(
       required: true,
     },
     body: {
-      type: String, // Alias for message for push notification compatibility
+      type: String,
+    },
+    actionUrl: {
+      type: String,
+    },
+    link: {
+      type: String,
+    },
+    entityType: {
+      type: String,
+      enum: ['order', 'offer', 'message', 'conversation', 'product', 'account'],
+    },
+    entityId: {
+      type: String,
+    },
+    conversationId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Conversation',
+    },
+    dedupeKey: {
+      type: String,
+      sparse: true,
     },
     data: {
       type: Schema.Types.Mixed,
       default: {},
     },
-    link: {
-      type: String, // Deep link or route path
-    },
-    payload: {
-      type: Schema.Types.Mixed,
-      default: {},
-    },
-    channel: {
-      type: String,
-      enum: ['websocket', 'push', 'email', 'in-app'],
-      default: 'in-app',
-      index: true,
-    },
     isRead: {
       type: Boolean,
       default: false,
       index: true,
-    },
-    readAt: {
-      type: Date,
-      default: null,
     },
   },
   {
@@ -83,17 +107,11 @@ const NotificationSchema: Schema = new Schema(
   }
 );
 
-// Indexes for efficient queries
 NotificationSchema.index({ user: 1, createdAt: -1 });
 NotificationSchema.index({ user: 1, isRead: 1 });
-NotificationSchema.index({ adminId: 1, createdAt: -1 });
-NotificationSchema.index({ adminId: 1, isRead: 1 });
-// Ensure either user or adminId is provided
-NotificationSchema.pre('validate', function(next) {
-  if (!this.user && !this.adminId) {
-    return next(new Error('Either user or adminId must be provided'));
-  }
-  next();
-});
+NotificationSchema.index(
+  { user: 1, dedupeKey: 1 },
+  { unique: true, partialFilterExpression: { dedupeKey: { $type: 'string' } } }
+);
 
 export default mongoose.model<INotification>('Notification', NotificationSchema);

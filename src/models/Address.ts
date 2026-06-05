@@ -7,7 +7,9 @@ export interface IAddress extends Document {
   fullName: string;
   phoneNumber: string;
   homeAddress: string;
-  state: string;
+  /** Quartier code used for shipping fee lookup */
+  neighborhood: string;
+  state?: string;
   city: string;
   postalCode: string;
   country: string;
@@ -36,9 +38,14 @@ const AddressSchema: Schema = new Schema<IAddress>(
       required: [true, 'Home address is required'],
       trim: true,
     },
+    neighborhood: {
+      type: String,
+      required: [true, 'Neighborhood is required'],
+      trim: true,
+      uppercase: true,
+    },
     state: {
       type: String,
-      required: [true, 'State is required'],
       trim: true,
     },
     city: {

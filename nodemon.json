@@ -1,5 +1,6 @@
 {
   "watch": ["src"],
   "ext": "ts,json",
-  "exec": "yarn run build && node dist/server.js"
+  "exec": "npm run build && node dist/server.js",
+  "signal": "SIGTERM"
 }

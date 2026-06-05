@@ -105,3 +105,6 @@ dist
 
 # macos directory shinanigans
 **/.DS_Store
+
+# secrets
+google-service-account.json

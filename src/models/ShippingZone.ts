@@ -4,26 +4,28 @@ import constants from '../utils/constants';
 const { SHIPPING_ZONE } = constants.mongooseModels;
 
 export interface IShippingZone extends Document {
-  province: string; // Province name (e.g., "Kinshasa", "Bas-Congo")
-  provinceCode: string; // Province code for matching with addresses
-  shippingFee: number; // Shipping cost in USD
-  isActive: boolean; // Enable/disable shipping to this province
-  estimatedDeliveryDays: number; // Estimated delivery time in days
+  /** Quartier display name */
+  name: string;
+  /** Unique lookup code (derived from name) */
+  code: string;
+  shippingFee: number;
+  isActive: boolean;
+  estimatedDeliveryDays: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
 const shippingZoneSchema: Schema<IShippingZone> = new Schema(
   {
-    province: {
+    name: {
       type: String,
-      required: [true, 'Province name is required'],
+      required: [true, 'Neighborhood name is required'],
       unique: true,
       trim: true,
     },
-    provinceCode: {
+    code: {
       type: String,
-      required: [true, 'Province code is required'],
+      required: [true, 'Neighborhood code is required'],
       unique: true,
       uppercase: true,
       trim: true,
@@ -50,11 +52,9 @@ const shippingZoneSchema: Schema<IShippingZone> = new Schema(
   }
 );
 
-// Index for fast lookups by province code
-shippingZoneSchema.index({ provinceCode: 1 });
+shippingZoneSchema.index({ code: 1 });
 shippingZoneSchema.index({ isActive: 1 });
 
-// Transform _id to id for API responses
 shippingZoneSchema.set('toJSON', {
   transform: (doc, ret) => {
     ret.id = ret._id.toString();

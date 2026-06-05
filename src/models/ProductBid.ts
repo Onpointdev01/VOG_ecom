@@ -10,7 +10,7 @@ export interface IBid extends Document {
   buyer: PopulatedDoc<IUser>;
   seller: PopulatedDoc<ISeller>;
   bidPrice: number;
-  status: 'PENDING' | 'open' | 'countered' | 'ACCEPTED' | 'REJECTED' | 'expired' | 'CANCELLED';
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
   expiresAt?: Date;
   cooldownUntil?: Date;
   isWithinPriceRange: boolean;
@@ -43,9 +43,8 @@ const bidSchema: Schema<IBid> = new Schema<IBid>(
     },
     status: {
       type: String,
-      enum: ['PENDING', 'open', 'countered', 'ACCEPTED', 'REJECTED', 'expired', 'CANCELLED'],
+      enum: ['PENDING', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CANCELLED'],
       default: 'PENDING',
-      index: true,
     },
     cooldownUntil: {
       type: Date,
@@ -71,8 +70,19 @@ const bidSchema: Schema<IBid> = new Schema<IBid>(
 
 // Middleware to handle bid restrictions
 bidSchema.pre('save', async function (next) {
-  // Removed: 24-hour restriction - users can now place unlimited bids
-  
+  // Check for existing bids within 24 hours
+  const existingBid = await this.model(BID).findOne({
+    buyer: this.buyer,
+    product: this.product,
+    createdAt: {
+      $gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    },
+  });
+
+  if (existingBid) {
+    return next(new Error('Only one bid per product within 24 hours is allowed'));
+  }
+
   //   // Validate price range
   //   const product = await this.model(PRODUCT).findById(this.product);
   //   if (!product) {
@@ -99,10 +109,14 @@ bidSchema.methods.isAllowedToBid = async function () {
     return false;
   }
 
-  // Removed: Check for existing bids - users can now place unlimited bids
-  // Users can have multiple pending/accepted bids on the same product
+  // Check existing bids
+  const existingBid = await this.model(BID).findOne({
+    buyer: this.buyer,
+    product: this.product,
+    status: { $in: ['PENDING', 'ACCEPTED'] },
+  });
 
-  return true;
+  return !existingBid;
 };
 
 // Transform _id to id for API responses

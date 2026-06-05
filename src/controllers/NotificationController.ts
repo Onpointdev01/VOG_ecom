@@ -3,99 +3,131 @@ import {
   controller,
   httpGet,
   httpPatch,
-  httpPut,
   httpDelete,
   requestParam,
   response,
   request,
-  queryParam,
 } from 'inversify-express-utils';
 import { Response, Request } from 'express';
 import { Model } from 'mongoose';
 
 import { BaseController } from './BaseController';
 import TYPES from '../di';
-import { IBidMessageService } from '../services';
-import { IUser, IAdmin, INotification } from '../models';
+import { IUser, INotification } from '../models';
+import { serializeNotifications } from '../utils/notificationSerializer';
+import { notificationBus } from '../utils/notificationBus';
+import { NotificationService } from '../services/NotificationService';
 
 @controller('/api/v1/notifications')
 export class NotificationController extends BaseController {
   constructor(
-    @inject(TYPES.BidMessageService) private bidMessageService: IBidMessageService,
-    @inject(TYPES.Notification) private Notification: Model<INotification>
+    @inject(TYPES.Notification) private Notification: Model<INotification>,
+    @inject(TYPES.NotificationService) private notificationService: NotificationService
   ) {
     super();
   }
 
-  /**
-   * Get all notifications for the authenticated user or admin
-   */
-  @httpGet('/', TYPES.RequireAuth)
-  async getNotifications(
-    @response() res: Response,
-    @request() req: Request
-  ) {
+  @httpGet('/', TYPES.RequireSignIn)
+  async getNotifications(@response() res: Response, @request() req: Request) {
     try {
-      // Check if it's an admin request
-      const admin = (req as any).admin as IAdmin;
-      if (admin) {
-        console.log(`📬 Fetching notifications for admin ${admin._id}`);
-        const notifications = await this.Notification.find({ adminId: admin._id })
-          .sort({ createdAt: -1 })
-          .limit(100)
-          .lean();
-        console.log(`✅ Found ${notifications.length} notifications for admin`);
-        return this.sendResponse(res, 200, 'Notifications retrieved successfully', notifications);
-      }
-
-      // Otherwise, it's a user request
       const user = req.user as IUser;
-      if (!user) {
-        return this.sendResponse(res, 401, 'Authentication required', null);
-      }
+      const targetParam = (req.query as Record<string, string>).target;
+      const targetFilter = targetParam === 'seller'
+        ? { $in: ['seller', 'both'] }
+        : { $in: ['buyer', 'both'] };
 
-      console.log(`📬 Fetching notifications for user ${user._id}`);
-      const notifications = await this.Notification.find({ user: user._id })
+      const notifications = await this.Notification.find({ user: user._id, target: targetFilter })
         .sort({ createdAt: -1 })
-        .limit(100) // Limit to last 100 notifications
+        .limit(100)
         .lean();
-      console.log(`✅ Found ${notifications.length} notifications for user`);
-      return this.sendResponse(res, 200, 'Notifications retrieved successfully', notifications);
+
+      return this.sendResponse(
+        res,
+        200,
+        'Notifications retrieved successfully',
+        serializeNotifications(notifications as INotification[])
+      );
     } catch (error) {
       console.error('Error fetching notifications:', error);
       return this.sendResponse(res, 500, 'Failed to fetch notifications', null);
     }
   }
 
+  @httpGet('/unread-count', TYPES.RequireSignIn)
+  async getUnreadCount(@response() res: Response, @request() req: Request) {
+    try {
+      const user = req.user as IUser;
+      const userId = (user._id as { toString(): string }).toString();
+      const targetParam = (req.query as Record<string, string>).target;
+      const count = await this.notificationService.getUnreadCount(userId, targetParam as 'buyer' | 'seller' | undefined);
+      return this.sendResponse(res, 200, 'Unread count retrieved', { count });
+    } catch (error) {
+      console.error('Error fetching unread count:', error);
+      return this.sendResponse(res, 500, 'Failed to fetch unread count', null);
+    }
+  }
+
+  @httpGet('/unread-summary', TYPES.RequireSignIn)
+  async getUnreadSummary(@response() res: Response, @request() req: Request) {
+    try {
+      const user = req.user as IUser;
+      const userId = (user._id as { toString(): string }).toString();
+      const targetParam = (req.query as Record<string, string>).target;
+      const summary = await this.notificationService.getSellerUnreadSummary(userId, targetParam as 'buyer' | 'seller' | undefined);
+      return this.sendResponse(res, 200, 'Unread summary retrieved', summary);
+    } catch (error) {
+      console.error('Error fetching unread summary:', error);
+      return this.sendResponse(res, 500, 'Failed to fetch unread summary', null);
+    }
+  }
+
   /**
-   * Mark a single notification as read
+   * Lightweight SSE stream — no Socket.IO. Client reconnects on disconnect.
    */
-  @httpPatch('/:id/read', TYPES.RequireAuth)
+  @httpGet('/stream', TYPES.RequireSignIn)
+  async streamNotifications(@response() res: Response, @request() req: Request) {
+    const user = req.user as IUser;
+    const userId = (user._id as { toString(): string }).toString();
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const send = (event: string, payload: unknown) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    send('connected', { userId });
+
+    const unsubscribe = notificationBus.onUser(userId, (notification) => {
+      send('notification', notification);
+    });
+
+    const heartbeat = setInterval(() => {
+      res.write(': heartbeat\n\n');
+    }, 30000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+      res.end();
+    });
+  }
+
+  @httpPatch('/:id/read', TYPES.RequireSignIn)
   async markAsRead(
     @response() res: Response,
     @request() req: Request,
     @requestParam('id') notificationId: string
   ) {
     try {
-      const admin = (req as any).admin as IAdmin;
       const user = req.user as IUser;
-
-      let notification;
-      if (admin) {
-        notification = await this.Notification.findOneAndUpdate(
-          { _id: notificationId, adminId: admin._id },
-          { isRead: true },
-          { new: true }
-        );
-      } else if (user) {
-        notification = await this.Notification.findOneAndUpdate(
-          { _id: notificationId, user: user._id },
-          { isRead: true },
-          { new: true }
-        );
-      } else {
-        return this.sendResponse(res, 401, 'Authentication required', null);
-      }
+      const notification = await this.Notification.findOneAndUpdate(
+        { _id: notificationId, user: user._id },
+        { isRead: true },
+        { new: true }
+      ).lean();
 
       if (!notification) {
         return this.sendResponse(res, 404, 'Notification not found', null);
@@ -108,32 +140,19 @@ export class NotificationController extends BaseController {
     }
   }
 
-  /**
-   * Mark all notifications as read for the user or admin
-   */
-  @httpPatch('/read-all', TYPES.RequireAuth)
-  async markAllAsRead(
-    @response() res: Response,
-    @request() req: Request
-  ) {
+  @httpPatch('/read-all', TYPES.RequireSignIn)
+  async markAllAsRead(@response() res: Response, @request() req: Request) {
     try {
-      const admin = (req as any).admin as IAdmin;
       const user = req.user as IUser;
-
-      if (admin) {
-        await this.Notification.updateMany(
-          { adminId: admin._id, isRead: false },
-          { isRead: true }
-        );
-      } else if (user) {
-        await this.Notification.updateMany(
-          { user: user._id, isRead: false },
-          { isRead: true }
-        );
-      } else {
-        return this.sendResponse(res, 401, 'Authentication required', null);
-      }
-
+      const targetParam = (req.query as Record<string, string>).target;
+      const targetFilter = targetParam === 'seller'
+        ? { $in: ['seller', 'both'] }
+        : targetParam === 'buyer'
+          ? { $in: ['buyer', 'both'] }
+          : undefined;
+      const query: Record<string, unknown> = { user: user._id, isRead: false };
+      if (targetFilter) query.target = targetFilter;
+      await this.Notification.updateMany(query, { isRead: true });
       return this.sendResponse(res, 200, 'All notifications marked as read', null);
     } catch (error) {
       console.error('Error marking all notifications as read:', error);
@@ -141,33 +160,18 @@ export class NotificationController extends BaseController {
     }
   }
 
-  /**
-   * Delete a single notification
-   */
-  @httpDelete('/:id', TYPES.RequireAuth)
+  @httpDelete('/:id', TYPES.RequireSignIn)
   async deleteNotification(
     @response() res: Response,
     @request() req: Request,
     @requestParam('id') notificationId: string
   ) {
     try {
-      const admin = (req as any).admin as IAdmin;
       const user = req.user as IUser;
-
-      let notification;
-      if (admin) {
-        notification = await this.Notification.findOneAndDelete({
-          _id: notificationId,
-          adminId: admin._id,
-        });
-      } else if (user) {
-        notification = await this.Notification.findOneAndDelete({
-          _id: notificationId,
-          user: user._id,
-        });
-      } else {
-        return this.sendResponse(res, 401, 'Authentication required', null);
-      }
+      const notification = await this.Notification.findOneAndDelete({
+        _id: notificationId,
+        user: user._id,
+      });
 
       if (!notification) {
         return this.sendResponse(res, 404, 'Notification not found', null);
@@ -180,55 +184,23 @@ export class NotificationController extends BaseController {
     }
   }
 
-  /**
-   * Clear all notifications for the user
-   */
   @httpDelete('/', TYPES.RequireSignIn)
-  async clearAllNotifications(
-    @response() res: Response,
-    @request() req: Request
-  ) {
+  async clearAllNotifications(@response() res: Response, @request() req: Request) {
     try {
       const user = req.user as IUser;
-
-      await this.Notification.deleteMany({ user: user._id });
-
+      const targetParam = (req.query as Record<string, string>).target;
+      const targetFilter = targetParam === 'seller'
+        ? { $in: ['seller', 'both'] }
+        : targetParam === 'buyer'
+          ? { $in: ['buyer', 'both'] }
+          : undefined;
+      const query: Record<string, unknown> = { user: user._id };
+      if (targetFilter) query.target = targetFilter;
+      await this.Notification.deleteMany(query);
       return this.sendResponse(res, 200, 'All notifications cleared', null);
     } catch (error) {
       console.error('Error clearing notifications:', error);
       return this.sendResponse(res, 500, 'Failed to clear notifications', null);
     }
-  }
-
-  @httpGet('/bid-messages', TYPES.RequireSignIn)
-  async getBidMessages(
-    @response() res: Response,
-    @request() req: Request,
-    @queryParam('productId') productId?: string
-  ) {
-    const user = req.user as IUser;
-    
-    const messages = await this.bidMessageService.getBidMessages(
-      (user._id as string).toString(),
-      productId
-    );
-
-    return this.sendResponse(res, 200, 'Bid messages retrieved successfully', messages);
-  }
-
-  @httpPut('/bid-messages/:messageId/read', TYPES.RequireSignIn)
-  async markMessageAsRead(
-    @response() res: Response,
-    @request() req: Request,
-    @requestParam('messageId') messageId: string
-  ) {
-    const user = req.user as IUser;
-    
-    const message = await this.bidMessageService.markMessageAsRead(
-      messageId,
-      (user._id as string).toString()
-    );
-
-    return this.sendResponse(res, 200, 'Message marked as read', message);
   }
 }

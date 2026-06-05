@@ -13,16 +13,19 @@ const constants = {
     PAYMENT_OPTION: 'PaymentOption',
     BID: 'Bid',
     BIDMESSAGES: 'BidMessages',
+    CONVERSATION: 'Conversation',
+    CONVERSATION_PRODUCT: 'ConversationProduct',
+    MESSAGE: 'Message',
+    OFFER: 'Offer',
     ORDER: 'Order',
     PAYMENT: 'Payment',
     USER_VIEW: 'UserView',
     SHIPPING_ZONE: 'ShippingZone',
     ATTRIBUTE: 'Attribute',
     ATTRIBUTE_VALUE: 'AttributeValue',
-    TOKEN_BLACKLIST: 'TokenBlacklist',
-    PAYOUT: 'Payout',
-    AUDIT_LOG: 'AuditLog',
-    BID_OFFER: 'BidOffer',
+    MARKETING_CAMPAIGN: 'MarketingCampaign',
+    ADMIN_EMAIL_BROADCAST: 'AdminEmailBroadcast',
   },
 };
+
 export default constants;

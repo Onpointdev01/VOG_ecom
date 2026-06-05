@@ -4,17 +4,19 @@ import { IProduct } from './Product';
 import constants from '../utils/constants';
 import { IUser } from './User';
 
-const { CART, PRODUCT, USER } = constants.mongooseModels;
+const { CART, PRODUCT, USER, PRODUCT_VARIANT } = constants.mongooseModels;
 
 export interface ICartItem {
   _id: string;
   product: Schema.Types.ObjectId | IProduct;
   quantity: number;
+  variantId?: string;
   sku?: string; // SKU for variable products (more reliable than size/color)
   size?: string; // Optional for simple products or display purposes
   color?: string; // Optional for simple products or display purposes
   price: number;
-  bidId?: Schema.Types.ObjectId; // Optional bid reference for bid-based purchases
+  bidId?: Schema.Types.ObjectId; // @deprecated — use offerId
+  offerId?: Schema.Types.ObjectId;
 }
 
 export interface ICart extends Document {
@@ -34,6 +36,11 @@ const cartItemSchema: Schema<ICartItem> = new Schema({
     type: Number,
     required: true,
     min: 1,
+  },
+  variantId: {
+    type: Schema.Types.ObjectId,
+    ref: PRODUCT_VARIANT,
+    required: false,
   },
   sku: {
     type: String,
@@ -55,6 +62,11 @@ const cartItemSchema: Schema<ICartItem> = new Schema({
   bidId: {
     type: Schema.Types.ObjectId,
     ref: 'Bid',
+    required: false,
+  },
+  offerId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Offer',
     required: false,
   },
 });

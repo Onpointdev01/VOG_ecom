@@ -7,11 +7,10 @@ import {
   httpDelete,
   requestBody,
   requestParam,
-  request,
   queryParam,
   response,
 } from 'inversify-express-utils';
-import { Response, Request } from 'express';
+import { Response } from 'express';
 import TYPES from '../di';
 import { OrderService, CreateOrderRequest } from '../services/OrderService';
 import { BaseController } from './BaseController';
@@ -22,6 +21,7 @@ export interface CreateOrderDTO {
   shippingAddressId: string;
   selectedItems?: string[];
   notes?: string;
+  couponCode?: string;
 }
 
 @controller('/api/v1/orders')
@@ -32,50 +32,18 @@ export class OrderController extends BaseController {
 
   @httpPost('/', TYPES.RequireSignIn)
   public async createOrder(@response() res: Response, @requestBody() payload: CreateOrderDTO) {
-    try {
-      const userId = res.locals.user;
-      
-      if (!userId) {
-        throw new AppError('User ID is missing. Please log in again.', 401);
-      }
+    const userId = res.locals.user;
+    const orderData: CreateOrderRequest = {
+      userId,
+      paymentMethod: payload.paymentMethod as any,
+      shippingAddressId: payload.shippingAddressId,
+      selectedItems: payload.selectedItems,
+      notes: payload.notes,
+      couponCode: payload.couponCode,
+    };
 
-      if (!payload.paymentMethod) {
-        throw new AppError('Payment method is required', 400);
-      }
-
-      if (!payload.shippingAddressId) {
-        throw new AppError('Shipping address is required', 400);
-      }
-
-      const orderData: CreateOrderRequest = {
-        userId,
-        paymentMethod: payload.paymentMethod as any,
-        shippingAddressId: payload.shippingAddressId,
-        selectedItems: payload.selectedItems,
-        notes: payload.notes,
-      };
-
-      const order = await this.orderService.createOrder(orderData);
-      return this.sendResponse(res, 201, 'Order created successfully', order);
-    } catch (error: any) {
-      console.error('Error in createOrder controller:', error);
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name,
-      });
-      
-      // Re-throw AppError as-is (it will be handled by error middleware)
-      if (error instanceof AppError) {
-        throw error;
-      }
-      
-      // Wrap unexpected errors
-      throw new AppError(
-        error.message || 'Failed to create order. Please try again.',
-        error.statusCode || 500
-      );
-    }
+    const order = await this.orderService.createOrder(orderData);
+    return this.sendResponse(res, 201, 'Order created successfully', order);
   }
 
   @httpGet('/', TYPES.RequireSignIn)
@@ -85,33 +53,16 @@ export class OrderController extends BaseController {
     @queryParam('status') status?: string,
     @queryParam('page') page?: string
   ) {
-    try {
-      const userId = res.locals.user;
-      
-      const options = {
-        limit: limit ? parseInt(limit, 10) : undefined,
-        status: status,
-        page: page ? parseInt(page, 10) : 1
-      };
-      
-      console.log('Getting user orders for userId:', userId, 'with options:', options);
-      
-      const orders = await this.orderService.getUserOrders(userId, options);
-      
-      console.log('Successfully retrieved orders count:', orders?.length || 0);
-      
-      return this.sendResponse(res, 200, 'Orders retrieved successfully', orders);
-    } catch (error) {
-      console.error('Error in getUserOrders controller:', error);
-      throw error; // Re-throw to let error handler handle it
-    }
-  }
-
-  @httpPost('/:orderId/review-complete', TYPES.RequireSignIn)
-  public async markOrderReviewComplete(@response() res: Response, @requestParam('orderId') orderId: string) {
     const userId = res.locals.user;
-    const order = await this.orderService.markBuyerReviewCompleted(orderId, userId);
-    return this.sendResponse(res, 200, 'Order review marked complete', order);
+    
+    const options = {
+      limit: limit ? parseInt(limit, 10) : undefined,
+      status: status,
+      page: page ? parseInt(page, 10) : 1
+    };
+    
+    const orders = await this.orderService.getUserOrders(userId, options);
+    return this.sendResponse(res, 200, 'Orders retrieved successfully', orders);
   }
 
   @httpGet('/:orderId', TYPES.RequireSignIn)
@@ -129,82 +80,36 @@ export class OrderController extends BaseController {
   }
 
   @httpPut('/:orderId/status', TYPES.RequireSignIn, TYPES.RequireAdmin)
-  public async updateOrderStatus(
-    @response() res: Response, 
-    @request() req: Request,
-    @requestParam('orderId') orderId: string, 
-    @requestBody() payload: { orderStatus: string }
-  ) {
+  public async updateOrderStatus(@response() res: Response, @requestParam('orderId') orderId: string, @requestBody() payload: { orderStatus: string }) {
     if (!payload.orderStatus) {
       throw new AppError('Order status is required', 400);
     }
     
-    const admin = (req as any).admin;
-    const order = await this.orderService.updateOrderStatus(
-      orderId, 
-      payload.orderStatus,
-      { adminId: admin?._id?.toString() || admin?.id }
-    );
+    const order = await this.orderService.updateOrderStatus(orderId, payload.orderStatus);
     return this.sendResponse(res, 200, 'Order status updated successfully', order);
   }
 
   @httpPut('/:orderId/confirm', TYPES.RequireSignIn, TYPES.RequireAdmin)
-  public async confirmOrder(
-    @response() res: Response, 
-    @request() req: Request,
-    @requestParam('orderId') orderId: string
-  ) {
-    const admin = (req as any).admin;
-    const order = await this.orderService.updateOrderStatus(
-      orderId, 
-      'CONFIRMED',
-      { adminId: admin?._id?.toString() || admin?.id }
-    );
+  public async confirmOrder(@response() res: Response, @requestParam('orderId') orderId: string) {
+    const order = await this.orderService.updateOrderStatus(orderId, 'CONFIRMED');
     return this.sendResponse(res, 200, 'Order confirmed successfully', order);
   }
 
   @httpPut('/:orderId/process', TYPES.RequireSignIn, TYPES.RequireAdmin)
-  public async processOrder(
-    @response() res: Response, 
-    @request() req: Request,
-    @requestParam('orderId') orderId: string
-  ) {
-    const admin = (req as any).admin;
-    const order = await this.orderService.updateOrderStatus(
-      orderId, 
-      'PROCESSING',
-      { adminId: admin?._id?.toString() || admin?.id }
-    );
+  public async processOrder(@response() res: Response, @requestParam('orderId') orderId: string) {
+    const order = await this.orderService.updateOrderStatus(orderId, 'PROCESSING');
     return this.sendResponse(res, 200, 'Order processing started', order);
   }
 
   @httpPut('/:orderId/ship', TYPES.RequireSignIn, TYPES.RequireAdmin)
-  public async shipOrder(
-    @response() res: Response, 
-    @request() req: Request,
-    @requestParam('orderId') orderId: string, 
-    @requestBody() payload: { trackingNumber?: string }
-  ) {
-    const admin = (req as any).admin;
-    const order = await this.orderService.shipOrder(
-      orderId, 
-      payload.trackingNumber,
-      { adminId: admin?._id?.toString() || admin?.id }
-    );
+  public async shipOrder(@response() res: Response, @requestParam('orderId') orderId: string, @requestBody() payload: { trackingNumber?: string }) {
+    const order = await this.orderService.shipOrder(orderId, payload.trackingNumber);
     return this.sendResponse(res, 200, 'Order shipped successfully', order);
   }
 
   @httpPut('/:orderId/deliver', TYPES.RequireSignIn, TYPES.RequireAdmin)
-  public async deliverOrder(
-    @response() res: Response, 
-    @request() req: Request,
-    @requestParam('orderId') orderId: string
-  ) {
-    const admin = (req as any).admin;
-    const order = await this.orderService.deliverOrder(
-      orderId,
-      { adminId: admin?._id?.toString() || admin?.id }
-    );
+  public async deliverOrder(@response() res: Response, @requestParam('orderId') orderId: string) {
+    const order = await this.orderService.deliverOrder(orderId);
     return this.sendResponse(res, 200, 'Order delivered successfully', order);
   }
 
@@ -218,18 +123,25 @@ export class OrderController extends BaseController {
     return this.sendResponse(res, 200, 'Payment status updated successfully', order);
   }
 
+  @httpPut('/:orderId/cancel', TYPES.RequireSignIn)
+  public async cancelOrderByBuyer(
+    @response() res: Response,
+    @requestParam('orderId') orderId: string,
+    @requestBody() payload: { reason?: string } = {}
+  ) {
+    const userId = res.locals.user;
+    const cancelledOrder = await this.orderService.cancelOrderByBuyer(
+      orderId,
+      userId,
+      payload?.reason
+    );
+    return this.sendResponse(res, 200, 'Order cancelled successfully', cancelledOrder);
+  }
+
   @httpDelete('/:orderId', TYPES.RequireSignIn)
   public async cancelOrder(@response() res: Response, @requestParam('orderId') orderId: string) {
     const userId = res.locals.user;
-    
-    const order = await this.orderService.getOrderById(orderId);
-    
-    // Check if user owns the order
-    if (order.user.toString() !== userId) {
-      throw new AppError('Access denied', 403);
-    }
-    
-    const cancelledOrder = await this.orderService.cancelOrder(orderId);
+    const cancelledOrder = await this.orderService.cancelOrderByBuyer(orderId, userId);
     return this.sendResponse(res, 200, 'Order cancelled successfully', cancelledOrder);
   }
 }

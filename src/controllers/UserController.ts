@@ -22,7 +22,6 @@ import { IUser } from '../models/User';
 import { addressDTO } from '../utils/dtos';
 import { mapUserProfile } from '../utils/helpers';
 import upload from '../utils/aws';
-import AppError from '../utils/errors/AppError';
 
 @controller('/api/v1/user')
 export class UserController extends BaseController {
@@ -259,54 +258,19 @@ export class UserController extends BaseController {
     try {
       const address = await this.addressService.findAddressesByUser(userID);
       return this.sendResponse(res, 200, 'Address fetched successfully', address);
-    } catch (error: any) {
-      console.error('Error fetching address:', error);
-      // Return empty array if no addresses found, not 404
-      if (error?.message?.includes('not found') || !error) {
-        return this.sendResponse(res, 200, 'No addresses found', []);
-      }
-      return this.sendResponse(res, 500, error?.message || 'Unable to fetch address');
+    } catch {
+      return this.sendResponse(res, 404, 'Unable to fetch address');
     }
   }
 
   @httpPost('/address', TYPES.RequireSignIn)
   public async addAddress(@requestBody() payload: addressDTO, @response() res: Response) {
-    console.log('[UserController] addAddress called with payload:', payload);
-    console.log('[UserController] res.locals.user:', res.locals.user);
-    
-    if (!res.locals.user) {
-      console.error('[UserController] No user ID in res.locals.user');
-      return this.sendResponse(res, 401, 'User not authenticated');
-    }
-    
     payload.user = res.locals.user;
-    
     try {
-      console.log('[UserController] Calling addressService.addAddress with:', payload);
       const newAddress = await this.addressService.addAddress(payload);
-      console.log('[UserController] Address created successfully:', newAddress);
       return this.sendResponse(res, 201, 'Address added successfully', newAddress);
-    } catch (error: any) {
-      console.error('[UserController] Error adding address:', error);
-      console.error('[UserController] Error stack:', error?.stack);
-      
-      // Handle AppError (from service layer)
-      if (error instanceof AppError) {
-        return this.sendResponse(res, error.statusCode || 500, error.message || 'Unable to add address');
-      }
-      
-      // Handle validation errors
-      if (error?.message?.includes('validation') || error?.message?.includes('required')) {
-        return this.sendResponse(res, 400, error.message || 'Invalid address data');
-      }
-      
-      // Handle not found errors
-      if (error?.message?.includes('not found')) {
-        return this.sendResponse(res, 404, error.message || 'Unable to add address');
-      }
-      
-      // Default to 500 for unexpected errors
-      return this.sendResponse(res, 500, error?.message || 'Unable to add address');
+    } catch {
+      return this.sendResponse(res, 404, 'Unable to add address');
     }
   }
 

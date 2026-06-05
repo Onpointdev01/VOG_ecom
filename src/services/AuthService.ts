@@ -4,47 +4,32 @@ import crypto from 'crypto';
 
 import { Model } from 'mongoose';
 import { TYPES } from '../di';
-import { IUser, ITokenBlacklist } from '../models';
+import { IUser } from '../models';
 import { EmailCheckResult, SignUpSellerDTO, SignUpUserDTO } from '../utils/dtos';
 import AppError from '../utils/errors/AppError';
 import { generateAccessToken, generateCode, generateRefreshToken, decodeToken } from '../utils/helpers';
 import { sendEmail, renderTemplate } from '../utils/helpers/sendMail';
 import validator from 'validator';
 import { OAuth2Client } from 'google-auth-library';
+import { getFirebaseAdminAuth } from '../utils/firebaseAdmin';
 import { BaseService } from './BaseService';
 import { ISeller } from '../models/Seller';
-import { getFirebaseAdminAuth } from '../utils/firebaseAdmin';
-
-/** Result of signup: user fields plus email delivery status (not stored on IUser) */
-export interface SignUpUserResult {
-  id: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  emailSent: boolean;
-  emailError?: string | null;
-}
-
 export interface IAuthService {
-  signupUser(payload: SignUpUserDTO): Promise<SignUpUserResult>;
+  signupUser(payload: SignUpUserDTO): Promise<Partial<IUser>>;
   signupSeller(payload: SignUpSellerDTO): Promise<Partial<ISeller>>;
-  login(email: string, password: string, type?: 'user' | 'seller' | 'admin'): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
+  login(email: string, password: string): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
+  firebaseSocialLogin(firebaseIdToken: string, providerHint?: 'google' | 'apple'): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
   socialLogin(
     idToken: string,
     provider: string
   ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
-  firebaseSocialLogin(
-    firebaseIdToken: string,
-    providerHint?: 'google' | 'apple'
-  ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
   forgotPassword(email: string): Promise<void>;
-  resetPassword(token: string, password: string): Promise<void>;
+  resetPassword(email: string, code: string, password: string): Promise<void>;
   verifyEmail(code: string, email: string): Promise<string>;
   resendVerification(email: string): Promise<void>;
   checkEmail(email: string): Promise<EmailCheckResult>;
   checkBannedOrDeleted(userId: string): Promise<Partial<IUser>>;
   refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string }>;
-  logout(userId: string, refreshToken: string): Promise<void>;
 }
 
 @injectable()
@@ -52,8 +37,7 @@ export class AuthService extends BaseService implements IAuthService {
   private oAuth2Client: OAuth2Client;
   constructor(
     @inject(TYPES.User) private User: Model<IUser>,
-    @inject(TYPES.Seller) private Seller: Model<ISeller>,
-    @inject(TYPES.TokenBlacklist) private TokenBlacklist: Model<ITokenBlacklist>
+    @inject(TYPES.Seller) private Seller: Model<ISeller>
   ) {
     super();
     this.oAuth2Client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
@@ -72,227 +56,90 @@ export class AuthService extends BaseService implements IAuthService {
     return user;
   }
 
-  async signupUser(payload: SignUpUserDTO): Promise<SignUpUserResult> {
-    // Handle both formats: {firstName, lastName} or {name}
-    let { email, firstName, lastName, nationality, phoneNumber, currentLocation, role } = payload;
+  async signupUser(payload: SignUpUserDTO): Promise<Partial<IUser>> {
+    const { email, firstName, lastName, nationality, phoneNumber, currentLocation } = payload;
     let { password } = payload;
-    
-    console.log(`🔍 Signup request - Role received: ${role || 'undefined (will default to user)'}`);
-    
-    // If 'name' is provided instead of firstName/lastName, split it
-    if ((payload as any).name && !firstName) {
-      const nameParts = (payload as any).name.trim().split(/\s+/);
-      firstName = nameParts[0] || '';
-      lastName = nameParts.slice(1).join(' ') || nameParts[0] || ''; // Use first name as last name if only one word
-    }
-    
-    // Validate required fields before processing
-    if (!firstName || !firstName.trim()) {
-      throw new AppError('First name is required', 400);
-    }
-    if (!lastName || !lastName.trim()) {
-      throw new AppError('Last name is required', 400);
-    }
-    if (!email || !email.trim()) {
-      throw new AppError('Email is required', 400);
-    }
-    if (!password || !password.trim()) {
-      throw new AppError('Password is required', 400);
-    }
-    
-    // Prevent admin self-registration (role is typed as 'user' | 'seller' | undefined, but check for safety)
-    if (role && role !== 'user' && role !== 'seller') {
-      throw new AppError('Admin accounts cannot be created through public signup', 403);
-    }
-
-    // Normalize email (lowercase and trim)
-    const normalizedEmail = email.trim().toLowerCase();
-    
-    // Check if user exists with this email (case-insensitive)
-    const prevUser = await this.User.findOne({ 
-      email: { $regex: new RegExp(`^${normalizedEmail}$`, 'i') } 
-    });
-    if (prevUser) {
-      throw new AppError(`Email ${normalizedEmail} is already registered. Please use a different email or log in.`, 400);
-    }
+    //check if user exists
+    const prevUser = await this.User.findOne({ email });
+    if (prevUser) throw new AppError(`Email ${email} already registered`, 400);
 
     //hash password
     password = await bcrypt.hash(password, 10);
-    
-    // Generate verification code
-    const verifyCode = generateCode(6);
-    const hashedCode = crypto.createHash('md5').update(verifyCode).digest('hex');
-    
-    try {
-      const newUser = await this.User.create({
-        email: normalizedEmail, // Use normalized email (lowercase, trimmed)
-        password,
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        nationality: nationality?.trim(),
-        phoneNumber: phoneNumber?.trim(),
-        currentLocation: currentLocation?.trim(),
-        role: role || 'user',
-        verified: false, // Require email verification
-        verifyCode: hashedCode,
-        verifyCodeExpires: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-      });
+    const newUser = await this.User.create({
+      email,
+      password,
+      firstName,
+      lastName,
+      nationality,
+      phoneNumber,
+      currentLocation,
+    });
 
-      // Send verification email with role-specific URL
-      const userRole = role || 'user';
-      console.log(`📧 Preparing to send verification email for user with role: ${userRole}`);
-      let emailSent = false;
-      let emailError: any = null;
-      try {
-        await this.sendVerificationEmail(normalizedEmail, firstName, verifyCode, userRole);
-        console.log(`✅ Verification email sent successfully to: ${normalizedEmail}`);
-        emailSent = true;
-      } catch (err: any) {
-        emailError = err;
-        console.error('❌ Failed to send verification email during signup:', err);
-        console.error('Error details:', {
-          email: normalizedEmail,
-          message: err?.message,
-          response: err?.response?.data || err?.response,
-        });
-        // Don't fail signup if email fails - user can resend later
-      }
+    //TODO: generate and send verification email
 
-      // Return user data with email status
-      return {
-        id: String(newUser._id),
-        email: normalizedEmail,
-        firstName,
-        lastName,
-        emailSent,
-        emailError: emailSent ? null : (emailError?.message ?? 'Email service unavailable')
-      };
-    } catch (error: any) {
-      // Handle MongoDB validation errors
-      if (error.name === 'ValidationError') {
-        const validationErrors = Object.keys(error.errors || {}).map(key => {
-          const err = error.errors[key];
-          return `${key}: ${err.message}`;
-        }).join(', ');
-        console.error('User validation errors:', validationErrors);
-        throw new AppError(`Validation failed: ${validationErrors}`, 400);
-      }
-      
-      // Handle duplicate key errors (e.g., email already exists)
-      if (error.name === 'MongoServerError' && error.code === 11000) {
-        const field = Object.keys(error.keyPattern || {})[0] || 'field';
-        throw new AppError(`${field} already exists`, 400);
-      }
-      
-      // Re-throw AppError as-is
-      if (error instanceof AppError) {
-        throw error;
-      }
-      
-      // Log and throw generic error for unexpected errors
-      console.error('Unexpected error during user signup:', error);
-      throw new AppError('Failed to create user account. Please try again.', 500);
-    }
+    return { id: newUser._id, email, firstName, lastName };
   }
 
   //signup as seller add more validation and the likes
   async signupSeller(payload: SignUpSellerDTO): Promise<Partial<ISeller>> {
-    const { name, type, logo, official, user } = payload;
-
-    console.log('signupSeller called with payload:', { name, type, logo, official, user });
-
-    if (!user || !user.trim()) {
-      throw new AppError('User ID is required', 400);
-    }
-    if (!name || !name.trim()) {
-      throw new AppError('Seller name is required', 400);
-    }
-    if (!type || (type !== 'individual' && type !== 'enterprise')) {
-      throw new AppError('Seller type must be either "individual" or "enterprise"', 400);
+    const { name, logo, official, user } = payload;
+    const shopName = String(name || '').trim();
+    if (!shopName) {
+      throw new AppError('Shop name is required', 400);
     }
 
-    // Validate MongoDB ObjectId format
-    const mongoose = require('mongoose');
-    if (!mongoose.Types.ObjectId.isValid(user)) {
-      console.error('Invalid user ID format:', user);
-      throw new AppError(`Invalid user ID format: ${user}`, 400);
-    }
+    const sellerType =
+      String(payload.type || '').toLowerCase() === 'company' ||
+      String(payload.type || '').toLowerCase() === 'enterprise'
+        ? 'company'
+        : 'individual';
 
-    console.log('Looking for user with ID:', user);
-
-    // Find user and verify they exist
     const prevUser = await this.User.findById(user);
-    if (!prevUser) {
-      console.error('User not found with ID:', user);
-      throw new AppError(`User not found with ID: ${user}`, 404);
-    }
-    
-    console.log('User found:', prevUser.email, 'Role:', prevUser.role);
+    if (!prevUser) throw new AppError(`User not found`, 404);
 
-    // Check if user is already a seller
     const prevSeller = await this.Seller.findOne({ user });
     if (prevSeller) {
-      throw new AppError(`User with email ${prevUser.email} is already registered as a seller`, 400);
+      prevSeller.name = shopName;
+      prevSeller.type = sellerType;
+      prevSeller.logo = logo ?? prevSeller.logo ?? '';
+      prevSeller.official = official ?? prevSeller.official ?? false;
+      await prevSeller.save();
+
+      await this.User.findByIdAndUpdate(user, {
+        seller: prevSeller._id,
+        role: 'seller',
+      });
+
+      return {
+        id: prevSeller._id,
+        name: prevSeller.name,
+        type: prevSeller.type,
+        logo: prevSeller.logo,
+        official: prevSeller.official,
+      };
     }
 
-    try {
-      const newSeller = await this.Seller.create({
-        user,
-        name: name.trim(),
-        type,
-        logo: logo?.trim() || '',
-        official: official || false,
-      });
+    const newSeller = await this.Seller.create({
+      user,
+      name: shopName,
+      type: sellerType,
+      logo: logo ?? '',
+      official: official ?? false,
+    });
 
-      // Update the user's seller field and role
-      await this.User.findByIdAndUpdate(user, { 
-        seller: newSeller._id,
-        role: 'seller' // Update user role to seller
-      });
+    await this.User.findByIdAndUpdate(user, {
+      seller: newSeller._id,
+      role: 'seller',
+    });
 
-      return { id: newSeller._id, name, type, logo, official };
-    } catch (error: any) {
-      // Handle duplicate key errors
-      if (error.name === 'MongoServerError' && error.code === 11000) {
-        const field = Object.keys(error.keyPattern || {})[0] || 'field';
-        throw new AppError(`Seller with this ${field} already exists`, 400);
-      }
-      
-      // Re-throw AppError as-is
-      if (error instanceof AppError) {
-        throw error;
-      }
-      
-      console.error('Error creating seller:', error);
-      console.error('Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-        code: error.code,
-        keyPattern: error.keyPattern,
-        keyValue: error.keyValue,
-        errors: error.errors
-      });
-      
-      // Handle validation errors
-      if (error.name === 'ValidationError') {
-        const validationErrors = Object.values(error.errors || {}).map((err: any) => err.message).join(', ');
-        throw new AppError(`Validation error: ${validationErrors}`, 400);
-      }
-      
-      throw new AppError(`Failed to create boutique: ${error.message || 'Please try again.'}`, 500);
-    }
+    return { id: newSeller._id, name: shopName, type: sellerType, logo, official };
   }
 
   login = async (
     email: string,
-    password: string,
-    type?: 'user' | 'seller' | 'admin'
+    password: string
   ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }> => {
-    // Normalize email (lowercase and trim)
-    const normalizedEmail = email.trim().toLowerCase();
-    
-    const user: IUser | null = await this.User.findOne({ email: normalizedEmail }, '+password').populate('seller');
+    const user: IUser | null = await this.User.findOne({ email }, '+password');
     if (!user) {
       throw new AppError('Invalid email or password', 400);
     }
@@ -302,59 +149,12 @@ export class AuthService extends BaseService implements IAuthService {
       throw new AppError('Invalid email or password', 400);
     }
 
-    // Type-based access control
-    if (type === 'seller') {
-      // For seller portal login, user must have a seller profile
-      if (!user.seller) {
-        throw new AppError('No seller account found. Please create a seller account first.', 403);
-      }
-    } else if (type === 'admin') {
-      // Admin login should use /admin/signin endpoint
-      throw new AppError('Please use the admin login portal.', 403);
-    }
+    const token = generateAccessToken(user._id as string);
+    const refreshToken = generateRefreshToken(user._id as string);
 
-    // Check if email is verified - if not, send verification email and throw error
-    if (!user.verified) {
-      // Generate new verification code
-      const verifyCode = generateCode(6);
-      const hashedCode = crypto.createHash('md5').update(verifyCode).digest('hex');
-      
-      // Update user with new verification code
-      user.verifyCode = hashedCode;
-      user.verifyCodeExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-      await user.save();
-      
-      // Send verification email with user role
-      const userRole = user.role || 'user';
-      console.log(`📧 Preparing to send verification email during login for user with role: ${userRole}`);
-      try {
-        await this.sendVerificationEmail(email, user.firstName, verifyCode, userRole);
-      } catch (emailError) {
-        console.error('Failed to send verification email during login:', emailError);
-        // Still throw the error, but with a message about email sending failure
-        throw new AppError('Email not verified. We attempted to send a verification email but it failed. Please try again or contact support.', 403);
-      }
-      
-      throw new AppError('Email not verified. A verification email has been sent to your email address. Please verify your email before logging in.', 403);
-    }
-
-    const token = generateAccessToken(user._id as string, user.role);
-    const refreshToken = generateRefreshToken(user._id as string, user.role);
-
-    // Store refresh token in database
     await this.User.findByIdAndUpdate(user._id, { refreshToken: refreshToken });
 
-    // Fetch user again with seller populated to ensure we have the seller reference
-    const userWithSeller = await this.User.findById(user._id).populate('seller');
-    
-    // Determine user type based on role and seller profile
-    const hasSeller = !!userWithSeller?.seller;
-    const userRole = user.role || 'user';
-    
-    // Type is 'seller' if user has a seller profile, otherwise use their role
-    const userType = hasSeller ? 'seller' : userRole;
-
-    const trimedUser: Partial<IUser> & { type?: string; seller?: string } = {
+    const trimedUser: Partial<IUser> = {
       id: user._id,
       email: user.email,
       firstName: user.firstName,
@@ -364,63 +164,9 @@ export class AuthService extends BaseService implements IAuthService {
       currentLocation: user.currentLocation,
       banned: user.banned,
       verified: user.verified,
-      role: userRole,
-      type: userType, // 'user' | 'seller' | 'admin'
     };
-
-    // Include seller ID if it exists
-    if (hasSeller) {
-      const seller = userWithSeller.seller as any;
-      const sellerId = seller._id || seller.id || seller;
-      if (sellerId) {
-        trimedUser.seller = sellerId.toString();
-      }
-    }
-
     return { user: trimedUser, token: token, refreshToken: refreshToken };
   };
-
-  private async buildAuthUserResponse(user: IUser): Promise<Partial<IUser> & { type?: string; seller?: string }> {
-    const userWithSeller = await this.User.findById(user._id).populate('seller');
-    const hasSeller = !!userWithSeller?.seller;
-    const userRole = user.role || 'user';
-    const userType = hasSeller ? 'seller' : userRole;
-
-    const trimedUser: Partial<IUser> & { type?: string; seller?: string } = {
-      id: user._id,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      profileImageUrl: user.profileImageUrl,
-      nationality: user.nationality,
-      currentLocation: user.currentLocation,
-      banned: user.banned,
-      verified: user.verified,
-      role: userRole,
-      type: userType,
-    };
-
-    if (hasSeller) {
-      const seller = userWithSeller?.seller as any;
-      const sellerId = seller?._id || seller?.id || seller;
-      if (sellerId) {
-        trimedUser.seller = sellerId.toString();
-      }
-    }
-
-    return trimedUser;
-  }
-
-  private splitDisplayName(displayName?: string | null): { firstName: string; lastName: string } {
-    const fullName = (displayName || '').trim();
-    if (!fullName) {
-      return { firstName: 'User', lastName: 'Firebase' };
-    }
-    const parts = fullName.split(/\s+/);
-    const firstName = parts[0] || 'User';
-    const lastName = parts.slice(1).join(' ') || 'Firebase';
-    return { firstName, lastName };
-  }
 
   async firebaseSocialLogin(
     firebaseIdToken: string,
@@ -429,14 +175,12 @@ export class AuthService extends BaseService implements IAuthService {
     let decoded: any;
     try {
       decoded = await getFirebaseAdminAuth().verifyIdToken(firebaseIdToken);
-    } catch (error) {
+    } catch {
       throw new AppError('Invalid Firebase token', 401);
     }
 
     const firebaseUid = decoded?.uid;
-    if (!firebaseUid) {
-      throw new AppError('Invalid Firebase token payload', 400);
-    }
+    if (!firebaseUid) throw new AppError('Invalid Firebase token payload', 400);
 
     const signInProvider = decoded?.firebase?.sign_in_provider;
     const provider = providerHint || signInProvider;
@@ -445,67 +189,50 @@ export class AuthService extends BaseService implements IAuthService {
     }
 
     const email = String(decoded?.email || '').trim().toLowerCase();
-    if (!email) {
-      throw new AppError('No email available from Firebase token', 400);
-    }
+    if (!email) throw new AppError('No email available from Firebase token', 400);
 
     const providerId = decoded?.sub || firebaseUid;
     let user = await this.User.findOne({ firebaseUid });
 
     if (!user) {
-      user = await this.User.findOne({
-        'socialLogin.provider': provider,
-        'socialLogin.providerId': providerId,
-      });
+      user = await this.User.findOne({ 'socialLogin.provider': provider, 'socialLogin.providerId': providerId });
     }
-
     if (!user) {
       user = await this.User.findOne({ email });
     }
 
     if (user) {
       let shouldSave = false;
-
-      if (!user.firebaseUid) {
-        user.firebaseUid = firebaseUid;
-        shouldSave = true;
-      }
-
-      const hasProviderLink = user.socialLogin?.some(
-        (entry) => entry.provider === provider && entry.providerId === providerId
-      );
-      if (!hasProviderLink) {
-        user.socialLogin.push({ provider, providerId });
-        shouldSave = true;
-      }
-
-      if (!user.verified) {
-        user.verified = true;
-        shouldSave = true;
-      }
-
-      if (shouldSave) {
-        await user.save();
-      }
+      if (!user.firebaseUid) { user.firebaseUid = firebaseUid; shouldSave = true; }
+      const hasLink = user.socialLogin?.some((e: any) => e.provider === provider && e.providerId === providerId);
+      if (!hasLink) { user.socialLogin.push({ provider, providerId }); shouldSave = true; }
+      if (!user.verified) { user.verified = true; shouldSave = true; }
+      if (shouldSave) await user.save();
     } else {
-      const { firstName, lastName } = this.splitDisplayName(decoded?.name);
+      const nameParts = String(decoded?.name || '').trim().split(/\s+/);
+      const firstName = nameParts[0] || 'User';
+      const lastName = nameParts.slice(1).join(' ') || '';
       user = await this.User.create({
         email,
         firstName,
         lastName,
-        profileImageUrl: decoded?.picture || `https://ui-avatars.com/api/?name=${firstName}+${lastName}`,
+        profileImageUrl: decoded?.picture,
         socialLogin: [{ provider, providerId }],
         firebaseUid,
         verified: true,
       });
     }
 
-    const userRole = user.role || 'user';
-    const token = generateAccessToken(user._id as string, userRole);
-    const refreshToken = generateRefreshToken(user._id as string, userRole);
-    await this.User.findByIdAndUpdate(user._id, { refreshToken });
-
-    const trimedUser = await this.buildAuthUserResponse(user);
+    const token = generateAccessToken(user._id as string);
+    const refreshToken = generateRefreshToken(user._id as string);
+    const trimedUser: Partial<IUser> = {
+      id: user._id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      profileImageUrl: user.profileImageUrl,
+      verified: user.verified,
+    };
     return { user: trimedUser, token, refreshToken };
   }
 
@@ -573,14 +300,8 @@ export class AuthService extends BaseService implements IAuthService {
         userWithEmail.socialLogin.push({ provider: provider, providerId: socialId });
         await userWithEmail.save();
 
-        // Check if user has seller profile
-        const userWithSeller = await this.User.findById(userWithEmail._id).populate('seller');
-        const hasSeller = !!userWithSeller?.seller;
-        const userRole = userWithEmail.role || 'user';
-        const userType = hasSeller ? 'seller' : userRole;
-
-        const trimedUser: Partial<IUser> & { type?: string; seller?: string } = {
-          id: userWithEmail._id,
+        const trimedUser: Partial<IUser> = {
+          _id: userWithEmail._id,
           email: userWithEmail.email,
           firstName: userWithEmail.firstName,
           lastName: userWithEmail.lastName,
@@ -589,19 +310,11 @@ export class AuthService extends BaseService implements IAuthService {
           currentLocation: userWithEmail.currentLocation,
           banned: userWithEmail.banned,
           verified: userWithEmail.verified,
-          role: userRole,
-          type: userType,
         };
-
-        if (hasSeller) {
-          const seller = userWithSeller.seller as any;
-          trimedUser.seller = (seller._id || seller.id || seller).toString();
-        }
-
         return {
           user: trimedUser,
-          token: generateAccessToken(userWithEmail._id as string, userRole),
-          refreshToken: generateRefreshToken(userWithEmail._id as string, userRole),
+          token: generateAccessToken(userWithEmail._id as string),
+          refreshToken: generateRefreshToken(userWithEmail._id as string),
         };
       } else {
         // Register new user if not found
@@ -610,23 +323,15 @@ export class AuthService extends BaseService implements IAuthService {
           firstName: payload?.given_name,
           lastName: payload?.family_name,
           profileImageUrl: payload?.picture,
-          socialLogin: [{ provider: provider, providerId: socialId }],
-          verified: true, // Google accounts are pre-verified
+          socialLogins: [{ provider: provider, providerId: socialId }],
         });
         await user.save();
       }
     }
 
-    // Check if user has seller profile
-    const userWithSeller = await this.User.findById(user._id).populate('seller');
-    const hasSeller = !!userWithSeller?.seller;
-    const userRole = user.role || 'user';
-    const userType = hasSeller ? 'seller' : userRole;
-
-    const token = await generateAccessToken(user._id as string, userRole);
-    const refreshToken = await generateRefreshToken(user._id as string, userRole);
-    
-    const trimedUser: Partial<IUser> & { type?: string; seller?: string } = {
+    const token = await generateAccessToken(user._id as string);
+    const refreshToken = await generateRefreshToken(user._id as string);
+    const trimedUser: Partial<IUser> = {
       id: user._id,
       email: user.email,
       firstName: user.firstName,
@@ -636,75 +341,39 @@ export class AuthService extends BaseService implements IAuthService {
       currentLocation: user.currentLocation,
       banned: user.banned,
       verified: user.verified,
-      role: userRole,
-      type: userType,
     };
-
-    if (hasSeller) {
-      const seller = userWithSeller.seller as any;
-      trimedUser.seller = (seller._id || seller.id || seller).toString();
-    }
-
     return { user: trimedUser, token: token, refreshToken: refreshToken };
   }
-
   async forgotPassword(email: string): Promise<void> {
     const user = await this.User.findOne({ email });
-    if (!user) {
-      // Don't reveal if user exists (security best practice)
-      return;
-    }
+    if (!user) throw new AppError('User not found', 404);
 
-    // Generate secure token (not code)
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-    
-    // Store hashed token (1 hour expiry)
-    user.passwordResetToken = hashedToken;
-    user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    const code = generateCode(6);
+    const expiresIn = 10;
+    user.passwordResetToken = code;
+    user.passwordResetExpires = new Date(Date.now() + expiresIn * 60 * 1000);
 
     await user.save();
+    await this.sendVerificationCode();
+    //TODO: send email with code
 
-    // Send password reset email with token (use Gmail SMTP if configured)
-    try {
-      await this.sendPasswordResetEmail(email, user.firstName, resetToken, user.role || 'user');
-    } catch (emailError) {
-      console.error('Failed to send password reset email:', emailError);
-      throw new AppError('Failed to send password reset email', 500);
-    }
   }
 
-  async resetPassword(token: string, password: string): Promise<void> {
-    if (!token || !password) {
-      throw new AppError('Token and password are required', 400);
-    }
+  async resetPassword(email: string, code: string, password: string): Promise<void> {
+    const user = await this.User.findOne({ email });
+    if (!user) throw new AppError('User not found', 404);
 
-    // Hash the provided token to compare with stored hash
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    if (user.passwordResetExpires!.getTime() < Date.now()) throw new AppError('provided code is expired', 400);
 
-    // Find user with matching token and valid expiry
-    const user = await this.User.findOne({
-      passwordResetToken: hashedToken,
-      passwordResetExpires: { $gt: new Date() },
-    });
+    const hashedCode = crypto.createHash('md5').update(code).digest('hex');
+    if (user.passwordResetToken !== hashedCode) throw new AppError('code does not match code sent', 400);
 
-    if (!user) {
-      throw new AppError('Invalid or expired reset token', 400);
-    }
-
-    // Hash new password
-    const hashedPassword = await bcrypt.hash(password, 10);
-    
-    // Update password and clear reset token
-    user.password = hashedPassword;
+    password = await bcrypt.hash(password, 10);
+    user.password = password;
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
 
     await user.save();
-
-    // Optionally blacklist all existing refresh tokens for this user
-    // This forces re-login after password reset for security
-    await this.User.findByIdAndUpdate(user._id, { refreshToken: undefined });
   }
 
   async checkEmail(email: string): Promise<EmailCheckResult> {
@@ -747,25 +416,7 @@ export class AuthService extends BaseService implements IAuthService {
     if (!user) throw new AppError('User not found', 404);
 
     if (user.verified) throw new AppError('Email already verified', 403);
-    
-    // Generate new verification code
-    const verifyCode = generateCode(6);
-    const hashedCode = crypto.createHash('md5').update(verifyCode).digest('hex');
-    
-    // Update user with new verification code
-    user.verifyCode = hashedCode;
-    user.verifyCodeExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-    await user.save();
-    
-    // Send verification email with user role
-    const userRole = user.role || 'user';
-    console.log(`📧 Preparing to resend verification email for user with role: ${userRole}`);
-    try {
-      await this.sendVerificationEmail(email, user.firstName, verifyCode, userRole);
-    } catch (error) {
-      console.error('Failed to send verification email:', error);
-      throw new AppError('Failed to send verification email. Please try again later.', 500);
-    }
+    //TODO: send email with code
   }
 
   private async sendVerificationCode() {
@@ -785,149 +436,26 @@ export class AuthService extends BaseService implements IAuthService {
 
   async refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string }> {
     try {
-      // Check if token is blacklisted
-      const isBlacklisted = await this.TokenBlacklist.findOne({ token: refreshToken });
-      if (isBlacklisted) {
-        throw new AppError('Token has been revoked', 401);
-      }
-
       const decoded = await decodeToken(refreshToken, true);
       const userId = decoded.id;
-      const userRole = decoded.role;
 
       const user = await this.User.findById(userId);
       if (!user) {
         throw new AppError('User not found', 404);
       }
 
-      // Verify token matches stored token
       if (user.refreshToken !== refreshToken) {
         throw new AppError('Invalid refresh token', 401);
       }
 
-      // Generate new tokens (rotation)
-      const newAccessToken = generateAccessToken(user._id as string, user.role || userRole);
-      const newRefreshToken = generateRefreshToken(user._id as string, user.role || userRole);
+      const newAccessToken = generateAccessToken(user._id as string);
+      const newRefreshToken = generateRefreshToken(user._id as string);
 
-      // Blacklist old refresh token
-      const tokenExpiry = new Date();
-      tokenExpiry.setDate(tokenExpiry.getDate() + 7); // Match refresh token expiry
-      await this.TokenBlacklist.create({
-        token: refreshToken,
-        userId: userId,
-        expiresAt: tokenExpiry,
-      });
-
-      // Store new refresh token
       await this.User.findByIdAndUpdate(userId, { refreshToken: newRefreshToken });
 
       return { token: newAccessToken, refreshToken: newRefreshToken };
     } catch (error) {
-      if (error instanceof AppError) {
-        throw error;
-      }
       throw new AppError('Invalid refresh token', 401);
-    }
-  }
-
-  async logout(userId: string, refreshToken: string): Promise<void> {
-    try {
-      // Blacklist the refresh token
-      if (refreshToken) {
-        const tokenExpiry = new Date();
-        tokenExpiry.setDate(tokenExpiry.getDate() + 7); // Match refresh token expiry
-        
-        await this.TokenBlacklist.create({
-          token: refreshToken,
-          userId: userId,
-          expiresAt: tokenExpiry,
-        });
-      }
-
-      // Clear refresh token from user record
-      await this.User.findByIdAndUpdate(userId, { refreshToken: undefined });
-    } catch (error) {
-      console.error('Error during logout:', error);
-      // Don't throw - logout should succeed even if blacklisting fails
-    }
-  }
-
-  private async sendVerificationEmail(email: string, firstName: string, code: string, role: string = 'user'): Promise<void> {
-    try {
-      // Check if Gmail is configured - use it for verification emails if available
-      const useGmail = !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
-      
-      // Determine frontend URL based on user role
-      let frontendUrl: string;
-      if (role === 'seller') {
-        // Use seller frontend URL if configured, otherwise default to production
-        frontendUrl = process.env.SELLER_FRONTEND_URL || 'https://seller.st-cael.org';
-        console.log(`🔍 Seller detected - Using SELLER_FRONTEND_URL: ${process.env.SELLER_FRONTEND_URL || 'not set, using default'}`);
-      } else {
-        // Use regular frontend URL for regular users
-        frontendUrl = process.env.FRONTEND_URL || 'https://market.st-cael.org';
-        console.log(`🔍 Regular user detected - Using FRONTEND_URL: ${process.env.FRONTEND_URL || 'not set, using default'}`);
-      }
-      
-      const verificationLink = `${frontendUrl}/verify-email?code=${code}&email=${email}`;
-      
-      console.log(`📧 Sending verification email to: ${email} (role: ${role}, frontend: ${frontendUrl})`);
-      console.log(`🔗 Verification link: ${verificationLink}`);
-      await sendEmail({
-        to: [email],
-        subject: 'Verify Your Email Address',
-        html: renderTemplate('src/utils/templates/email-verification.html', { 
-          firstName, 
-          code,
-          verificationLink
-        }),
-        useGmail: useGmail, // Use Gmail if configured
-      });
-      console.log(`✅ Verification email sent successfully to: ${email}`);
-    } catch (error: any) {
-      console.error('❌ Failed to send verification email:', error);
-      console.error('Error details:', {
-        email,
-        message: error?.message,
-        response: error?.response?.data || error?.response,
-      });
-      // Don't throw error - allow user to resend verification
-      // But log it for debugging
-      throw new AppError(
-        `Failed to send verification email. Please check your email configuration or try again later. Error: ${error?.message || 'Unknown error'}`,
-        500
-      );
-    }
-  }
-
-  private async sendPasswordResetEmail(email: string, firstName: string, token: string, role: string = 'user'): Promise<void> {
-    try {
-      // Determine frontend URL based on user role
-      let frontendUrl: string;
-      if (role === 'seller') {
-        // Use seller frontend URL if configured, otherwise default to production
-        frontendUrl = process.env.SELLER_FRONTEND_URL || 'https://seller.st-cael.org';
-      } else {
-        // Use regular frontend URL for regular users
-        frontendUrl = process.env.FRONTEND_URL || 'https://market.st-cael.org';
-      }
-      
-      const resetLink = `${frontendUrl}/reset-password?token=${token}`;
-      // Use Gmail SMTP for password reset if configured, otherwise use default Resend
-      const useGmail = !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
-      await sendEmail({
-        to: [email],
-        subject: 'Password Reset Request',
-        html: renderTemplate('src/utils/templates/password-reset.html', {
-          firstName,
-          resetLink,
-          token, // Include token in case link doesn't work
-        }),
-        useGmail, // Use Gmail SMTP if configured
-      });
-    } catch (error) {
-      console.error('Failed to send password reset email:', error);
-      throw error;
     }
   }
 }

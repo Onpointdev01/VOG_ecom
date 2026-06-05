@@ -4,18 +4,19 @@ import TYPES from '../di';
 import { IShippingZone } from '../models';
 import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
+import { DEFAULT_SHIPPING_FEE, neighborhoodCodeFromName } from '../utils/neighborhoodCode';
 
 export interface CreateShippingZoneDTO {
-  province: string;
-  provinceCode: string;
+  name: string;
+  code?: string;
   shippingFee: number;
   estimatedDeliveryDays: number;
   isActive?: boolean;
 }
 
 export interface UpdateShippingZoneDTO {
-  province?: string;
-  provinceCode?: string;
+  name?: string;
+  code?: string;
   shippingFee?: number;
   estimatedDeliveryDays?: number;
   isActive?: boolean;
@@ -26,10 +27,10 @@ export interface IShippingZoneService {
   getAllShippingZones(): Promise<IShippingZone[]>;
   getActiveShippingZones(): Promise<IShippingZone[]>;
   getShippingZoneById(id: string): Promise<IShippingZone>;
-  getShippingZoneByProvinceCode(provinceCode: string): Promise<IShippingZone | null>;
+  getShippingZoneByCode(code: string): Promise<IShippingZone | null>;
   updateShippingZone(id: string, data: UpdateShippingZoneDTO): Promise<IShippingZone>;
   deleteShippingZone(id: string): Promise<void>;
-  calculateShippingFee(provinceCode: string): Promise<number>;
+  calculateShippingFee(neighborhoodCode: string): Promise<number>;
 }
 
 @injectable()
@@ -38,28 +39,43 @@ export class ShippingZoneService extends BaseService implements IShippingZoneSer
     super();
   }
 
+  private normalizeCode(code: string): string {
+    return neighborhoodCodeFromName(code);
+  }
+
+  private resolveCode(data: { name: string; code?: string }): string {
+    if (data.code?.trim()) {
+      return this.normalizeCode(data.code);
+    }
+    return neighborhoodCodeFromName(data.name);
+  }
+
   async createShippingZone(data: CreateShippingZoneDTO): Promise<IShippingZone> {
-    // Check if province or code already exists
+    const code = this.resolveCode(data);
     const existing = await this.ShippingZone.findOne({
-      $or: [{ province: data.province }, { provinceCode: data.provinceCode }],
+      $or: [{ name: data.name.trim() }, { code }],
     });
 
     if (existing) {
-      throw new AppError('Shipping zone with this province or code already exists', 409);
+      throw new AppError('A neighborhood with this name or code already exists', 409);
     }
 
-    const shippingZone = new this.ShippingZone(data);
+    const shippingZone = new this.ShippingZone({
+      ...data,
+      name: data.name.trim(),
+      code,
+    });
     await shippingZone.save();
 
     return shippingZone;
   }
 
   async getAllShippingZones(): Promise<IShippingZone[]> {
-    return await this.ShippingZone.find().sort({ province: 1 });
+    return await this.ShippingZone.find().sort({ name: 1 });
   }
 
   async getActiveShippingZones(): Promise<IShippingZone[]> {
-    return await this.ShippingZone.find({ isActive: true }).sort({ province: 1 });
+    return await this.ShippingZone.find({ isActive: true }).sort({ name: 1 });
   }
 
   async getShippingZoneById(id: string): Promise<IShippingZone> {
@@ -72,17 +88,17 @@ export class ShippingZoneService extends BaseService implements IShippingZoneSer
     return shippingZone;
   }
 
-  async getShippingZoneByProvinceCode(provinceCode: string): Promise<IShippingZone | null> {
-    // Try to find by province code first (case-insensitive)
+  async getShippingZoneByCode(code: string): Promise<IShippingZone | null> {
+    const normalized = this.normalizeCode(code);
+
     let shippingZone = await this.ShippingZone.findOne({
-      provinceCode: new RegExp(`^${provinceCode}$`, 'i'),
+      code: new RegExp(`^${normalized}$`, 'i'),
       isActive: true,
     });
 
-    // If not found, try to find by province name (case-insensitive)
     if (!shippingZone) {
       shippingZone = await this.ShippingZone.findOne({
-        province: new RegExp(`^${provinceCode}`, 'i'),
+        name: new RegExp(`^${code.trim()}`, 'i'),
         isActive: true,
       });
     }
@@ -91,22 +107,29 @@ export class ShippingZoneService extends BaseService implements IShippingZoneSer
   }
 
   async updateShippingZone(id: string, data: UpdateShippingZoneDTO): Promise<IShippingZone> {
-    // Check if trying to update to existing province/code
-    if (data.province || data.provinceCode) {
+    const updatePayload: UpdateShippingZoneDTO = { ...data };
+
+    if (data.name && !data.code) {
+      updatePayload.code = neighborhoodCodeFromName(data.name);
+    } else if (data.code) {
+      updatePayload.code = this.normalizeCode(data.code);
+    }
+
+    if (updatePayload.name || updatePayload.code) {
       const existing = await this.ShippingZone.findOne({
         _id: { $ne: id },
         $or: [
-          ...(data.province ? [{ province: data.province }] : []),
-          ...(data.provinceCode ? [{ provinceCode: data.provinceCode }] : []),
+          ...(updatePayload.name ? [{ name: updatePayload.name.trim() }] : []),
+          ...(updatePayload.code ? [{ code: updatePayload.code }] : []),
         ],
       });
 
       if (existing) {
-        throw new AppError('Another shipping zone with this province or code already exists', 409);
+        throw new AppError('Another neighborhood with this name or code already exists', 409);
       }
     }
 
-    const shippingZone = await this.ShippingZone.findByIdAndUpdate(id, data, {
+    const shippingZone = await this.ShippingZone.findByIdAndUpdate(id, updatePayload, {
       new: true,
       runValidators: true,
     });
@@ -126,13 +149,18 @@ export class ShippingZoneService extends BaseService implements IShippingZoneSer
     }
   }
 
-  async calculateShippingFee(provinceCode: string): Promise<number> {
-    const shippingZone = await this.getShippingZoneByProvinceCode(provinceCode);
+  async calculateShippingFee(neighborhoodCode: string): Promise<number> {
+    if (!neighborhoodCode?.trim()) {
+      return DEFAULT_SHIPPING_FEE;
+    }
+
+    const shippingZone = await this.getShippingZoneByCode(neighborhoodCode);
 
     if (!shippingZone) {
-      // If province not found, return a default shipping fee
-      console.warn(`No shipping zone found for province code: ${provinceCode}, using default fee`);
-      return 199.99; // Default shipping fee
+      console.warn(
+        `No shipping zone found for neighborhood: ${neighborhoodCode}, using default fee`
+      );
+      return DEFAULT_SHIPPING_FEE;
     }
 
     return shippingZone.shippingFee;

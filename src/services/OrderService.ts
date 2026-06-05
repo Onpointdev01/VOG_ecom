@@ -1,6 +1,6 @@
 import { injectable, inject } from 'inversify';
 import { BaseService } from './BaseService';
-import { Order, IOrder } from '../models/Order';
+import { Order, IOrder, IOrderItem, OrderApprovalActor } from '../models/Order';
 import { Cart, ICart } from '../models/Cart';
 import { Product } from '../models/Product';
 import { ProductVariant } from '../models/ProductVariant';
@@ -9,13 +9,29 @@ import { PaymentOption, PaymentMethodType } from '../models/PaymentOption';
 import { PaymentService } from './PaymentService';
 import { IShippingZoneService } from './ShippingZoneService';
 import { NotificationService } from './NotificationService';
-import { IPayoutService } from './PayoutService';
-import { PaymentMethod } from '../models/Payment';
+import { IMarketingCampaignService } from './MarketingCampaignService';
+import { Payment, PaymentMethod } from '../models/Payment';
 import AppError from '../utils/errors/AppError';
 import { TYPES } from '../di';
-import { Model } from 'mongoose';
-import validator from 'validator';
-import { IUser } from '../models';
+import { ProductAvailabilityService } from './ProductAvailabilityService';
+import { PlatformSettingsService } from './PlatformSettingsService';
+import { User } from '../models/User';
+import { Admin } from '../models/Admin';
+import { Seller } from '../models/Seller';
+import { toIdString } from '../utils/mongoId';
+import { resolveAdminChatUserId } from '../utils/resolveAdminChatUser';
+import { isVariableProductType } from '../utils/productAvailability';
+import {
+  computeSellerItemsTotal,
+  filterOrderItemsForSeller,
+  mapOrderItemsForResponse,
+  OrderItemLike,
+} from '../utils/orderSellerScope';
+import {
+  applyExcludeCancelledFromOrderList,
+  excludeCancelledOrdersClause,
+  HIDDEN_CANCELLED_ORDER_STATUSES,
+} from '../utils/orderListFilters';
 
 export interface CreateOrderRequest {
   userId: string;
@@ -23,7 +39,11 @@ export interface CreateOrderRequest {
   shippingAddressId: string;
   selectedItems?: string[];
   notes?: string;
+  couponCode?: string;
 }
+
+/** Order statuses where the buyer may cancel (seller has not confirmed yet). */
+export const BUYER_CANCELLABLE_ORDER_STATUSES = ['PENDING'] as const;
 
 @injectable()
 export class OrderService extends BaseService {
@@ -31,154 +51,110 @@ export class OrderService extends BaseService {
     @inject(TYPES.PaymentService) private paymentService: PaymentService,
     @inject(TYPES.ShippingZoneService) private shippingZoneService: IShippingZoneService,
     @inject(TYPES.NotificationService) private notificationService: NotificationService,
-    @inject(TYPES.PayoutService) private payoutService: IPayoutService,
-    @inject(TYPES.User) private User: Model<IUser>
+    @inject(TYPES.MarketingCampaignService)
+    private marketingCampaignService: IMarketingCampaignService,
+    @inject(TYPES.ProductAvailabilityService)
+    private productAvailability: ProductAvailabilityService,
+    @inject(TYPES.PlatformSettingsService)
+    private platformSettingsService: PlatformSettingsService
   ) {
     super();
   }
   async createOrder(data: CreateOrderRequest): Promise<IOrder> {
-    try {
-      const { userId, paymentMethod, shippingAddressId, selectedItems, notes } = data;
+    const { userId, paymentMethod, shippingAddressId, selectedItems, notes, couponCode } = data;
 
-      console.log('Creating order for userId:', userId);
-      console.log('Order data:', { paymentMethod, shippingAddressId, selectedItems, notes });
+    // Verify user's cart exists and has items
+    const cart = await Cart.findOne({ user: userId }).populate('items.product');
+    if (!cart || cart.items.length === 0) {
+      throw new AppError('Cart is empty', 400);
+    }
 
-      // Verify user's cart exists and has items
-      const cart = await Cart.findOne({ user: userId }).populate({
-        path: 'items.product',
-        select: 'name price images productType quantityAvailable'
-      });
+    // Filter items based on selection (partial checkout)
+    let itemsToOrder = cart.items;
+    if (selectedItems && selectedItems.length > 0) {
+      itemsToOrder = cart.items.filter(item => 
+        selectedItems.includes(item._id.toString())
+      );
       
-      if (!cart) {
-        console.error('Cart not found for userId:', userId);
-        throw new AppError('Cart is empty', 400);
+      if (itemsToOrder.length === 0) {
+        throw new AppError('No valid items selected for checkout', 400);
       }
-      
-      if (!cart.items || cart.items.length === 0) {
-        console.error('Cart has no items for userId:', userId);
-        throw new AppError('Cart is empty', 400);
-      }
-      
-      console.log('Cart found with', cart.items.length, 'items');
+    }
 
-      // Filter items based on selection (partial checkout)
-      let itemsToOrder = cart.items;
-      if (selectedItems && selectedItems.length > 0) {
-        itemsToOrder = cart.items.filter(item => {
-          if (!item || !item._id) {
-            console.error('Invalid cart item found:', item);
-            return false;
-          }
-          const itemId = item._id.toString();
-          return selectedItems.includes(itemId);
-        });
-        
-        if (itemsToOrder.length === 0) {
-          const validItemIds = cart.items
-            .filter(i => i && i._id)
-            .map(i => i._id.toString());
-          console.error('No valid items selected. SelectedItems:', selectedItems, 'Cart item IDs:', validItemIds);
-          throw new AppError('No valid items selected for checkout', 400);
+    // Verify payment method exists and is enabled
+    const paymentOption = await PaymentOption.findOne({ 
+      code: paymentMethod, 
+      isEnabled: true 
+    });
+    if (!paymentOption) {
+      throw new AppError('Payment method not available', 400);
+    }
+
+    // Verify shipping address exists and belongs to user
+    const shippingAddress = await Address.findOne({ 
+      _id: shippingAddressId, 
+      user: userId 
+    });
+    if (!shippingAddress) {
+      throw new AppError('Shipping address not found', 404);
+    }
+
+    for (const item of itemsToOrder) {
+      const productRef = item.product as { _id?: { toString(): string }; id?: string };
+      const pid =
+        productRef?._id?.toString?.() ||
+        (typeof item.product === 'string' ? item.product : productRef?.id);
+      if (pid) {
+        await this.productAvailability.assertPurchasable(pid, item.quantity);
+      }
+    }
+
+    const totalPrice = itemsToOrder.reduce((sum, item) => {
+      let itemPrice = item.price;
+      
+      // If cart item doesn't have price, get it from the populated product
+      if (typeof itemPrice !== 'number' || isNaN(itemPrice) || itemPrice < 0) {
+        const product = item.product as any;
+        if (product && typeof product.price === 'number') {
+          itemPrice = product.price;
+        } else {
+          throw new AppError(`Invalid price for item: ${product?.name || 'Unknown product'}. Please refresh your cart and try again.`, 400);
         }
       }
       
-      console.log('Items to order:', itemsToOrder.length);
+      return sum + (itemPrice * item.quantity);
+    }, 0);
+    
+    if (isNaN(totalPrice) || totalPrice < 0) {
+      throw new AppError('Unable to calculate order total. Please check your cart items and try again.', 400);
+    }
 
-      // Verify payment method exists and is enabled
-      const paymentOption = await PaymentOption.findOne({ 
-        code: paymentMethod, 
-        isEnabled: true 
-      });
-      if (!paymentOption) {
-        console.error('Payment method not found or disabled:', paymentMethod);
-        throw new AppError('Payment method not available', 400);
-      }
-      
-      console.log('Payment method verified:', paymentMethod);
+    // Calculate shipping fee based on province
+    const shippingFee = await this.calculateShippingFee(shippingAddress);
 
-      // Verify shipping address exists and belongs to user
-      const shippingAddress = await Address.findOne({ 
-        _id: shippingAddressId, 
-        user: userId 
-      });
-      if (!shippingAddress) {
-        console.error('Shipping address not found:', shippingAddressId, 'for userId:', userId);
-        throw new AppError('Shipping address not found', 404);
-      }
-      
-      console.log('Shipping address verified:', shippingAddressId);
-
-      // Validate and calculate totals based on selected items
-      const totalPrice = itemsToOrder.reduce((sum, item) => {
-        let itemPrice = item.price;
-        
-        // If cart item doesn't have price, get it from the populated product
-        if (typeof itemPrice !== 'number' || isNaN(itemPrice) || itemPrice < 0) {
-          const product = item.product as any;
-          if (product && typeof product.price === 'number') {
-            itemPrice = product.price;
-          } else {
-            console.error('Invalid price for item:', item, 'Product:', product);
-            throw new AppError(`Invalid price for item: ${product?.name || 'Unknown product'}. Please refresh your cart and try again.`, 400);
-          }
-        }
-        
-        return sum + (itemPrice * item.quantity);
-      }, 0);
-      
-      if (isNaN(totalPrice) || totalPrice < 0) {
-        console.error('Invalid total price calculated:', totalPrice);
-        throw new AppError('Unable to calculate order total. Please check your cart items and try again.', 400);
-      }
-      
-      console.log('Total price calculated:', totalPrice);
-
-      // Calculate shipping fee based on province
-      const shippingFee = await this.calculateShippingFee(shippingAddress);
-      const finalPrice = totalPrice + shippingFee;
-      
-      console.log('Shipping fee:', shippingFee, 'Final price:', finalPrice);
+    const discount = await this.marketingCampaignService.resolveCouponForOrder(
+      userId,
+      couponCode,
+      totalPrice,
+      shippingFee
+    );
+    const discountAmount = discount.discountAmount;
+    const finalPrice = Math.max(0, totalPrice + shippingFee - discountAmount);
 
     // Store cart item IDs for later clearing
     const cartItemIdsToRemove = selectedItems && selectedItems.length > 0 
       ? selectedItems 
-      : cart.items
-          .filter(item => item && item._id)
-          .map(item => item._id.toString());
+      : cart.items.map(item => item._id.toString());
 
-      // Generate order number
-      const timestamp = Date.now().toString();
-      const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-      const orderNumber = `ORD-${timestamp}-${random}`;
-      
-      console.log('Generated order number:', orderNumber);
+    // Generate order number
+    const timestamp = Date.now().toString();
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    const orderNumber = `ORD-${timestamp}-${random}`;
 
-      // Create order
-      const order = new Order({
+    // Create order
+    const order = new Order({
       user: userId,
-      items: itemsToOrder.map((item, index) => {
-        // Validate item structure
-        if (!item) {
-          console.error(`Invalid item at index ${index}:`, item);
-          throw new AppError(`Invalid cart item at position ${index + 1}. Please refresh your cart and try again.`, 400);
-        }
-
-        if (!item.product) {
-          console.error(`Item at index ${index} has no product:`, item);
-          throw new AppError(`Cart item at position ${index + 1} is missing product information. Please refresh your cart and try again.`, 400);
-        }
-
-        // Get product ID (handle both populated and non-populated cases)
-        const product = item.product as any;
-        const productId = (product && typeof product === 'object' && product._id) 
-          ? product._id 
-          : item.product;
-
-        if (!productId) {
-          console.error(`Item at index ${index} has invalid product ID:`, item);
-          throw new AppError(`Cart item at position ${index + 1} has invalid product. Please refresh your cart and try again.`, 400);
-        }
-
+      items: itemsToOrder.map(item => {
         let itemPrice = item.price;
         
         // Ensure we have a valid price for the order item
@@ -187,26 +163,27 @@ export class OrderService extends BaseService {
           if (product && typeof product.price === 'number') {
             itemPrice = product.price;
           } else {
-            const productName = product?.name || 'Unknown product';
-            console.error(`Invalid price for item at index ${index}:`, { item, product, itemPrice });
-            throw new AppError(`Cannot create order: Invalid price for item "${productName}". Please refresh your cart and try again.`, 400);
+            throw new AppError(`Cannot create order: Invalid price for item ${product?.name || 'Unknown product'}`, 400);
           }
         }
         
         return {
-          product: productId,
-          quantity: item.quantity || 1,
-          sku: item.sku || undefined,
-          size: item.size || undefined,
-          color: item.color || undefined,
+          product: item.product,
+          quantity: item.quantity,
+          variantId: item.variantId,
+          sku: item.sku,
+          size: item.size,
+          color: item.color,
           price: itemPrice,
-          bidId: item.bidId || undefined,
+          bidId: item.bidId,
+          offerId: item.offerId,
         };
       }),
       shippingAddress: {
         fullName: shippingAddress.fullName,
         phoneNumber: shippingAddress.phoneNumber,
         homeAddress: shippingAddress.homeAddress,
+        neighborhood: shippingAddress.neighborhood,
         state: shippingAddress.state,
         city: shippingAddress.city,
         postalCode: shippingAddress.postalCode,
@@ -215,6 +192,9 @@ export class OrderService extends BaseService {
       paymentMethod,
       totalPrice,
       shippingFee,
+      discountAmount,
+      campaignId: discount.campaignId,
+      couponCode: discount.couponCode,
       finalPrice,
       orderNumber,
       notes,
@@ -281,229 +261,130 @@ export class OrderService extends BaseService {
     }
 
     // DON'T clear cart yet - wait for confirmation or payment
-    // Cart will be cleared when:
-    // 1. COD orders are CONFIRMED by seller
-    // 2. Other payment orders are paid (COMPLETED payment status)
-
-    // Notify client of new order
     try {
-      await this.notificationService.sendNewOrderNotificationToClient(
+      await this.notificationService.notifyOrderCreated({
         userId,
-        (order._id as string).toString(),
+        orderId: (order._id as { toString(): string }).toString(),
         orderNumber,
-        finalPrice
-      );
+      });
+      await this.notifyOrderApprovers(order);
     } catch (error) {
-      console.error('Failed to send new order notification to client:', error);
-      // Don't throw - notification failure shouldn't fail the order creation
+      console.error('Failed to send order created notification:', error);
     }
 
-    // Notify admins of new order
-    try {
-      const user = await this.User.findById(userId);
-      const customerName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email : 'Customer';
-      
-      await this.notificationService.sendNewOrderNotificationToAdmins(
-        (order._id as string).toString(),
+    return order;
+  }
+
+  private async notifyOrderApprovers(order: IOrder): Promise<void> {
+    const orderId = toIdString(order._id);
+    const orderNumber = order.orderNumber;
+    const mode = await this.platformSettingsService.getOrderApprovalMode();
+
+    if (mode === 'SELLER_ALLOWED') {
+      const productIds = order.items.map((item) => toIdString(item.product));
+      const products = await Product.find({ _id: { $in: productIds } })
+        .select('owner')
+        .lean();
+      const sellerIds = Array.from(
+        new Set(products.map((p) => toIdString(p.owner)).filter(Boolean))
+      );
+      if (sellerIds.length === 0) return;
+
+      const sellers = await Seller.find({ _id: { $in: sellerIds } })
+        .select('user name')
+        .lean();
+      const sellerUserIds = Array.from(
+        new Set(sellers.map((s) => toIdString(s.user)).filter(Boolean))
+      );
+
+      await this.notificationService.notifyOrderPendingApproval({
+        approverUserIds: sellerUserIds,
+        orderId,
         orderNumber,
-        customerName,
-        finalPrice,
-        paymentMethod
-      );
-    } catch (error) {
-      console.error('Failed to send new order notification to admins:', error);
-      // Don't throw - notification failure shouldn't fail the order creation
+        forSeller: true,
+      });
+      return;
     }
 
-    // Notify sellers of new order (for products they own)
-    try {
-      const user = await this.User.findById(userId);
-      const customerName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email : 'Customer';
-      
-      // Group items by seller
-      const sellerItems = new Map<string, { sellerId: string; items: any[]; productNames: string[] }>();
-      
-      for (const item of order.items) {
-        const product = item.product as any;
-        if (product && product.owner) {
-          const ownerId = product.owner._id || product.owner;
-          const ownerIdStr = ownerId.toString();
-          
-          if (!sellerItems.has(ownerIdStr)) {
-            sellerItems.set(ownerIdStr, {
-              sellerId: ownerIdStr,
-              items: [],
-              productNames: []
-            });
-          }
-          
-          const sellerData = sellerItems.get(ownerIdStr)!;
-          sellerData.items.push(item);
-          sellerData.productNames.push(product.name || 'Product');
-        }
-      }
+    const adminDocs = await Admin.find({ isActive: true });
+    if (adminDocs.length === 0) return;
 
-      // Send notification to each seller
-      for (const [sellerId, data] of Array.from(sellerItems.entries())) {
-        const sellerTotal = data.items.reduce((sum: number, item: any) => sum + (item.price * item.quantity), 0);
-        await this.notificationService.sendNewOrderNotificationToSeller(
-          sellerId,
-          (order._id as string).toString(),
-          orderNumber,
-          customerName,
-          sellerTotal,
-          data.productNames
-        );
+    const adminUserIds: string[] = [];
+    for (const admin of adminDocs) {
+      try {
+        const uid = await resolveAdminChatUserId(admin, User);
+        if (uid) adminUserIds.push(uid);
+      } catch {
+        // skip admin without resolvable inbox
       }
-    } catch (error) {
-      console.error('Failed to send new order notification to sellers:', error);
-      // Don't throw - notification failure shouldn't fail the order creation
     }
-    
-      console.log('Order created successfully:', order._id);
-      return order;
-    } catch (error: any) {
-      console.error('Error in createOrder service:', error);
-      console.error('Error stack:', error.stack);
-      console.error('Error name:', error.name);
-      
-      // Re-throw AppError as-is
-      if (error instanceof AppError) {
-        throw error;
-      }
-      
-      // Wrap unexpected errors with more context
-      throw new AppError(
-        `Failed to create order: ${error.message || 'Unknown error'}`,
-        error.statusCode || 500
-      );
-    }
+
+    if (adminUserIds.length === 0) return;
+
+    await this.notificationService.notifyOrderPendingApproval({
+      approverUserIds: adminUserIds,
+      orderId,
+      orderNumber,
+      forSeller: false,
+    });
   }
 
   async getOrderById(orderId: string): Promise<IOrder> {
-    if (!validator.isMongoId(orderId)) throw new AppError('invalid id provided', 400);
-    const doc = await Order.findById(orderId).populate({
-      path: 'items.product',
-      select: 'name price images sizes color owner',
-      populate: { path: 'owner', select: '_id name logo official rating noOfRating' },
-    });
-    if (!doc) throw new AppError('Order not found', 404);
-    return doc;
+    // Don't populate user for ownership checks - populate only items.product
+    return this.verifyDoc(orderId, Order, 'items.product');
   }
 
   async getUserOrders(userId: string, options?: { limit?: number; status?: string; page?: number }): Promise<IOrder[]> {
-    try {
-      console.log('getUserOrders called with userId:', userId, 'options:', options);
-      
-      // Validate userId is a valid ObjectId
-      if (!userId || typeof userId !== 'string') {
-        throw new AppError('Invalid user ID', 400);
+    const baseFilter: Record<string, unknown> = { user: userId };
+
+    // Handle status filtering
+    if (options?.status) {
+      if (options.status === 'recent') {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        baseFilter.createdAt = { $gte: thirtyDaysAgo };
+      } else if (
+        !HIDDEN_CANCELLED_ORDER_STATUSES.includes(
+          options.status.toUpperCase() as (typeof HIDDEN_CANCELLED_ORDER_STATUSES)[number]
+        )
+      ) {
+        baseFilter.orderStatus = options.status.toUpperCase();
       }
-      
-      const filter: any = { user: userId };
-
-      // Handle status filtering
-      if (options?.status) {
-        if (options.status === 'recent') {
-          // For recent orders, get orders from last 30 days
-          const thirtyDaysAgo = new Date();
-          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-          filter.createdAt = { $gte: thirtyDaysAgo };
-        } else {
-          // Filter by specific order status
-          filter.orderStatus = options.status;
-        }
-      }
-
-      console.log('Order filter:', JSON.stringify(filter, null, 2));
-
-      let query = Order.find(filter)
-        .populate({
-          path: 'items.product',
-          select: 'name price images sizes color'
-        })
-        .sort({ createdAt: -1 });
-
-      // Handle pagination
-      if (options?.page && options?.limit) {
-        const skip = (options.page - 1) * options.limit;
-        query = query.skip(skip);
-      }
-
-      // Handle limit
-      if (options?.limit) {
-        query = query.limit(options.limit);
-      }
-
-      console.log('Executing query...');
-      const orders = await query.lean().exec();
-      console.log('Query executed successfully, found', orders?.length || 0, 'orders');
-      
-      // Clean up any null products (deleted products). lean() skips toJSON — expose `id` for clients.
-      const cleanedOrders = (orders || []).map((order: any) => {
-        const oid = order._id;
-        if (oid != null && order.id == null) {
-          order.id = typeof oid.toString === 'function' ? oid.toString() : String(oid);
-        }
-        if (order.items && Array.isArray(order.items)) {
-          order.items = order.items.map((item: any) => {
-            const iid = item._id;
-            if (iid != null && item.id == null) {
-              item.id = typeof iid.toString === 'function' ? iid.toString() : String(iid);
-            }
-            // If product was deleted (null), provide a placeholder
-            if (!item.product) {
-              item.product = {
-                name: 'Product no longer available',
-                price: item.price || 0,
-                images: [],
-                _id: null
-              };
-            }
-            return item;
-          });
-        }
-        return order;
-      });
-      
-      console.log('Returning cleaned orders');
-      return cleanedOrders as IOrder[];
-    } catch (error) {
-      console.error('Error in getUserOrders service:', error);
-      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-      throw new AppError(`Failed to retrieve orders: ${error instanceof Error ? error.message : 'Unknown error'}`, 500);
     }
-  }
 
-  async markBuyerReviewCompleted(orderId: string, userId: string): Promise<IOrder> {
-    if (!validator.isMongoId(orderId)) throw new AppError('invalid id provided', 400);
-    const order = await Order.findById(orderId);
-    if (!order) throw new AppError('Order not found', 404);
-    if (order.user.toString() !== userId) {
-      throw new AppError('Access denied', 403);
+    const filter = applyExcludeCancelledFromOrderList(baseFilter);
+
+    let query = Order.find(filter)
+      .populate('items.product')
+      .sort({ createdAt: -1 });
+
+    // Handle pagination
+    if (options?.page && options?.limit) {
+      const skip = (options.page - 1) * options.limit;
+      query = query.skip(skip);
     }
-    if (order.orderStatus !== 'COMPLETE') {
-      throw new AppError('Reviews can only be completed for delivered orders', 400);
+
+    // Handle limit
+    if (options?.limit) {
+      query = query.limit(options.limit);
     }
-    if (!order.buyerReviewCompletedAt) {
-      order.buyerReviewCompletedAt = new Date();
-      await order.save();
-    }
-    return this.getOrderById(orderId);
+
+    return query.exec();
   }
 
   async getAllOrders(filter: any = {}, options: { page: number; limit: number }): Promise<{ orders: IOrder[]; total: number; page: number; totalPages: number }> {
     const { page, limit } = options;
     const skip = (page - 1) * limit;
-    
-    const orders = await Order.find(filter)
+    const listFilter = applyExcludeCancelledFromOrderList(filter);
+
+    const orders = await Order.find(listFilter)
       .populate('items.product')
       .populate('user', 'firstName lastName email phoneNumber')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
     
-    const total = await Order.countDocuments(filter);
+    const total = await Order.countDocuments(listFilter);
     const totalPages = Math.ceil(total / limit);
     
     return {
@@ -515,157 +396,39 @@ export class OrderService extends BaseService {
   }
 
   async updateOrderStatus(
-    orderId: string, 
-    orderStatus: string, 
-    performedBy?: { adminId?: string; sellerId?: string }
+    orderId: string,
+    orderStatus: string,
+    actor?: { userId: string; role: OrderApprovalActor }
   ): Promise<IOrder> {
-    console.log(`🔄 Updating order ${orderId} status to: ${orderStatus}`);
     const order = await this.verifyDoc(orderId, Order);
 
     const previousStatus = order.orderStatus;
-    order.orderStatus = orderStatus as any;
-    
-    // Update payment status to COMPLETED when order status becomes COMPLETE
-    if (orderStatus === 'COMPLETE' && previousStatus !== 'COMPLETE') {
-      if (order.paymentStatus !== 'COMPLETED') {
-        console.log(`💰 Updating payment status to COMPLETED for order ${orderId}`);
-        order.paymentStatus = 'COMPLETED';
-      }
-    }
-    
+    this.applyApprovalMetadata(order, previousStatus, orderStatus, actor);
+    order.orderStatus = orderStatus as IOrder['orderStatus'];
     await order.save();
 
     // Clear cart when COD order is confirmed
     if (orderStatus === 'CONFIRMED' && order.paymentMethod === 'CASH_ON_DELIVERY' && previousStatus === 'PENDING') {
-      let userId: string | undefined;
-      if (order.user) {
-        if (typeof order.user === 'object' && '_id' in order.user) {
-          userId = (order.user as any)._id?.toString() || (order.user as any).id?.toString();
-        } else {
-          userId = order.user.toString();
-        }
-      }
-      if (userId) {
-        await this.clearCartItems(userId, order.cartItemIds || []);
-      }
+      await this.clearCartItems(order.user.toString(), order.cartItemIds || []);
     }
 
-    // Send push notification for status change to customer
+    // Send push notification for status change
     try {
-      let userId: string | undefined;
-      if (order.user) {
-        if (typeof order.user === 'object' && '_id' in order.user) {
-          userId = (order.user as any)._id?.toString() || (order.user as any).id?.toString();
-        } else {
-          userId = order.user.toString();
-        }
-      }
-      if (userId) {
-        console.log(`📧 Calling sendOrderStatusNotification for user ${userId}, order ${orderId}, status ${orderStatus}`);
-        await this.notificationService.sendOrderStatusNotification(
-          userId,
-          orderId,
-          orderStatus,
-          order.orderNumber
-        );
-      } else {
-        console.warn(`⚠️ Order ${orderId} has no user, skipping notification`);
-      }
-      console.log(`✅ Order status notification completed for order ${orderId}`);
-    } catch (error) {
-      console.error('❌ Failed to send order status notification:', error);
-      console.error('Error details:', error);
-      // Don't throw - notification failure shouldn't fail the order update
-    }
-
-    // Notify admins of order status change (excluding the admin who performed the action)
-    try {
-      const user = await this.User.findById(order.user);
-      const customerName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email : 'Customer';
-      
-      await this.notificationService.sendOrderStatusChangeNotificationToAdmins(
+      await this.notificationService.sendOrderStatusNotification(
+        order.user.toString(),
         orderId,
-        order.orderNumber || orderId.substring(0, 8),
-        previousStatus,
         orderStatus,
-        customerName,
-        performedBy?.adminId // Exclude the admin who performed the action
+        order.orderNumber
       );
     } catch (error) {
-      console.error('Failed to send order status change notification to admins:', error);
-      // Don't throw - notification failure shouldn't fail the order update
-    }
-
-    // Notify sellers of order status change (for products they own)
-    try {
-      const user = await this.User.findById(order.user);
-      const customerName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email : 'Customer';
-      
-      // Get unique seller IDs from order items
-      const sellerIds = new Set<string>();
-      const sellerAmounts = new Map<string, number>();
-      
-      for (const item of order.items) {
-        const product = item.product as any;
-        if (product && product.owner) {
-          const ownerId = product.owner._id || product.owner;
-          const ownerIdStr = ownerId.toString();
-          sellerIds.add(ownerIdStr);
-          
-          // Calculate amount for this seller
-          const itemAmount = (item.price || 0) * (item.quantity || 0);
-          sellerAmounts.set(ownerIdStr, (sellerAmounts.get(ownerIdStr) || 0) + itemAmount);
-        }
-      }
-
-      // If order status is COMPLETE, create payouts and send completion notifications
-      if (orderStatus === 'COMPLETE' && previousStatus !== 'COMPLETE') {
-        try {
-          // Create payouts for all sellers
-          await this.payoutService.createPayoutForOrder(orderId);
-          
-          // Send completion notification to each seller with their payout amount
-          for (const sellerId of Array.from(sellerIds)) {
-            const amount = sellerAmounts.get(sellerId) || 0;
-            await this.notificationService.sendOrderCompleteNotificationToSeller(
-              sellerId,
-              orderId,
-              order.orderNumber || orderId.substring(0, 8),
-              amount,
-              customerName
-            );
-          }
-        } catch (error) {
-          console.error('Failed to create payouts or send completion notifications:', error);
-          // Don't throw - payout/notification failure shouldn't fail the order update
-        }
-      } else {
-        // For other status changes, send regular status change notification
-        for (const sellerId of Array.from(sellerIds)) {
-          await this.notificationService.sendOrderStatusChangeNotificationToSeller(
-            sellerId,
-            orderId,
-            order.orderNumber || orderId.substring(0, 8),
-            previousStatus,
-            orderStatus,
-            customerName,
-            performedBy?.sellerId // Exclude the seller who performed the action
-          );
-        }
-      }
-    } catch (error) {
-      console.error('Failed to send order status change notification to sellers:', error);
+      console.error('Failed to send order status notification:', error);
       // Don't throw - notification failure shouldn't fail the order update
     }
 
     return order;
   }
 
-  async shipOrder(
-    orderId: string, 
-    trackingNumber?: string,
-    performedBy?: { adminId?: string; sellerId?: string }
-  ): Promise<IOrder> {
+  async shipOrder(orderId: string, trackingNumber?: string): Promise<IOrder> {
     const order = await this.verifyDoc(orderId, Order);
     
     // Only allow shipping from CONFIRMED status
@@ -673,60 +436,16 @@ export class OrderService extends BaseService {
       throw new AppError('Order must be in CONFIRMED status to ship', 400);
     }
 
-    // Use updateOrderStatus to handle notifications properly
-    const previousStatus = order.orderStatus;
     order.orderStatus = 'OUT_FOR_DELIVERY';
     if (trackingNumber) {
       order.paymentReference = trackingNumber; // Using this field for tracking
     }
     await order.save();
 
-    // Send notifications (excluding the performer)
-    try {
-      const user = await this.User.findById(order.user);
-      const customerName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email : 'Customer';
-      
-      // Notify admins
-      await this.notificationService.sendOrderStatusChangeNotificationToAdmins(
-        orderId,
-        order.orderNumber || orderId.substring(0, 8),
-        previousStatus,
-        'OUT_FOR_DELIVERY',
-        customerName,
-        performedBy?.adminId
-      );
-
-      // Notify sellers
-      const sellerIds = new Set<string>();
-      for (const item of order.items) {
-        const product = item.product as any;
-        if (product && product.owner) {
-          const ownerId = product.owner._id || product.owner;
-          sellerIds.add(ownerId.toString());
-        }
-      }
-      for (const sellerId of Array.from(sellerIds)) {
-        await this.notificationService.sendOrderStatusChangeNotificationToSeller(
-          sellerId,
-          orderId,
-          order.orderNumber || orderId.substring(0, 8),
-          previousStatus,
-          'OUT_FOR_DELIVERY',
-          customerName,
-          performedBy?.sellerId
-        );
-      }
-    } catch (error) {
-      console.error('Failed to send notifications for ship order:', error);
-    }
-
     return order;
   }
 
-  async deliverOrder(
-    orderId: string, 
-    performedBy?: { adminId?: string; sellerId?: string }
-  ): Promise<IOrder> {
+  async deliverOrder(orderId: string): Promise<IOrder> {
     const order = await this.verifyDoc(orderId, Order);
     
     // Only allow delivery from OUT_FOR_DELIVERY status
@@ -734,10 +453,11 @@ export class OrderService extends BaseService {
       throw new AppError('Order must be in OUT_FOR_DELIVERY status to deliver', 400);
     }
 
-    // Use updateOrderStatus to handle all notifications, payouts, and payment status updates
-    // This ensures consistency and triggers all necessary notifications
-    // Payment status will be automatically set to COMPLETED in updateOrderStatus when order becomes COMPLETE
-    return this.updateOrderStatus(orderId, 'COMPLETE', performedBy);
+    order.orderStatus = 'COMPLETE';
+    // Cash on delivery: payment stays PENDING until admin marks it paid after delivery
+    await order.save();
+
+    return order;
   }
 
   private validateStatusTransition(currentStatus: string, newStatus: string): void {
@@ -755,39 +475,19 @@ export class OrderService extends BaseService {
     }
   }
 
-  /**
-   * Fix existing COMPLETE orders that don't have paymentStatus set to COMPLETED
-   * This is a utility method to fix data consistency for existing orders
-   */
-  async fixCompleteOrdersPaymentStatus(): Promise<{ updated: number }> {
-    try {
-      const result = await Order.updateMany(
-        {
-          orderStatus: 'COMPLETE',
-          $or: [
-            { paymentStatus: { $ne: 'COMPLETED' } },
-            { paymentStatus: { $exists: false } }
-          ]
-        },
-        {
-          $set: { paymentStatus: 'COMPLETED' }
-        }
-      );
-
-      console.log(`✅ Fixed ${result.modifiedCount} COMPLETE orders with payment status`);
-      return { updated: result.modifiedCount || 0 };
-    } catch (error) {
-      console.error('Error fixing complete orders payment status:', error);
-      throw new AppError('Failed to fix complete orders payment status', 500);
-    }
-  }
-
   async updatePaymentStatus(orderId: string, paymentStatus: string, paymentReference?: string): Promise<IOrder> {
     const order = await this.verifyDoc(orderId, Order);
     
-    const validStatuses = ['PENDING', 'COMPLETED', 'FAILED', 'REFUNDED'];
+    const validStatuses = ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'REFUNDED'];
     if (!validStatuses.includes(paymentStatus)) {
       throw new AppError('Invalid payment status', 400);
+    }
+
+    if (paymentStatus === 'COMPLETED' && order.orderStatus !== 'COMPLETE') {
+      throw new AppError(
+        'Order must be delivered (Complete) before payment can be recorded',
+        400
+      );
     }
 
     const previousPaymentStatus = order.paymentStatus;
@@ -796,62 +496,293 @@ export class OrderService extends BaseService {
       order.paymentReference = paymentReference;
     }
 
-    // Auto-confirm order if payment is completed (except for cash on delivery)
-    if (paymentStatus === 'COMPLETED' && order.paymentMethod !== 'CASH_ON_DELIVERY') {
-      order.orderStatus = 'CONFIRMED';
-    }
-
     await order.save();
+
+    if (order.activePayment) {
+      const paymentUpdate: Record<string, unknown> = { status: paymentStatus };
+      if (paymentStatus === 'COMPLETED') {
+        paymentUpdate.completedAt = new Date();
+      }
+      await Payment.findByIdAndUpdate(order.activePayment, paymentUpdate);
+    }
 
     // Clear cart when payment is completed for non-COD orders
     if (paymentStatus === 'COMPLETED' && order.paymentMethod !== 'CASH_ON_DELIVERY' && previousPaymentStatus !== 'COMPLETED') {
-      let userId: string | undefined;
-      if (order.user) {
-        if (typeof order.user === 'object' && '_id' in order.user) {
-          userId = (order.user as any)._id?.toString() || (order.user as any).id?.toString();
-        } else {
-          userId = order.user.toString();
-        }
-      }
-      if (userId) {
-        await this.clearCartItems(userId, order.cartItemIds || []);
+      await this.clearCartItems(order.user.toString(), order.cartItemIds || []);
+    }
+
+    if (paymentStatus === 'COMPLETED' && previousPaymentStatus !== 'COMPLETED') {
+      try {
+        await this.notificationService.notifyOrderStatus({
+          userId: toIdString(order.user),
+          orderId: toIdString(order._id),
+          status: 'CONFIRMED',
+          orderNumber: order.orderNumber,
+        });
+      } catch {
+        // non-blocking
       }
     }
 
     return order;
   }
 
-  async cancelOrder(orderId: string): Promise<IOrder> {
+  /**
+   * Admin records that payment was received (cash, mobile money verification, etc.).
+   * Allowed only after the order has been delivered (orderStatus COMPLETE).
+   */
+  async recordOrderPaidByAdmin(
+    orderId: string,
+    adminId: string,
+    payload?: { paymentReference?: string; note?: string }
+  ): Promise<IOrder> {
     const order = await this.verifyDoc(orderId, Order);
-    
-    // Only allow cancellation if order is not yet shipped
-    if (['SHIPPED', 'DELIVERED'].includes(order.orderStatus)) {
-      throw new AppError('Cannot cancel order that has been shipped or delivered', 400);
+
+    if (order.orderStatus === 'CANCELLED' || order.orderStatus === 'CANCELLED_BY_BUYER') {
+      throw new AppError('Cannot mark a cancelled order as paid', 400);
+    }
+    if (order.orderStatus !== 'COMPLETE') {
+      throw new AppError(
+        'Order must be delivered (Complete) before payment can be recorded',
+        400
+      );
+    }
+    if (order.paymentStatus === 'COMPLETED') {
+      throw new AppError('Order is already marked as paid', 400);
     }
 
-    order.orderStatus = 'CANCELLED';
+    const admin = await Admin.findById(adminId);
+    if (!admin) {
+      throw new AppError('Admin not found', 404);
+    }
+    const adminUserId = await resolveAdminChatUserId(admin, User);
+
+    if (payload?.paymentReference?.trim()) {
+      order.paymentReference = payload.paymentReference.trim();
+    }
+    if (payload?.note?.trim()) {
+      const line = `[Paiement enregistré par admin] ${payload.note.trim()}`;
+      order.notes = order.notes ? `${order.notes}\n${line}` : line;
+    }
+
+    order.set({
+      paymentMarkedPaidBy: adminUserId,
+      paymentMarkedPaidAt: new Date(),
+      paymentMarkedPaidByActor: 'ADMIN',
+    });
+
+    order.paymentStatus = 'COMPLETED';
+
     await order.save();
 
+    if (order.activePayment) {
+      await Payment.findByIdAndUpdate(order.activePayment, {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+      });
+    }
+
+    if (order.paymentMethod !== 'CASH_ON_DELIVERY') {
+      await this.clearCartItems(order.user.toString(), order.cartItemIds || []);
+    }
+
+    try {
+      await this.notificationService.notifyOrderStatus({
+        userId: toIdString(order.user),
+        orderId: toIdString(order._id),
+        status: 'CONFIRMED',
+        orderNumber: order.orderNumber,
+      });
+    } catch {
+      // non-blocking
+    }
+
+    return (await Order.findById(orderId)) as IOrder;
+  }
+
+  /**
+   * Buyer-initiated cancellation before seller confirmation.
+   * Uses an atomic update to avoid double cancellation under concurrent requests.
+   */
+  async cancelOrderByBuyer(
+    orderId: string,
+    userId: string,
+    reason?: string
+  ): Promise<IOrder> {
+    const trimmedReason = reason?.trim();
+    const now = new Date();
+
+    const statusUpdate: Record<string, unknown> = {
+      $set: {
+        orderStatus: 'CANCELLED_BY_BUYER',
+        cancelledAt: now,
+        cancelledBy: userId,
+        cancelledByActor: 'BUYER',
+        ...(trimmedReason ? { cancellationReason: trimmedReason } : {}),
+      },
+    };
+    if (!trimmedReason) {
+      statusUpdate.$unset = { cancellationReason: '' };
+    }
+
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: orderId,
+        user: userId,
+        orderStatus: { $in: [...BUYER_CANCELLABLE_ORDER_STATUSES] },
+      },
+      statusUpdate,
+      { new: true }
+    ).populate('items.product');
+
+    if (!order) {
+      const existing = await Order.findById(orderId).select('user orderStatus').lean();
+      if (!existing) {
+        throw new AppError('Order not found', 404);
+      }
+      if (toIdString(existing.user) !== userId) {
+        throw new AppError('Access denied', 403);
+      }
+      if (
+        existing.orderStatus === 'CANCELLED' ||
+        existing.orderStatus === 'CANCELLED_BY_BUYER'
+      ) {
+        throw new AppError('Order is already cancelled', 409);
+      }
+      throw new AppError(
+        'This order can no longer be cancelled because it has already been confirmed or is being processed',
+        400
+      );
+    }
+
+    if (order.paymentStatus === 'PROCESSING' || order.paymentStatus === 'COMPLETED') {
+      order.paymentStatus = 'REFUNDED';
+    } else if (order.paymentStatus === 'PENDING') {
+      order.paymentStatus = 'FAILED';
+    }
+    await order.save();
+
+    if (order.activePayment) {
+      await Payment.findByIdAndUpdate(order.activePayment, {
+        status: order.paymentStatus === 'REFUNDED' ? 'REFUNDED' : 'FAILED',
+      });
+    }
+
+    await this.restoreProductQuantities(order.items as IOrderItem[]);
+
+    try {
+      await this.notificationService.notifyOrderStatus({
+        userId,
+        orderId: toIdString(order._id),
+        status: 'CANCELLED_BY_BUYER',
+        orderNumber: order.orderNumber,
+      });
+      await this.notifySellersOrderCancelledByBuyer(order);
+    } catch (error) {
+      console.error('Failed to send buyer cancellation notifications:', error);
+    }
+
     return order;
+  }
+
+  /** @deprecated Use cancelOrderByBuyer — kept for internal compatibility */
+  async cancelOrder(orderId: string, userId: string, reason?: string): Promise<IOrder> {
+    return this.cancelOrderByBuyer(orderId, userId, reason);
+  }
+
+  private async notifySellersOrderCancelledByBuyer(order: IOrder): Promise<void> {
+    const orderId = toIdString(order._id);
+    const orderNumber = order.orderNumber;
+    const productIds = order.items.map((item) => toIdString(item.product));
+    if (productIds.length === 0) return;
+
+    const products = await Product.find({ _id: { $in: productIds } })
+      .select('owner')
+      .lean();
+    const sellerIds = Array.from(
+      new Set(products.map((p) => toIdString(p.owner)).filter(Boolean))
+    );
+    if (sellerIds.length === 0) return;
+
+    const sellers = await Seller.find({ _id: { $in: sellerIds } })
+      .select('user')
+      .lean();
+    const sellerUserIds = Array.from(
+      new Set(sellers.map((s) => toIdString(s.user)).filter(Boolean))
+    );
+
+    await this.notificationService.notifyOrderCancelledByBuyerForSellers({
+      sellerUserIds,
+      orderId,
+      orderNumber,
+    });
+  }
+
+  private async restoreProductQuantities(items: IOrderItem[]): Promise<void> {
+    try {
+      for (const item of items) {
+        const productId = toIdString(item.product);
+        const product = await Product.findById(productId);
+
+        if (!product) {
+          console.warn(`Product not found for stock restore: ${productId}`);
+          continue;
+        }
+
+        if (product.productType === 'simple') {
+          const currentQty = product.quantityAvailable || 0;
+          product.quantityAvailable = currentQty + item.quantity;
+          await product.save();
+          continue;
+        }
+
+        if (isVariableProductType(product.productType)) {
+          let variant = null;
+          if (item.variantId) {
+            variant = await ProductVariant.findOne({
+              _id: item.variantId,
+              product: productId,
+            });
+          }
+          if (!variant && item.sku) {
+            variant = await ProductVariant.findOne({ sku: item.sku, product: productId });
+          }
+          if (!variant && (item.size || item.color)) {
+            const q: Record<string, unknown> = { product: productId };
+            if (item.size) q.size = item.size;
+            if (item.color) q.color = item.color;
+            variant = await ProductVariant.findOne(q);
+          }
+
+          if (!variant) {
+            console.warn(`Variant not found for stock restore on product ${productId}`);
+            continue;
+          }
+
+          variant.quantityAvailable = (variant.quantityAvailable || 0) + item.quantity;
+          await variant.save();
+        }
+      }
+    } catch (error) {
+      console.error('Error restoring product quantities after cancellation:', error);
+      throw new AppError('Order was cancelled but stock could not be restored', 500);
+    }
   }
 
   private async calculateShippingFee(shippingAddress: IAddress): Promise<number> {
     try {
-      // Get shipping fee based on the province/state code
-      const provinceCode = shippingAddress.state;
+      const neighborhoodCode =
+        shippingAddress.neighborhood ||
+        (shippingAddress as IAddress & { state?: string }).state;
 
-      if (!provinceCode) {
-        console.warn('No province code found in shipping address, using default fee');
-        return 199.99; // Default shipping fee
+      if (!neighborhoodCode) {
+        console.warn('No neighborhood on shipping address, using default fee');
+        return 199.99;
       }
 
-      // Use the shipping zone service to calculate the fee
-      const shippingFee = await this.shippingZoneService.calculateShippingFee(provinceCode);
-
-      return shippingFee;
+      return await this.shippingZoneService.calculateShippingFee(neighborhoodCode);
     } catch (error) {
       console.error('Error calculating shipping fee:', error);
-      // Return default fee if calculation fails
       return 199.99;
     }
   }
@@ -898,6 +829,472 @@ export class OrderService extends BaseService {
     }
   }
 
+  private async getSellerProductIdSet(sellerId: string): Promise<Set<string>> {
+    const sellerProductIds = await Product.find({ owner: sellerId }).distinct('_id');
+    return new Set(sellerProductIds.map((id) => String(id)));
+  }
+
+  private mapOrderForSellerView(
+    order: {
+      _id?: unknown;
+      orderNumber?: string;
+      orderStatus?: string;
+      paymentStatus?: string;
+      paymentMethod?: string;
+      finalPrice?: number;
+      totalPrice?: number;
+      items?: Array<{
+        _id?: unknown;
+        product?: unknown;
+        quantity?: number;
+        price?: number;
+        sku?: string;
+        size?: string;
+        color?: string;
+      }>;
+      user?: unknown;
+      createdAt?: Date;
+      updatedAt?: Date;
+      paymentMarkedPaidAt?: Date;
+    },
+    sellerId: string,
+    sellerProductIds: Set<string>
+  ) {
+    const allItems = order.items || [];
+    const sellerItems = filterOrderItemsForSeller(allItems, sellerId, sellerProductIds);
+    const sellerAmount = Math.round(computeSellerItemsTotal(sellerItems) * 100) / 100;
+    const orderTotal = order.finalPrice ?? order.totalPrice ?? 0;
+
+    return {
+      id: order._id != null ? String(order._id) : undefined,
+      orderNumber: order.orderNumber,
+      orderStatus: order.orderStatus,
+      paymentStatus: order.paymentStatus,
+      paymentMethod: order.paymentMethod,
+      totalAmount: sellerAmount,
+      sellerAmount,
+      orderTotalAmount: orderTotal,
+      isMultiVendor: sellerItems.length < allItems.length,
+      items: mapOrderItemsForResponse(sellerItems),
+      user: order.user,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+      deliveredAt: order.updatedAt,
+      paidAt: order.paymentMarkedPaidAt ?? order.updatedAt,
+    };
+  }
+
+  async getSellerPaidOrders(
+    sellerId: string,
+    options: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      dateFrom?: string;
+      dateTo?: string;
+    } = {}
+  ): Promise<{
+    orders: unknown[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    summary: { totalPaidOrders: number; totalRevenue: number };
+  }> {
+    const page = options.page || 1;
+    const limit = Math.min(100, Math.max(1, options.limit || 20));
+    const skip = (page - 1) * limit;
+
+    const sellerProductIds = await this.getSellerProductIdSet(sellerId);
+    if (sellerProductIds.size === 0) {
+      return {
+        orders: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 0,
+        summary: { totalPaidOrders: 0, totalRevenue: 0 },
+      };
+    }
+
+    const filter = await this.buildSellerOrdersFilter(sellerId, sellerProductIds, {
+      status: 'COMPLETE',
+      paymentStatus: 'COMPLETED',
+      search: options.search,
+      dateFrom: options.dateFrom,
+      dateTo: options.dateTo,
+    });
+
+    const [orders, total, allForRevenue] = await Promise.all([
+      Order.find(filter)
+        .populate('items.product', 'name images price owner sku')
+        .populate('user', 'firstName lastName email')
+        .sort({ updatedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Order.countDocuments(filter),
+      Order.find(filter).select('items').lean(),
+    ]);
+
+    const mapped = orders.map((order) =>
+      this.mapOrderForSellerView(order, sellerId, sellerProductIds)
+    );
+    const totalRevenue = await this.computeSellerRevenueForOrders(
+      allForRevenue,
+      sellerId,
+      sellerProductIds
+    );
+
+    return {
+      orders: mapped,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 0,
+      summary: {
+        totalPaidOrders: total,
+        totalRevenue,
+      },
+    };
+  }
+
+  private buildSearchRegex(term: string): RegExp {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(escaped, 'i');
+  }
+
+  private async computeSellerRevenueForOrders(
+    orders: Array<{ items?: OrderItemLike[] }>,
+    sellerId: string,
+    sellerProductIds: Set<string>
+  ): Promise<number> {
+    let total = 0;
+    for (const order of orders) {
+      const sellerItems = filterOrderItemsForSeller(order.items || [], sellerId, sellerProductIds);
+      total += computeSellerItemsTotal(sellerItems);
+    }
+    return Math.round(total * 100) / 100;
+  }
+
+  private async buildSellerOrdersFilter(
+    sellerId: string,
+    sellerProductIds: Set<string>,
+    options: {
+      status?: string;
+      paymentStatus?: string;
+      search?: string;
+      dateFrom?: string;
+      dateTo?: string;
+    }
+  ): Promise<Record<string, unknown>> {
+    const productObjectIds = Array.from(sellerProductIds);
+    const andClauses: Record<string, unknown>[] = [
+      { 'items.product': { $in: productObjectIds } },
+      excludeCancelledOrdersClause,
+    ];
+
+    if (
+      options.status &&
+      !HIDDEN_CANCELLED_ORDER_STATUSES.includes(
+        options.status as (typeof HIDDEN_CANCELLED_ORDER_STATUSES)[number]
+      )
+    ) {
+      andClauses.push({ orderStatus: options.status });
+    }
+
+    if (options.paymentStatus) {
+      andClauses.push({ paymentStatus: options.paymentStatus });
+    }
+
+    if (options.dateFrom || options.dateTo) {
+      const dateFilter: Record<string, Date> = {};
+      if (options.dateFrom) {
+        dateFilter.$gte = new Date(options.dateFrom);
+      }
+      if (options.dateTo) {
+        const end = new Date(options.dateTo);
+        end.setHours(23, 59, 59, 999);
+        dateFilter.$lte = end;
+      }
+      andClauses.push({ updatedAt: dateFilter });
+    }
+
+    const searchTerm = options.search?.trim();
+    if (searchTerm) {
+      const regex = this.buildSearchRegex(searchTerm);
+      const orClauses: Record<string, unknown>[] = [{ orderNumber: regex }];
+
+      const [matchingUserIds, matchingProductIds] = await Promise.all([
+        User.find({
+          $or: [{ email: regex }, { firstName: regex }, { lastName: regex }],
+        }).distinct('_id'),
+        Product.find({ owner: sellerId, name: regex }).distinct('_id'),
+      ]);
+
+      if (matchingUserIds.length > 0) {
+        orClauses.push({ user: { $in: matchingUserIds } });
+      }
+      if (matchingProductIds.length > 0) {
+        orClauses.push({ 'items.product': { $in: matchingProductIds } });
+      }
+
+      andClauses.push({ $or: orClauses });
+    }
+
+    return andClauses.length === 1 ? andClauses[0] : { $and: andClauses };
+  }
+
+  async getSellerOrderStatusCounts(
+    sellerId: string
+  ): Promise<Record<string, number>> {
+    const sellerProductIds = await this.getSellerProductIdSet(sellerId);
+    const counts: Record<string, number> = {
+      all: 0,
+      PENDING: 0,
+      OUT_FOR_DELIVERY: 0,
+      COMPLETE: 0,
+    };
+
+    if (sellerProductIds.size === 0) {
+      return counts;
+    }
+
+    const productObjectIds = Array.from(sellerProductIds);
+    const rows = await Order.aggregate<{ _id: string; count: number }>([
+      {
+        $match: {
+          'items.product': { $in: productObjectIds },
+          ...excludeCancelledOrdersClause,
+        },
+      },
+      { $group: { _id: '$orderStatus', count: { $sum: 1 } } },
+    ]);
+
+    for (const row of rows) {
+      const status = row._id;
+      counts.all += row.count;
+      if (status in counts) {
+        counts[status] = row.count;
+      }
+    }
+
+    return counts;
+  }
+
+  async getSellerOrders(
+    sellerId: string,
+    options: { page?: number; limit?: number; status?: string; search?: string } = {}
+  ): Promise<{
+    orders: unknown[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    statusCounts: Record<string, number>;
+  }> {
+    const page = options.page || 1;
+    const limit = Math.min(100, Math.max(1, options.limit || 20));
+    const skip = (page - 1) * limit;
+
+    const sellerProductIds = await this.getSellerProductIdSet(sellerId);
+    if (sellerProductIds.size === 0) {
+      return {
+        orders: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 0,
+        statusCounts: await this.getSellerOrderStatusCounts(sellerId),
+      };
+    }
+
+    const filter = await this.buildSellerOrdersFilter(sellerId, sellerProductIds, {
+      status: options.status,
+      search: options.search,
+    });
+
+    const [orders, total, statusCounts] = await Promise.all([
+      Order.find(filter)
+        .populate('items.product', 'name images price owner')
+        .populate('user', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Order.countDocuments(filter),
+      this.getSellerOrderStatusCounts(sellerId),
+    ]);
+
+    const mapped = orders.map((order) =>
+      this.mapOrderForSellerView(order, sellerId, sellerProductIds)
+    );
+
+    return {
+      orders: mapped,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 0,
+      statusCounts,
+    };
+  }
+
+  async getSellerOrderById(orderId: string, sellerId: string): Promise<Record<string, unknown>> {
+    const sellerProductIds = await this.getSellerProductIdSet(sellerId);
+    if (sellerProductIds.size === 0) {
+      throw new AppError('Order not found', 404);
+    }
+
+    const productObjectIds = Array.from(sellerProductIds);
+    const order = await Order.findOne({
+      _id: orderId,
+      'items.product': { $in: productObjectIds },
+    })
+      .populate('items.product', 'name images price owner')
+      .populate('user', 'firstName lastName email')
+      .lean();
+
+    if (!order) {
+      throw new AppError('Order not found', 404);
+    }
+
+    return this.mapOrderForSellerView(order, sellerId, sellerProductIds);
+  }
+
+  async assertSellerOwnsOrder(orderId: string, sellerId: string): Promise<IOrder> {
+    const order = await Order.findById(orderId).populate('items.product', 'owner');
+    if (!order) {
+      throw new AppError('Order not found', 404);
+    }
+
+    const ownsItem = order.items.some((item) => {
+      const product = item.product as { owner?: { toString(): string } | string };
+      if (!product?.owner) return false;
+      const ownerId =
+        typeof product.owner === 'object' && product.owner !== null
+          ? product.owner.toString()
+          : String(product.owner);
+      return ownerId === sellerId;
+    });
+
+    if (!ownsItem) {
+      throw new AppError('Order not found', 404);
+    }
+
+    return order;
+  }
+
+  private applyApprovalMetadata(
+    order: IOrder,
+    previousStatus: string,
+    nextStatus: string,
+    actor?: { userId: string; role: OrderApprovalActor }
+  ): void {
+    if (!actor?.userId || previousStatus !== 'PENDING') return;
+
+    if (nextStatus === 'CONFIRMED') {
+      order.set({
+        approvedBy: actor.userId,
+        approvedAt: new Date(),
+        approvedByActor: actor.role,
+        rejectedBy: undefined,
+        rejectedAt: undefined,
+        rejectedByActor: undefined,
+      });
+    } else if (nextStatus === 'CANCELLED') {
+      order.set({
+        rejectedBy: actor.userId,
+        rejectedAt: new Date(),
+        rejectedByActor: actor.role,
+      });
+    }
+  }
+
+  private async resolveSellerUserId(sellerId: string): Promise<string> {
+    const seller = await Seller.findById(sellerId).select('user').lean();
+    if (!seller?.user) {
+      throw new AppError('Seller account not found', 404);
+    }
+    return toIdString(seller.user);
+  }
+
+  async confirmOrderBySeller(orderId: string, sellerId: string): Promise<IOrder> {
+    const allowed = await this.platformSettingsService.isSellerOrderApprovalAllowed();
+    if (!allowed) {
+      throw new AppError('Order approval not allowed.', 403);
+    }
+
+    const order = await this.assertSellerOwnsOrder(orderId, sellerId);
+    if (order.orderStatus !== 'PENDING') {
+      throw new AppError('Only pending orders can be accepted', 400);
+    }
+    const sellerUserId = await this.resolveSellerUserId(sellerId);
+    return this.updateOrderStatus(orderId, 'CONFIRMED', {
+      userId: sellerUserId,
+      role: 'SELLER',
+    });
+  }
+
+  async rejectOrderBySeller(
+    orderId: string,
+    sellerId: string,
+    reason?: string
+  ): Promise<IOrder> {
+    const allowed = await this.platformSettingsService.isSellerOrderApprovalAllowed();
+    if (!allowed) {
+      throw new AppError('Order approval not allowed.', 403);
+    }
+
+    const order = await this.assertSellerOwnsOrder(orderId, sellerId);
+    if (order.orderStatus !== 'PENDING') {
+      throw new AppError('Only pending orders can be refused', 400);
+    }
+    if (reason?.trim()) {
+      order.notes = order.notes
+        ? `${order.notes}\n[Seller refusal] ${reason.trim()}`
+        : `[Seller refusal] ${reason.trim()}`;
+      await order.save();
+    }
+    const sellerUserId = await this.resolveSellerUserId(sellerId);
+    return this.updateOrderStatus(orderId, 'CANCELLED', {
+      userId: sellerUserId,
+      role: 'SELLER',
+    });
+  }
+
+  async approveOrderByAdmin(orderId: string, adminUserId: string): Promise<IOrder> {
+    const order = await this.verifyDoc(orderId, Order);
+    if (order.orderStatus !== 'PENDING') {
+      throw new AppError('Only pending orders can be approved', 400);
+    }
+    return this.updateOrderStatus(orderId, 'CONFIRMED', {
+      userId: adminUserId,
+      role: 'ADMIN',
+    });
+  }
+
+  async rejectOrderByAdmin(
+    orderId: string,
+    adminUserId: string,
+    reason?: string
+  ): Promise<IOrder> {
+    const order = await this.verifyDoc(orderId, Order);
+    if (order.orderStatus !== 'PENDING') {
+      throw new AppError('Only pending orders can be rejected', 400);
+    }
+    if (reason?.trim()) {
+      order.notes = order.notes
+        ? `${order.notes}\n[Admin rejection] ${reason.trim()}`
+        : `[Admin rejection] ${reason.trim()}`;
+      await order.save();
+    }
+    return this.updateOrderStatus(orderId, 'CANCELLED', {
+      userId: adminUserId,
+      role: 'ADMIN',
+    });
+  }
+
   private async decrementProductQuantities(cartItems: any[]): Promise<void> {
     try {
       for (const item of cartItems) {
@@ -925,12 +1322,26 @@ export class OrderService extends BaseService {
           } else if (newQty < 5) {
             console.warn(`Product ${productId} is low on stock: ${newQty} remaining`);
           }
-        } else if (product.productType === 'variable' && item.sku) {
-          // Decrement quantity for specific variant
-          const variant = await ProductVariant.findOne({ sku: item.sku, product: productId });
+        } else if (isVariableProductType(product.productType)) {
+          let variant = null;
+          if (item.variantId) {
+            variant = await ProductVariant.findOne({
+              _id: item.variantId,
+              product: productId,
+            });
+          }
+          if (!variant && item.sku) {
+            variant = await ProductVariant.findOne({ sku: item.sku, product: productId });
+          }
+          if (!variant && (item.size || item.color)) {
+            const q: Record<string, unknown> = { product: productId };
+            if (item.size) q.size = item.size;
+            if (item.color) q.color = item.color;
+            variant = await ProductVariant.findOne(q);
+          }
 
           if (!variant) {
-            console.warn(`Variant not found for SKU: ${item.sku}`);
+            console.warn(`Variant not found for order item on product ${productId}`);
             continue;
           }
 

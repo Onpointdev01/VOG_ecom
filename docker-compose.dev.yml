@@ -1,0 +1,52 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: vog_ecom_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - vog_ecom_mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: vog_ecom_api_dev
+    ports:
+      - "${PORT:-8013}:8013"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: development
+      PORT: "8013"
+      MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017/vog_ecom}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret}
+      JWT_EXPIRES: ${JWT_EXPIRES:-24h}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-jwt-refresh-secret}
+      JWT_REFRESH_EXPIRES: ${JWT_REFRESH_EXPIRES:-7d}
+      BUCKET_NAME: ${BUCKET_NAME:-local-dev-bucket}
+      SECRET_ACCESS_KEY: ${SECRET_ACCESS_KEY:-local-dev-secret}
+      ACCESS_KEY_ID: ${ACCESS_KEY_ID:-local-dev-access-key}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  vog_ecom_mongo_data:

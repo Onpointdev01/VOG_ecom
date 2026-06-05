@@ -11,6 +11,10 @@ export * from './PaymentOption';
 export * from './Payment';
 export * from './ProductBid';
 export * from './BidMessages';
+export * from './Conversation';
+export * from './ConversationProduct';
+export * from './Message';
+export * from './Offer';
 export * from './Order';
 export * from './UserView';
 export * from './Brand';
@@ -18,9 +22,8 @@ export * from './ShippingZone';
 export * from './Attribute';
 export * from './AttributeValue';
 export * from './Notification';
-export * from './TokenBlacklist';
-export * from './Payout';
-export * from './AuditLog';
-export * from './BidOffer';
+export * from './MarketingCampaign';
+export * from './PlatformSettings';
+export * from './AdminEmailBroadcast';
 
 export * from './newCategory'; // This exports Category and ICategory

@@ -8,6 +8,7 @@ export interface IAttribute extends Document {
   displayName: string;       // Display name: "Choose Size", "Select Color"
   type: 'select' | 'color' | 'text';  // How to display in UI
   description?: string;      // Optional description for admin
+  iconUrl?: string;          // Optional icon/image for catalog UI
   isRequired: boolean;       // Default required state
   isActive: boolean;
   displayOrder: number;      // Order in UI
@@ -39,6 +40,11 @@ const attributeSchema: Schema = new Schema<IAttribute>(
     description: {
       type: String,
       trim: true,
+    },
+    iconUrl: {
+      type: String,
+      trim: true,
+      default: '',
     },
     isRequired: {
       type: Boolean,

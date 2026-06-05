@@ -8,7 +8,24 @@ import AppError from '../utils/errors/AppError';
 import { BaseService } from './BaseService';
 import { createProductDTO, createReviewDTO, getAllProductsResponse } from '../utils/dtos';
 import { IReview, IUser, IProductVariant, ProductVariant, ISeller } from '../models';
-import { NotificationService } from './NotificationService';
+import {
+  inStockOnlyMatch,
+  publicListingBaseMatch,
+  sellerLookupStages,
+  totalStockStage,
+  variantsLookupStage,
+} from '../utils/productListingPipeline';
+import {
+  canViewProductPage,
+  enrichProductAvailability,
+  isVariableProductType,
+} from '../utils/productAvailability';
+import {
+  VariantCombinationInput,
+  VariantConfigInput,
+  mergeVariantRowsWithConfig,
+  normalizeStringList,
+} from '../utils/variantUtils';
 
 export interface IProductService {
   createProduct(payload: createProductDTO): Promise<IProduct>;
@@ -16,7 +33,10 @@ export interface IProductService {
   createVariableProduct(payload: any): Promise<IProduct>;
   bulkCreateSimpleProducts(payload: any): Promise<IProduct[]>;
   duplicateProduct(productId: string, modifications: any): Promise<IProduct>;
-  getProductById(id: string): Promise<IProduct>;
+  getProductById(
+    id: string,
+    options?: { skipAvailabilityCheck?: boolean; includeInactiveVariants?: boolean }
+  ): Promise<IProduct>;
   getAllProducts(
     filter: FilterQuery<IProduct>,
     category?: string,
@@ -39,29 +59,18 @@ export interface IProductService {
   getProductsBySellerId(
     sellerId: string,
     page: number,
-    limit: number
-  ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}>;
-  getProductsByBoutiqueId(
-    boutiqueId: string,
-    page: number,
     limit: number,
-    filters?: {
-      category?: string;
-      min_price?: number;
-      max_price?: number;
-      in_stock?: boolean;
-      sort?: 'price_asc' | 'price_desc' | 'newest' | 'best_selling';
-    }
+    options?: { search?: string; isActive?: boolean; category?: string }
   ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}>;
   updateProduct(id: string, payload: Partial<IProduct>): Promise<IProduct>;
+  updateProductWithVariants(productId: string, sellerId: string, payload: any): Promise<any>;
+  getSellerOwnedProduct(productId: string, sellerId: string): Promise<any>;
   deleteProduct(id: string): Promise<void>;
   reviewProduct(review: createReviewDTO): Promise<IReview>;
 }
 
 @injectable()
 export class ProductService extends BaseService implements IProductService {
-  private notificationService?: NotificationService;
-
   constructor(
     @inject(TYPES.Product) private Product: Model<IProduct>,
     @inject(TYPES.ProductVariant) private ProductVariant: Model<IProductVariant>,
@@ -72,59 +81,38 @@ export class ProductService extends BaseService implements IProductService {
     super();
   }
 
-  /**
-   * Set notification service (called after NotificationService is initialized)
-   */
-  setNotificationService(notificationService: NotificationService): void {
-    this.notificationService = notificationService;
-  }
-
   async createProduct(payload: createProductDTO): Promise<IProduct> {
     // Check if product exists by name or another unique identifier
     // const existingProduct = await this.Product.findOne({ name });
     // if (existingProduct) throw new AppError('Product already exists', 400);
     await this.verifySeller(payload.owner.toString());
     const newProduct = await this.Product.create(payload);
-    
-    // Notify admins of new product
-    try {
-      const seller = await this.Seller.findById(payload.owner).populate('user');
-      const sellerName = seller ? (seller as any).name || 'Unknown Seller' : 'Unknown Seller';
-      
-      if (this.notificationService) {
-        await this.notificationService.sendNewProductNotificationToAdmins(
-          (newProduct._id as string).toString(),
-          newProduct.name,
-          sellerName,
-          newProduct.productType || 'simple'
-        );
-      }
-    } catch (error) {
-      console.error('Failed to send new product notification to admins:', error);
-      // Don't throw - notification failure shouldn't fail product creation
-    }
-    
     return newProduct;
   }
 
-  async getProductById(id: string): Promise<any> {
+  async getProductById(
+    id: string,
+    options?: { skipAvailabilityCheck?: boolean; includeInactiveVariants?: boolean }
+  ): Promise<any> {
     const product = await this.Product.findById(id).lean();
     if (!product) throw new AppError('Product not found', 404);
-
-    // Populate owner/seller data
-    let ownerData = null;
-    if (product.owner) {
-      const seller = await this.Seller.findById(product.owner).lean();
-      if (seller) {
-        ownerData = {
-          id: (seller._id as any).toString(),
-          name: seller.name,
-          rating: seller.rating,
-          logo: seller.logo,
-          official: seller.official,
-        };
-      }
+    if (!product.owner) {
+      throw new AppError('Product not found', 404);
     }
+
+    const seller = await this.Seller.findById(product.owner).lean();
+    if (!seller) {
+      throw new AppError('Product not found', 404);
+    }
+
+    const ownerData = {
+      id: (seller._id as any).toString(),
+      name: seller.name,
+      rating: seller.rating,
+      logo: seller.logo,
+      official: seller.official,
+      status: seller.status,
+    };
 
     // Populate attributes if they exist
     let populatedAttributes = product.attributes;
@@ -145,47 +133,70 @@ export class ProductService extends BaseService implements IProductService {
     }
 
     // If it's a variable product, populate variants
-    if (product.productType === 'variable') {
-      const variants = await this.ProductVariant.find({
-        product: id,
-        isActive: true
-      }).select('sku size color price originalPrice quantityAvailable images');
+    if (isVariableProductType(product.productType)) {
+      const variantFilter: Record<string, unknown> = { product: id };
+      if (!options?.includeInactiveVariants) {
+        variantFilter.isActive = true;
+      }
+      const variants = await this.ProductVariant.find(variantFilter).select(
+        'sku size color price originalPrice quantityAvailable images isActive'
+      );
 
-      return {
+      const payload = {
         ...product,
         id: product._id.toString(),
         _id: undefined,
         owner: ownerData,
         attributes: populatedAttributes,
-        variants: variants.map(v => ({
+        variants: variants.map((v) => ({
           ...v.toObject(),
           id: (v._id as any).toString(),
-          _id: undefined
+          _id: undefined,
         })),
-        // Computed fields for variable products
-        priceRange: variants.length > 0 ? {
-          min: Math.min(...variants.map(v => v.price)),
-          max: Math.max(...variants.map(v => v.price))
-        } : null,
-        totalStock: variants.reduce((sum, v) => sum + v.quantityAvailable, 0),
-        availableColors: Array.from(new Set(variants.map(v => v.color))),
-        availableSizes: Array.from(new Set(variants.map(v => v.size)))
+        priceRange:
+          variants.length > 0
+            ? {
+                min: Math.min(...variants.map((v) => v.price)),
+                max: Math.max(...variants.map((v) => v.price)),
+              }
+            : null,
+        totalStock: variants.reduce((sum, v) => sum + (v.quantityAvailable || 0), 0),
+        quantityAvailable: variants.reduce((sum, v) => sum + (v.quantityAvailable || 0), 0),
+        availableColors: Array.from(new Set(variants.map((v) => v.color).filter(Boolean))),
+        availableSizes: Array.from(new Set(variants.map((v) => v.size).filter(Boolean))),
+        variantConfig: product.variantConfig || {
+          hasSizes: variants.some((v) => Boolean(v.size)),
+          hasColors: variants.some((v) => Boolean(v.color)),
+          sizes: Array.from(new Set(variants.map((v) => v.size).filter(Boolean))),
+          colors: Array.from(new Set(variants.map((v) => v.color).filter(Boolean))),
+        },
       };
+
+      if (!options?.skipAvailabilityCheck && !canViewProductPage({ product: payload, seller })) {
+        throw new AppError('Product not found', 404);
+      }
+
+      return enrichProductAvailability(payload, seller);
     }
 
-    // For simple products, add computed fields
-    return {
+    const payload = {
       ...product,
       id: (product._id as any).toString(),
       _id: undefined,
       owner: ownerData,
       attributes: populatedAttributes,
       variants: [],
-      priceRange: null, // Simple products have fixed price
+      priceRange: null,
       totalStock: product.quantityAvailable || 0,
       availableColors: product.color ? [product.color] : [],
-      availableSizes: [] // Simple products don't have size variations
+      availableSizes: [],
     };
+
+    if (!options?.skipAvailabilityCheck && !canViewProductPage({ product: payload, seller })) {
+      throw new AppError('Product not found', 404);
+    }
+
+    return enrichProductAvailability(payload, seller);
   }
 
   // async getAllProducts(filter: FilterQuery<IProduct>): Promise<getAllProductsResponse[]> {
@@ -222,66 +233,25 @@ export class ProductService extends BaseService implements IProductService {
     }
     const aggregationPipeline: any[] = [];
     
-    // Search handling - use regex search which always works
-    if (search && search.trim()) {
-      const searchTerm = search.trim();
-      // Escape special regex characters to prevent errors
-      const escapedSearchTerm = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      // Create regex pattern string for MongoDB (not RegExp object)
-      const regexPattern = escapedSearchTerm;
-      
-      // Use regex search which works without requiring text index
-      // This searches in name, description, and brand fields
+    // Text search must be the first stage in aggregation pipeline
+    if (search) {
       aggregationPipeline.push({
         $match: {
-          $and: [
-            {
-              $or: [
-                { name: { $regex: regexPattern, $options: 'i' } },
-                { description: { $regex: regexPattern, $options: 'i' } },
-                { brand: { $regex: regexPattern, $options: 'i' } }
-              ]
-            },
-            filter
-          ]
-        }
+          $and: [{ $text: { $search: search } }, publicListingBaseMatch, filter],
+        },
       });
       
-      // Add relevance score based on where the match was found
-      // Name matches are most relevant, then brand, then description
+      // Add text score for search relevance
       aggregationPipeline.push({
         $addFields: {
-          score: {
-            $add: [
-              { 
-                $cond: [
-                  { $regexMatch: { input: '$name', regex: regexPattern, options: 'i' } }, 
-                  10, 
-                  0
-                ] 
-              },
-              { 
-                $cond: [
-                  { $regexMatch: { input: '$brand', regex: regexPattern, options: 'i' } }, 
-                  5, 
-                  0
-                ] 
-              },
-              { 
-                $cond: [
-                  { $regexMatch: { input: '$description', regex: regexPattern, options: 'i' } }, 
-                  1, 
-                  0
-                ] 
-              }
-            ]
-          }
+          score: { $meta: 'textScore' }
         }
       });
     } else {
-      // Non-search queries can start with regular match
       aggregationPipeline.push({
-        $match: filter
+        $match: {
+          $and: [publicListingBaseMatch, filter],
+        },
       });
     }
     
@@ -306,25 +276,10 @@ export class ProductService extends BaseService implements IProductService {
     }
     
     aggregationPipeline.push(
-      {
-        $lookup: {
-          from: 'sellers',
-          localField: 'owner',
-          foreignField: '_id',
-          as: 'ownerData',
-        },
-      },
-      {
-        $addFields: {
-          owner: {
-            $cond: {
-              if: { $eq: [{ $size: '$ownerData' }, 0] },
-              then: null,
-              else: { $arrayElemAt: ['$ownerData', 0] },
-            },
-          },
-        },
-      },
+      ...sellerLookupStages,
+      variantsLookupStage,
+      totalStockStage,
+      inStockOnlyMatch,
       {
         $project: {
           _id: 1,
@@ -337,6 +292,10 @@ export class ProductService extends BaseService implements IProductService {
           images: 1,
           isActive: 1,
           isFlash: 1,
+          productType: 1,
+          quantityAvailable: 1,
+          totalStock: 1,
+          variants: 1,
           category: {
             _id: '$categoryData._id',
             name: '$categoryData.name',
@@ -354,16 +313,13 @@ export class ProductService extends BaseService implements IProductService {
               else: null,
             },
           },
-          itemDetails: {
-            brand: '$brand',
-            condition: '$condition',
-            color: '$color',
-            quantityAvailable: '$quantityAvailable',
-          },
+          brand: '$brand',
+          condition: '$condition',
+          color: '$color',
         },
       }
     );
-    
+
     // If the user is authenticated, check their wishlist
     if (user) {
       aggregationPipeline.push({
@@ -371,10 +327,7 @@ export class ProductService extends BaseService implements IProductService {
           isWishlist: {
             $cond: {
               if: {
-                $in: [
-                  '$_id', // The product's _id
-                  user.wishlist, // The user's wishlist array
-                ],
+                $in: ['$_id', user.wishlist],
               },
               then: true,
               else: false,
@@ -384,119 +337,90 @@ export class ProductService extends BaseService implements IProductService {
       });
     }
 
-    // Add lookup for variants (for variable products)
-    aggregationPipeline.push({
-      $lookup: {
-        from: 'productvariants',
-        localField: '_id',
-        foreignField: 'product',
-        as: 'variants',
-        pipeline: [
-          { $match: { isActive: true } },
-          { $project: { sku: 1, size: 1, color: 1, price: 1, quantityAvailable: 1, images: 1 } }
-        ]
-      }
-    });
-
-    // Add computed fields based on product type
+    // Computed display fields (after stock filter; productType/qty still on document)
     aggregationPipeline.push({
       $addFields: {
-        // For variable products, compute from variants
         computedPrice: {
           $cond: {
-            if: { $eq: ['$productType', 'variable'] },
+            if: { $in: ['$productType', ['variable', 'variant']] },
             then: {
               $cond: {
                 if: { $gt: [{ $size: '$variants' }, 0] },
-                then: { $min: '$variants.price' }, // Show minimum price for variable
-                else: '$price'
-              }
+                then: { $min: '$variants.price' },
+                else: '$price',
+              },
             },
-            else: '$price' // Use direct price for simple products
-          }
+            else: '$price',
+          },
         },
         priceRange: {
           $cond: {
-            if: { $and: [{ $eq: ['$productType', 'variable'] }, { $gt: [{ $size: '$variants' }, 0] }] },
+            if: {
+              $and: [
+                { $in: ['$productType', ['variable', 'variant']] },
+                { $gt: [{ $size: '$variants' }, 0] },
+              ],
+            },
             then: {
               min: { $min: '$variants.price' },
-              max: { $max: '$variants.price' }
+              max: { $max: '$variants.price' },
             },
-            else: null
-          }
-        },
-        totalStock: {
-          $cond: {
-            if: { $eq: ['$productType', 'variable'] },
-            then: { $sum: '$variants.quantityAvailable' },
-            else: '$quantityAvailable'
-          }
+            else: null,
+          },
         },
         availableColors: {
           $cond: {
-            if: { $eq: ['$productType', 'variable'] },
-            then: { $setUnion: ['$variants.color', []] }, // Unique colors from variants
-            else: { $cond: { if: '$color', then: ['$color'], else: [] } } // Single color as array for simple products
-          }
+            if: { $in: ['$productType', ['variable', 'variant']] },
+            then: { $setUnion: ['$variants.color', []] },
+            else: { $cond: { if: '$color', then: ['$color'], else: [] } },
+          },
         },
         availableSizes: {
           $cond: {
-            if: { $eq: ['$productType', 'variable'] },
-            then: { $setUnion: ['$variants.size', []] }, // Unique sizes from variants
-            else: [] // Simple products don't have sizes field anymore
-          }
-        }
-      }
+            if: { $in: ['$productType', ['variable', 'variant']] },
+            then: { $setUnion: ['$variants.size', []] },
+            else: [],
+          },
+        },
+      },
     });
 
     // Add sorting based on options or search relevance or default
-    const sortBy = options?.sortBy || 'createdAt';
-    const sortOrder = options?.sortOrder === 'asc' ? 1 : -1;
-    
-    const sortObj: any = {};
-    
-    // For search results, prioritize relevance score if available
-    if (search && (!sortBy || sortBy === 'relevance' || sortBy === 'newest')) {
-      // If we have a score field (from text search), use it as primary sort
-      if (search) {
-        sortObj.score = -1; // Higher score = more relevant
-      }
-      
-      // Add secondary sort based on options
-      if (sortBy === 'newest') {
-        sortObj.createdAt = -1;
-      } else {
-        sortObj.createdAt = -1; // Default: newest first for search results
-      }
+    if (search && (!options?.sortBy || options.sortBy === 'relevance')) {
+      // For search results, use text score unless different sort is specified
+      aggregationPipeline.push({
+        $sort: { score: { $meta: 'textScore' }, _id: 1 }
+      });
     } else {
-      // Custom sorting for non-search or specific sort requests
+      // Custom sorting
+      const sortBy = options?.sortBy || 'createdAt';
+      const sortOrder = options?.sortOrder === 'asc' ? 1 : -1;
+      
+      const sortObj: any = {};
+      
       switch (sortBy) {
         case 'name':
           sortObj.name = sortOrder;
           break;
         case 'price':
-        case 'price_asc':
-        case 'price_desc':
-          sortObj.computedPrice = sortBy === 'price_asc' ? 1 : -1;
+          sortObj.computedPrice = sortOrder;
           break;
         case 'rating':
           sortObj.rating = sortOrder;
           break;
-        case 'popular':
         case 'popularity':
           sortObj.noOfReviews = sortOrder;
           break;
         case 'createdAt':
-        case 'newest':
         default:
           sortObj.createdAt = sortOrder;
           break;
       }
+      
+      aggregationPipeline.push({
+        $sort: sortObj
+      });
     }
-    
-    aggregationPipeline.push({
-      $sort: sortObj
-    });
 
     // Add pagination if specified
     if (options?.page && options?.limit) {
@@ -507,8 +431,6 @@ export class ProductService extends BaseService implements IProductService {
       );
     }
 
-    // Execute aggregation
-    // We're using regex search which always works, no try-catch needed
     const products = await this.Product.aggregate(aggregationPipeline).exec();
     
     // Transform _id to id using schema transforms where possible
@@ -543,7 +465,6 @@ export class ProductService extends BaseService implements IProductService {
           id: product.owner._id?.toString(),
           name: product.owner.name,
           rating: product.owner.rating,
-          noOfRating: product.owner.noOfRating,
           logo: product.owner.logo,
           official: product.owner.official
         } : null,
@@ -567,10 +488,13 @@ export class ProductService extends BaseService implements IProductService {
     const productSuggestions = await this.Product.aggregate([
       {
         $match: {
-          isActive: true,
-          $text: { $search: query }  // MongoDB text search
-        }
+          $and: [publicListingBaseMatch, { $text: { $search: query } }],
+        },
       },
+      ...sellerLookupStages,
+      variantsLookupStage,
+      totalStockStage,
+      inStockOnlyMatch,
       {
         $addFields: {
           score: { $meta: 'textScore' }  // Add relevance score
@@ -818,36 +742,16 @@ export class ProductService extends BaseService implements IProductService {
       },
       { $unwind: '$categoryData' },
 
-      // Match active products and category filter
       {
         $match: {
-          $and: [
-            { isActive: true },
-            categoryFilter
-          ]
+          $and: [publicListingBaseMatch, categoryFilter],
         },
       },
 
-      // Lookup owner/seller data
-      {
-        $lookup: {
-          from: 'sellers',
-          localField: 'owner',
-          foreignField: '_id',
-          as: 'ownerData',
-        },
-      },
-      {
-        $addFields: {
-          owner: {
-            $cond: {
-              if: { $eq: [{ $size: '$ownerData' }, 0] },
-              then: null,
-              else: { $arrayElemAt: ['$ownerData', 0] },
-            },
-          },
-        },
-      },
+      ...sellerLookupStages,
+      variantsLookupStage,
+      totalStockStage,
+      inStockOnlyMatch,
 
       // Sort by creation date (newest first)
       { $sort: { createdAt: -1 } },
@@ -882,20 +786,37 @@ export class ProductService extends BaseService implements IProductService {
   async getProductsBySellerId(
     sellerId: string,
     page: number,
-    limit: number
+    limit: number,
+    options: { search?: string; isActive?: boolean; category?: string } = {}
   ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}> {
     const skip = (page - 1) * limit;
 
     // Verify seller exists
     await this.verifySeller(sellerId);
 
+    const matchConditions: Record<string, unknown>[] = [
+      { owner: new mongoose.Types.ObjectId(sellerId) },
+    ];
+    if (options.isActive !== undefined) {
+      matchConditions.push({ isActive: options.isActive });
+    }
+    if (options.category) {
+      matchConditions.push({ category: new mongoose.Types.ObjectId(options.category) });
+    }
+    if (options.search?.trim()) {
+      const term = options.search.trim();
+      matchConditions.push({
+        $or: [
+          { name: { $regex: term, $options: 'i' } },
+          { brand: { $regex: term, $options: 'i' } },
+          { description: { $regex: term, $options: 'i' } },
+        ],
+      });
+    }
+
     const aggregationPipeline: any[] = [
-      // Match products by seller/owner
       {
-        $match: {
-          owner: new mongoose.Types.ObjectId(sellerId),
-          isActive: true
-        }
+        $match: { $and: matchConditions },
       },
 
       // Lookup category data
@@ -920,75 +841,8 @@ export class ProductService extends BaseService implements IProductService {
       },
 
       // Lookup owner/seller data
-      {
-        $lookup: {
-          from: 'sellers',
-          localField: 'owner',
-          foreignField: '_id',
-          as: 'ownerData',
-        },
-      },
-      {
-        $addFields: {
-          owner: {
-            $cond: {
-              if: { $eq: [{ $size: '$ownerData' }, 0] },
-              then: null,
-              else: { $arrayElemAt: ['$ownerData', 0] },
-            },
-          },
-        },
-      },
-
-      // Lookup variants for variable products
-      {
-        $lookup: {
-          from: 'productvariants',
-          localField: '_id',
-          foreignField: 'product',
-          as: 'variants',
-          pipeline: [
-            { $match: { isActive: true } },
-            { $project: { sku: 1, size: 1, color: 1, price: 1, quantityAvailable: 1, images: 1 } }
-          ]
-        }
-      },
-
-      // Add computed fields
-      {
-        $addFields: {
-          computedPrice: {
-            $cond: {
-              if: { $eq: ['$productType', 'variable'] },
-              then: {
-                $cond: {
-                  if: { $gt: [{ $size: '$variants' }, 0] },
-                  then: { $min: '$variants.price' },
-                  else: '$price'
-                }
-              },
-              else: '$price'
-            }
-          },
-          priceRange: {
-            $cond: {
-              if: { $and: [{ $eq: ['$productType', 'variable'] }, { $gt: [{ $size: '$variants' }, 0] }] },
-              then: {
-                min: { $min: '$variants.price' },
-                max: { $max: '$variants.price' }
-              },
-              else: null
-            }
-          },
-          totalStock: {
-            $cond: {
-              if: { $eq: ['$productType', 'variable'] },
-              then: { $sum: '$variants.quantityAvailable' },
-              else: '$quantityAvailable'
-            }
-          }
-        }
-      },
+      variantsLookupStage,
+      totalStockStage,
 
       // Sort by creation date (newest first)
       { $sort: { createdAt: -1 } },
@@ -1038,7 +892,6 @@ export class ProductService extends BaseService implements IProductService {
         id: product.owner._id?.toString(),
         name: product.owner.name,
         rating: product.owner.rating,
-        noOfRating: product.owner.noOfRating,
         logo: product.owner.logo,
         official: product.owner.official
       } : null,
@@ -1051,6 +904,21 @@ export class ProductService extends BaseService implements IProductService {
         quantityAvailable: variant.quantityAvailable,
         images: variant.images
       })) || [],
+      variantConfig: product.variantConfig || null,
+      availableSizes: Array.from(
+        new Set(
+          (product.variants || [])
+            .map((variant: { size?: string }) => variant.size)
+            .filter(Boolean)
+        )
+      ),
+      availableColors: Array.from(
+        new Set(
+          (product.variants || [])
+            .map((variant: { color?: string }) => variant.color)
+            .filter(Boolean)
+        )
+      ),
       createdAt: product.createdAt
     }));
 
@@ -1065,205 +933,158 @@ export class ProductService extends BaseService implements IProductService {
     };
   }
 
-  /**
-   * Products by boutique (seller) with optional filters and sort.
-   * Reuses same aggregation shape as getProductsBySellerId; no duplicated business logic.
-   */
-  async getProductsByBoutiqueId(
-    boutiqueId: string,
-    page: number,
-    limit: number,
-    filters?: {
-      category?: string;
-      min_price?: number;
-      max_price?: number;
-      in_stock?: boolean;
-      sort?: 'price_asc' | 'price_desc' | 'newest' | 'best_selling';
-    }
-  ): Promise<{products: IProduct[]; total: number; totalPages: number; currentPage: number}> {
-    const skip = (page - 1) * limit;
-    await this.verifySeller(boutiqueId);
-
-    const pipeline: any[] = [
-      { $match: { owner: new mongoose.Types.ObjectId(boutiqueId), isActive: true } },
-      {
-        $lookup: {
-          from: 'categories',
-          localField: 'category',
-          foreignField: '_id',
-          as: 'categoryData',
-        },
-      },
-      { $unwind: { path: '$categoryData', preserveNullAndEmptyArrays: true } },
-    ];
-
-    if (filters?.category) {
-      const cat = filters.category.trim();
-      const isObjectId = mongoose.Types.ObjectId.isValid(cat) && String(new mongoose.Types.ObjectId(cat)) === cat;
-      pipeline.push({
-        $match: isObjectId
-          ? { 'category': new mongoose.Types.ObjectId(cat) }
-          : { 'categoryData.name': { $regex: cat, $options: 'i' } },
-      });
-    }
-
-    pipeline.push(
-      {
-        $lookup: {
-          from: 'sellers',
-          localField: 'owner',
-          foreignField: '_id',
-          as: 'ownerData',
-        },
-      },
-      {
-        $addFields: {
-          owner: {
-            $cond: {
-              if: { $eq: [{ $size: '$ownerData' }, 0] },
-              then: null,
-              else: { $arrayElemAt: ['$ownerData', 0] },
-            },
-          },
-        },
-      },
-      {
-        $lookup: {
-          from: 'productvariants',
-          localField: '_id',
-          foreignField: 'product',
-          as: 'variants',
-          pipeline: [
-            { $match: { isActive: true } },
-            { $project: { sku: 1, size: 1, color: 1, price: 1, quantityAvailable: 1, images: 1 } },
-          ],
-        },
-      },
-      {
-        $addFields: {
-          computedPrice: {
-            $cond: {
-              if: { $eq: ['$productType', 'variable'] },
-              then: {
-                $cond: {
-                  if: { $gt: [{ $size: '$variants' }, 0] },
-                  then: { $min: '$variants.price' },
-                  else: '$price',
-                },
-              },
-              else: '$price',
-            },
-          },
-          priceRange: {
-            $cond: {
-              if: { $and: [{ $eq: ['$productType', 'variable'] }, { $gt: [{ $size: '$variants' }, 0] }] },
-              then: { min: { $min: '$variants.price' }, max: { $max: '$variants.price' } },
-              else: null,
-            },
-          },
-          totalStock: {
-            $cond: {
-              if: { $eq: ['$productType', 'variable'] },
-              then: { $sum: '$variants.quantityAvailable' },
-              else: '$quantityAvailable',
-            },
-          },
-        },
-      }
-    );
-
-    if (filters?.min_price != null && !isNaN(filters.min_price)) {
-      pipeline.push({ $match: { computedPrice: { $gte: Number(filters.min_price) } } });
-    }
-    if (filters?.max_price != null && !isNaN(filters.max_price)) {
-      pipeline.push({ $match: { computedPrice: { $lte: Number(filters.max_price) } } });
-    }
-    if (filters?.in_stock === true) {
-      pipeline.push({ $match: { $expr: { $gt: ['$totalStock', 0] } } });
-    }
-
-    const sortOption = filters?.sort || 'newest';
-    const sortStage: Record<string, 1 | -1> =
-      sortOption === 'price_asc'
-        ? { computedPrice: 1, createdAt: -1 }
-        : sortOption === 'price_desc'
-          ? { computedPrice: -1, createdAt: -1 }
-          : sortOption === 'best_selling'
-            ? { noOfReviews: -1, createdAt: -1 }
-            : { createdAt: -1 };
-    pipeline.push({ $sort: sortStage });
-
-    pipeline.push({
-      $facet: {
-        products: [{ $skip: skip }, { $limit: limit }],
-        totalCount: [{ $count: 'count' }],
-      },
-    });
-
-    const result = await this.Product.aggregate(pipeline);
-    const products = (result[0].products || []).map((product: any) => ({
-      id: product._id.toString(),
-      name: product.name,
-      description: product.description,
-      productType: product.productType,
-      price: product.price,
-      originalPrice: product.originalPrice,
-      rating: product.rating,
-      noOfReviews: product.noOfReviews,
-      images: product.images,
-      isActive: product.isActive,
-      isFlash: product.isFlash,
-      brand: product.brand,
-      condition: product.condition,
-      color: product.color,
-      quantityAvailable: product.quantityAvailable,
-      computedPrice: product.computedPrice,
-      priceRange: product.priceRange,
-      totalStock: product.totalStock,
-      attributes: product.attributes,
-      category: product.categoryData
-        ? { id: product.categoryData._id?.toString(), name: product.categoryData.name }
-        : product.category
-          ? { id: product.category?.toString(), name: '' }
-          : null,
-      owner: product.owner
-        ? {
-            id: product.owner._id?.toString(),
-            name: product.owner.name,
-            rating: product.owner.rating,
-            noOfRating: product.owner.noOfRating,
-            logo: product.owner.logo,
-            official: product.owner.official,
-          }
-        : null,
-      variants:
-        product.variants?.map((variant: any) => ({
-          id: variant._id?.toString(),
-          sku: variant.sku,
-          size: variant.size,
-          color: variant.color,
-          price: variant.price,
-          quantityAvailable: variant.quantityAvailable,
-          images: variant.images,
-        })) || [],
-      createdAt: product.createdAt,
-    }));
-
-    const total = result[0].totalCount[0]?.count || 0;
-    const totalPages = Math.ceil(total / limit) || 1;
-
-    return {
-      products,
-      total,
-      totalPages,
-      currentPage: page,
-    };
-  }
-
   async updateProduct(id: string, payload: Partial<IProduct>): Promise<IProduct> {
     const updatedProduct = await this.Product.findByIdAndUpdate(id, payload, { new: true });
     if (!updatedProduct) throw new AppError('Product not found', 404);
     return updatedProduct;
+  }
+
+  async getSellerOwnedProduct(productId: string, sellerId: string): Promise<any> {
+    const product = await this.Product.findOne({ _id: productId, owner: sellerId });
+    if (!product) throw new AppError('Product not found', 404);
+    return this.getProductById(productId, {
+      skipAvailabilityCheck: true,
+      includeInactiveVariants: true,
+    });
+  }
+
+  async updateProductWithVariants(productId: string, sellerId: string, payload: any): Promise<any> {
+    const existing = await this.Product.findOne({ _id: productId, owner: sellerId });
+    if (!existing) throw new AppError('Product not found', 404);
+
+    const productType = payload.productType || existing.productType;
+
+    if (productType === 'simple') {
+      const {
+        variants: _v,
+        variantConfig: _c,
+        product: nested,
+        ...simpleFields
+      } = payload;
+      const updateBody = nested || simpleFields;
+      await this.ProductVariant.updateMany({ product: productId }, { isActive: false });
+      Object.assign(existing, {
+        ...updateBody,
+        productType: 'simple',
+        variantConfig: undefined,
+      });
+      await existing.save();
+      return this.getProductById(productId);
+    }
+
+    if (productType !== 'variable') {
+      throw new AppError('Invalid product type', 400);
+    }
+
+    const productFields = payload.product || payload;
+    const {
+      variants: _variants,
+      variantConfig: incomingConfig,
+      product: _nested,
+      ...topLevelProduct
+    } = payload;
+
+    const variantConfig = this.normalizeVariantConfig(
+      incomingConfig || productFields.variantConfig || existing.variantConfig
+    );
+
+    const basePrice = Number(productFields.basePrice ?? payload.basePrice ?? 0);
+    const baseOriginalPrice = Number(
+      productFields.baseOriginalPrice ?? payload.baseOriginalPrice ?? basePrice
+    );
+
+    const mergedRows = mergeVariantRowsWithConfig(
+      variantConfig,
+      (payload.variants || []) as VariantCombinationInput[],
+      basePrice,
+      baseOriginalPrice
+    );
+
+    if (mergedRows.length === 0) {
+      throw new AppError('Variable products must have at least one variant', 400);
+    }
+
+    const { price, originalPrice, color, quantityAvailable, condition, variants, variantConfig: _vc, basePrice: _bp, baseOriginalPrice: _bop, ...safeProduct } =
+      productFields;
+
+    Object.assign(existing, {
+      ...topLevelProduct,
+      ...safeProduct,
+      productType: 'variable',
+      variantConfig,
+      price: undefined,
+      quantityAvailable: undefined,
+      condition: undefined,
+    });
+    await existing.save();
+
+    await this.syncVariantsForProduct(productId, mergedRows);
+
+    return this.getProductById(productId);
+  }
+
+  private normalizeVariantConfig(config?: VariantConfigInput | null) {
+    const hasSizes = Boolean(config?.hasSizes);
+    const hasColors = Boolean(config?.hasColors);
+    return {
+      hasSizes,
+      hasColors,
+      sizes: hasSizes ? normalizeStringList(config?.sizes) : [],
+      colors: hasColors ? normalizeStringList(config?.colors) : [],
+    };
+  }
+
+  private async syncVariantsForProduct(
+    productId: string,
+    rows: VariantCombinationInput[]
+  ): Promise<void> {
+    const existingVariants = await this.ProductVariant.find({ product: productId });
+    const byId = new Map(existingVariants.map((v) => [String(v._id), v]));
+
+    const keepIds = new Set<string>();
+
+    for (const row of rows) {
+      const price = Number(row.price) >= 0 ? Number(row.price) : 0;
+      const originalPrice =
+        Number(row.originalPrice) >= 0 ? Number(row.originalPrice) : price;
+      const quantityAvailable = Math.max(0, Number(row.quantityAvailable ?? 0));
+
+      if (row.id && byId.has(row.id)) {
+        const doc = byId.get(row.id)!;
+        doc.size = row.size;
+        doc.color = row.color;
+        doc.price = price;
+        doc.originalPrice = originalPrice;
+        doc.quantityAvailable = quantityAvailable;
+        doc.images = row.images || doc.images || [];
+        if (row.sku) doc.sku = row.sku;
+        doc.isActive = true;
+        await doc.save();
+        keepIds.add(row.id);
+        continue;
+      }
+
+      const created = await new this.ProductVariant({
+        product: productId,
+        size: row.size,
+        color: row.color,
+        price,
+        originalPrice,
+        quantityAvailable,
+        images: row.images || [],
+        sku: row.sku,
+        isActive: true,
+      }).save();
+      keepIds.add(String(created._id));
+    }
+
+    for (const variant of existingVariants) {
+      const id = String(variant._id);
+      if (!keepIds.has(id)) {
+        variant.isActive = false;
+        await variant.save();
+      }
+    }
   }
 
   async deleteProduct(id: string): Promise<void> {
@@ -1286,54 +1107,59 @@ export class ProductService extends BaseService implements IProductService {
       productType: 'simple' as const
     };
     const newProduct = await this.Product.create(productData);
-    
-    // Notify admins of new product
-    try {
-      const seller = await this.Seller.findById(payload.owner).populate('user');
-      const sellerName = seller ? (seller as any).name || 'Unknown Seller' : 'Unknown Seller';
-      
-      if (this.notificationService) {
-        await this.notificationService.sendNewProductNotificationToAdmins(
-          (newProduct._id as string).toString(),
-          newProduct.name,
-          sellerName,
-          'simple'
-        );
-      }
-    } catch (error) {
-      console.error('Failed to send new product notification to admins:', error);
-      // Don't throw - notification failure shouldn't fail product creation
-    }
-    
     return newProduct;
   }
 
   async createVariableProduct(payload: any): Promise<IProduct> {
     try {
-      const { product, variants } = payload;
-      
-      
-      await this.verifySeller(product.owner.toString());
+      const productPayload = payload.product || payload;
+      await this.verifySeller(productPayload.owner.toString());
 
-      // Validate required data
-      if (!variants || variants.length === 0) {
+      const variantConfig = this.normalizeVariantConfig(
+        payload.variantConfig || productPayload.variantConfig
+      );
+
+      const basePrice = Number(payload.basePrice ?? productPayload.basePrice ?? 0);
+      const baseOriginalPrice = Number(
+        payload.baseOriginalPrice ?? productPayload.baseOriginalPrice ?? basePrice
+      );
+
+      const variantRows =
+        payload.variants && payload.variants.length > 0
+          ? mergeVariantRowsWithConfig(
+              variantConfig,
+              payload.variants as VariantCombinationInput[],
+              basePrice,
+              baseOriginalPrice
+            )
+          : mergeVariantRowsWithConfig(variantConfig, [], basePrice, baseOriginalPrice);
+
+      if (variantRows.length === 0) {
         throw new AppError('Variable products must have at least one variant', 400);
       }
 
-      // Create the variable product
-      const { price, originalPrice, color, quantityAvailable, condition, ...productData } = product;
-      
+      const {
+        price,
+        originalPrice,
+        color,
+        quantityAvailable,
+        condition,
+        variants: _v,
+        variantConfig: _vc,
+        basePrice: _bp,
+        baseOriginalPrice: _bop,
+        ...productData
+      } = productPayload;
+
       const variableProduct = await this.Product.create({
         ...productData,
         productType: 'variable',
-        images: product.images || [],
-        // Explicitly exclude fields that should not be at product level for variable products
+        images: productPayload.images || [],
+        variantConfig,
       });
 
-      // Create all variants one by one to trigger validation/save hooks for SKU generation
       const createdVariants = [];
-      for (const variantInfo of variants) {
-        
+      for (const variantInfo of variantRows) {
         const variant = new this.ProductVariant({
           ...variantInfo,
           product: variableProduct._id,
@@ -1342,31 +1168,11 @@ export class ProductService extends BaseService implements IProductService {
         createdVariants.push(savedVariant);
       }
 
-      // Notify admins of new product
-      try {
-        const seller = await this.Seller.findById(product.owner).populate('user');
-        const sellerName = seller ? (seller as any).name || 'Unknown Seller' : 'Unknown Seller';
-        
-        if (this.notificationService) {
-          await this.notificationService.sendNewProductNotificationToAdmins(
-            (variableProduct._id as string).toString(),
-            variableProduct.name,
-            sellerName,
-            'variable'
-          );
-        }
-      } catch (error) {
-        console.error('Failed to send new product notification to admins:', error);
-        // Don't throw - notification failure shouldn't fail product creation
-      }
-
-      // Return the product with variants populated
       return {
         ...variableProduct.toObject(),
-        variants: createdVariants
+        variants: createdVariants,
       } as any;
     } catch (error: any) {
-      // Convert MongoDB errors to structured AppError
       throw AppError.fromMongoError(error);
     }
   }

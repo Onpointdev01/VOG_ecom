@@ -36,8 +36,7 @@
     // "typeRoots": [],                                  /* Specify multiple folders that act like `./node_modules/@types`. */
     "types": [
       "reflect-metadata",
-      "jest",
-      "node"
+      "mocha"
     ] /* Specify type package names to be included without being referenced in a source file. */,
     // "allowUmdGlobalAccess": true,                     /* Allow accessing UMD globals from modules. */
     // "resolveJsonModule": true,                        /* Enable importing .json files */
@@ -106,5 +105,5 @@
     "skipLibCheck": true /* Skip type checking all .d.ts files. */
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "eslint.config.mjs", "src/tests/**", "**/*.test.ts", "**/*.spec.ts"]
+  "exclude": ["node_modules", "dist", "eslint.config.mjs"]
 }

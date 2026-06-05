@@ -22,6 +22,16 @@ const createOrderSchema = Joi.object({
     .messages({
       'string.max': 'Notes cannot exceed 500 characters',
     }),
+
+  couponCode: Joi.string()
+    .trim()
+    .max(50)
+    .optional()
+    .allow(''),
+
+  selectedItems: Joi.array()
+    .items(Joi.string())
+    .optional(),
 });
 
 export const validateCreateOrder = joiMiddleware(createOrderSchema, 'body');

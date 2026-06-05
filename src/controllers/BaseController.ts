@@ -46,60 +46,15 @@ export class BaseController {
   @httpPost('/api/v1/upload-single-file', upload.fields([{ name: 'image', maxCount: 1 }]))
   async uploadSingleFile(@request() req: Request, @response() res: Response) {
     try {
-      // Check for multer errors first (they might be in req.file or req.files)
-      if ((req as any).fileError) {
-        console.error('Multer error:', (req as any).fileError);
-        throw new AppError((req as any).fileError.message || 'File upload error', 400);
-      }
-      
       if (!req.files) {
         throw new AppError('No file uploaded.', 400);
       }
-      
       const files = req.files as { [key: string]: Express.MulterS3.File[] };
-      
-      // Check if image field exists and has files
-      if (!files.image || !Array.isArray(files.image) || files.image.length === 0) {
-        console.error('Upload error: No image file found in request. Files received:', Object.keys(files));
-        throw new AppError('No image file found in upload request.', 400);
-      }
-      
-      const uploadedFile = files.image[0];
-      
-      // Check if file has location (S3 URL)
-      if (!uploadedFile.location) {
-        console.error('Upload error: File uploaded but no location (S3 URL) returned. File:', uploadedFile);
-        throw new AppError('File uploaded but failed to get S3 URL.', 500);
-      }
-      
-      const fileUrl = uploadedFile.location;
+      const fileUrl = files.image[0].location;
       return this.sendResponse(res, 200, 'File uploaded successfully', { fileUrl });
-    } catch (error: any) {
-      console.error('Upload error details:', {
-        message: error?.message,
-        stack: error?.stack,
-        name: error?.name,
-        code: error?.code,
-        files: req.files ? Object.keys(req.files as object) : 'no files',
-        body: req.body,
-      });
-      
-      // If it's already an AppError, re-throw it
-      if (error instanceof AppError) {
-        throw error;
-      }
-      
-      // Handle multer errors specifically
-      if (error?.code === 'LIMIT_FILE_SIZE' || error?.message?.includes('File too large')) {
-        throw new AppError('File size exceeds the maximum allowed size (250MB)', 400);
-      }
-      
-      if (error?.message?.includes('Invalid file type')) {
-        throw new AppError('Invalid file type. Only JPEG, PNG, JPG, GIF, and WebP images are allowed', 400);
-      }
-      
-      // Otherwise, wrap it in an AppError
-      throw new AppError(error?.message || 'File upload not successful', 500);
+    } catch (error) {
+      console.log(error);
+      throw new AppError('file uploaded not successful', 500);
     }
   }
 

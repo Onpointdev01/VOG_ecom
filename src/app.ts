@@ -4,14 +4,11 @@ import { Container } from 'inversify';
 import { InversifyExpressServer } from 'inversify-express-utils';
 import cors from 'cors';
 import morgan from 'morgan';
-import helmet from 'helmet';
-import compression from 'compression';
 import { Model } from 'mongoose';
 
 import { env } from './config';
+import './controllers';
 import errorMiddleWare from './utils/errors/errorHandler';
-import multerErrorHandler from './middlewares/multerErrorHandler';
-
 import {
   Address,
   IAddress,
@@ -38,7 +35,15 @@ import {
   IBid,
   Bid,
   IBidMessages,
+  BidMessage,
+  IConversation,
+  Conversation,
+  IConversationProduct,
+  ConversationProduct,
+  IMessage,
   Message,
+  IOffer,
+  Offer,
   IOrder,
   Order,
   UserView,
@@ -50,17 +55,14 @@ import {
   AttributeValue,
   IAttributeValue,
   INotification,
-  ITokenBlacklist,
-  IPayout,
-  IAuditLog,
-  IBidOffer,
+  MarketingCampaign,
+  IMarketingCampaign,
+  IPlatformSettings,
+  PlatformSettings,
+  AdminEmailBroadcast,
+  IAdminEmailBroadcast,
 } from './models';
-
 import Notification from './models/Notification';
-import { TokenBlacklist } from './models/TokenBlacklist';
-import { Payout } from './models/Payout';
-import { AuditLog } from './models/AuditLog';
-import { BidOffer } from './models/BidOffer';
 import TYPES from './di';
 
 import {
@@ -87,6 +89,14 @@ import {
   ProductBidService,
   IBidMessageService,
   BidMessageService,
+  IConversationService,
+  ConversationService,
+  IAdminMessagingService,
+  AdminMessagingService,
+  IMessageService,
+  MessageService,
+  IOfferService,
+  OfferService,
   OrderService,
   IViewTrackingService,
   ViewTrackingService,
@@ -98,32 +108,19 @@ import {
   AttributeValueService,
   ISellerService,
   SellerService,
-  IBoutiqueService,
-  BoutiqueService,
-  IPayoutService,
-  PayoutService,
-  ISKUService,
-  SKUService,
-  ITranslationService,
-  TranslationService,
+  MarketingCampaignService,
+  IMarketingCampaignService,
+  ProductAvailabilityService,
+  ProductCleanupService,
+  PlatformSettingsService,
 } from './services';
-
 import { NotificationService } from './services/NotificationService';
-import { WebSocketService } from './services/WebSocketService';
-import {
-  OptionalAuth,
-  RequireAdmin,
-  RequireSeller,
-  RequireSignIn,
-  RequireAuth,
-} from './middlewares/AuthMiddleware';
+import { OptionalAuth, RequireAdmin, RequireSeller, RequireSignIn } from './middlewares/AuthMiddleware';
 
 const { NODE_ENV } = env;
 const container = new Container();
 
-/* ===========================
-   MODEL BINDINGS
-=========================== */
+// Bind all models to the container
 container.bind<Model<IUser>>(TYPES.User).toConstantValue(User);
 container.bind<Model<IAdmin>>(TYPES.Admin).toConstantValue(Admin);
 container.bind<Model<ICategory>>(TYPES.Category).toConstantValue(Category);
@@ -136,30 +133,31 @@ container.bind<Model<ICart>>(TYPES.Cart).toConstantValue(Cart);
 container.bind<Model<IPaymentOption>>(TYPES.PaymentOption).toConstantValue(PaymentOption);
 container.bind<Model<IPayment>>(TYPES.Payment).toConstantValue(Payment);
 container.bind<Model<IBid>>(TYPES.Bid).toConstantValue(Bid);
-container.bind<Model<IBidMessages>>(TYPES.BidMessages).toConstantValue(Message);
+container.bind<Model<IBidMessages>>(TYPES.BidMessages).toConstantValue(BidMessage);
+container.bind<Model<IConversation>>(TYPES.Conversation).toConstantValue(Conversation);
+container
+  .bind<Model<IConversationProduct>>(TYPES.ConversationProduct)
+  .toConstantValue(ConversationProduct);
+container.bind<Model<IMessage>>(TYPES.Message).toConstantValue(Message);
+container.bind<Model<IOffer>>(TYPES.Offer).toConstantValue(Offer);
 container.bind<Model<IOrder>>(TYPES.Order).toConstantValue(Order);
 container.bind<Model<IUserView>>(TYPES.UserView).toConstantValue(UserView);
 container.bind<Model<IShippingZone>>(TYPES.ShippingZone).toConstantValue(ShippingZone);
 container.bind<Model<IAttribute>>(TYPES.Attribute).toConstantValue(Attribute);
 container.bind<Model<IAttributeValue>>(TYPES.AttributeValue).toConstantValue(AttributeValue);
 container.bind<Model<INotification>>(TYPES.Notification).toConstantValue(Notification);
-container.bind<Model<ITokenBlacklist>>(TYPES.TokenBlacklist).toConstantValue(TokenBlacklist);
-container.bind<Model<IPayout>>(TYPES.Payout).toConstantValue(Payout);
-container.bind<Model<IAuditLog>>(TYPES.AuditLog).toConstantValue(AuditLog);
-container.bind<Model<IBidOffer>>(TYPES.BidOffer).toConstantValue(BidOffer);
+container.bind<Model<IMarketingCampaign>>(TYPES.MarketingCampaign).toConstantValue(MarketingCampaign);
+container.bind<Model<IPlatformSettings>>(TYPES.PlatformSettings).toConstantValue(PlatformSettings);
+container
+  .bind<Model<IAdminEmailBroadcast>>(TYPES.AdminEmailBroadcast)
+  .toConstantValue(AdminEmailBroadcast);
 
-/* ===========================
-   MIDDLEWARE BINDINGS
-=========================== */
 container.bind<RequireSignIn>(TYPES.RequireSignIn).to(RequireSignIn);
 container.bind<RequireSeller>(TYPES.RequireSeller).to(RequireSeller);
 container.bind<RequireAdmin>(TYPES.RequireAdmin).to(RequireAdmin);
-container.bind<RequireAuth>(TYPES.RequireAuth).to(RequireAuth);
 container.bind<OptionalAuth>(TYPES.OptionalAuth).to(OptionalAuth);
 
-/* ===========================
-   SERVICE BINDINGS
-=========================== */
+// Bind all services to the container
 container.bind<IAuthService>(TYPES.AuthService).to(AuthService);
 container.bind<IAdminService>(TYPES.AdminService).to(AdminService);
 container.bind<ICategoryService>(TYPES.CategoryService).to(CategoryService);
@@ -172,96 +170,49 @@ container.bind<IPaymentOptionService>(TYPES.PaymentOptionService).to(PaymentOpti
 container.bind<PaymentService>(TYPES.PaymentService).to(PaymentService);
 container.bind<IProductBidService>(TYPES.ProductBidService).to(ProductBidService);
 container.bind<IBidMessageService>(TYPES.BidMessageService).to(BidMessageService);
+container.bind<IConversationService>(TYPES.ConversationService).to(ConversationService);
+container.bind<IAdminMessagingService>(TYPES.AdminMessagingService).to(AdminMessagingService);
+container.bind<IMessageService>(TYPES.MessageService).to(MessageService);
+container.bind<IOfferService>(TYPES.OfferService).to(OfferService);
 container.bind<OrderService>(TYPES.OrderService).to(OrderService);
 container.bind<IViewTrackingService>(TYPES.ViewTrackingService).to(ViewTrackingService);
 container.bind<IShippingZoneService>(TYPES.ShippingZoneService).to(ShippingZoneService);
 container.bind<IAttributeService>(TYPES.AttributeService).to(AttributeService);
 container.bind<IAttributeValueService>(TYPES.AttributeValueService).to(AttributeValueService);
 container.bind<ISellerService>(TYPES.SellerService).to(SellerService);
-container.bind<IBoutiqueService>(TYPES.BoutiqueService).to(BoutiqueService);
 container.bind<NotificationService>(TYPES.NotificationService).to(NotificationService);
-container.bind<WebSocketService>(TYPES.WebSocketService).to(WebSocketService).inSingletonScope();
-container.bind<IPayoutService>(TYPES.PayoutService).to(PayoutService);
-container.bind<ISKUService>(TYPES.SKUService).to(SKUService);
-container.bind<ITranslationService>(TYPES.TranslationService).to(TranslationService);
+container.bind<ProductAvailabilityService>(TYPES.ProductAvailabilityService).to(ProductAvailabilityService);
+container.bind<ProductCleanupService>(TYPES.ProductCleanupService).to(ProductCleanupService);
+container.bind<PlatformSettingsService>(TYPES.PlatformSettingsService).to(PlatformSettingsService);
+container
+  .bind<IMarketingCampaignService>(TYPES.MarketingCampaignService)
+  .to(MarketingCampaignService);
 
-/* ===========================
-   IMPORT CONTROLLERS (AFTER CONTAINER IS CREATED)
-   Using require() not import because import is hoisted!
-=========================== */
-require('./controllers');
-
-/* ===========================
-   SERVER SETUP
-=========================== */
 const server = new InversifyExpressServer(container);
 
 server.setConfig((app) => {
-  /* 1️⃣ CORS (NO COOKIES) */
-  const corsOptions: cors.CorsOptions = {
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-    exposedHeaders: ['Content-Range', 'X-Content-Range'],
-    credentials: false,
-    optionsSuccessStatus: 204,
-    preflightContinue: false,
-  };
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
 
-  app.use(cors(corsOptions));
-  app.options('*', cors(corsOptions));
-
-  /* 2️⃣ SECURITY */
-  app.use(
-    helmet({
-      crossOriginResourcePolicy: { policy: 'cross-origin' },
-      crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
-      crossOriginEmbedderPolicy: false,
-      contentSecurityPolicy: false,
-    })
-  );
-
-  /* 3️⃣ COMPRESSION */
-  app.use(compression());
-
-  /* 4️⃣ BODY PARSING */
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-  /* 5️⃣ LOGGING */
+  app.use(cors());
   if (NODE_ENV === 'development') {
     app.use(morgan('dev'));
   }
-
-  /* 6️⃣ SWAGGER */
-  if (NODE_ENV === 'development' || process.env.ENABLE_SWAGGER === 'true') {
-    try {
-      const { setupSwagger } = require('./swagger/swagger');
-      setupSwagger(app);
-    } catch (err) {
-      console.warn('Swagger setup failed:', err);
-    }
-  }
 });
 
-// Error handlers and 404 must run AFTER controller routes are registered
 server.setErrorConfig((app) => {
-  /* 7️⃣ 404 - Must come before error handlers */
   app.all('*', (req: Request, res: Response) => {
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
-
     res.status(404).json({
       status: 'error',
       message: 'This endpoint does not exist on this server',
     });
   });
 
-  /* 8️⃣ ERROR HANDLERS */
-  app.use(multerErrorHandler);
+  // Add MongoDB error handler before the general error middleware
+  // app.use(mongoErrorHandler);
   app.use(errorMiddleWare);
 });
 
 const app = server.build();
-
 export { container };
 export default app;
