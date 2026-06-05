@@ -27,3 +27,7 @@ export * from './PlatformSettings';
 export * from './AdminEmailBroadcast';
 
 export * from './newCategory'; // This exports Category and ICategory
+export * from './AuditLog';
+export * from './BidOffer';
+export * from './Payout';
+export * from './TokenBlacklist';

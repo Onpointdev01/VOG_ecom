@@ -54,6 +54,15 @@ export const TYPES = {
   ProductCleanupService: Symbol.for('ProductCleanupService'),
   PlatformSettingsService: Symbol.for('PlatformSettingsService'),
 
+  Payout: Symbol.for('Payout'),
+  TokenBlacklist: Symbol.for('TokenBlacklist'),
+  AuditLog: Symbol.for('AuditLog'),
+  BidOffer: Symbol.for('BidOffer'),
+  TranslationService: Symbol.for('TranslationService'),
+  PayoutService: Symbol.for('PayoutService'),
+  SKUService: Symbol.for('SKUService'),
+  WebSocketService: Symbol.for('WebSocketService'),
+
   RequireSignIn: Symbol.for('RequireSignIn'),
   RequireSeller: Symbol.for('RequireSeller'),
   RequireAdmin: Symbol.for('RequireAdmin'),

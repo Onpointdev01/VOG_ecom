@@ -9,6 +9,7 @@ interface AuthenticatedSocket extends Socket {
   userId?: string;
   user?: IUser;
   isAdmin?: boolean;
+  handshake: Socket['handshake'];
 }
 
 @injectable()

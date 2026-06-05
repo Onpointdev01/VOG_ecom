@@ -25,6 +25,10 @@ const constants = {
     ATTRIBUTE_VALUE: 'AttributeValue',
     MARKETING_CAMPAIGN: 'MarketingCampaign',
     ADMIN_EMAIL_BROADCAST: 'AdminEmailBroadcast',
+    AUDIT_LOG: 'AuditLog',
+    BID_OFFER: 'BidOffer',
+    PAYOUT: 'Payout',
+    TOKEN_BLACKLIST: 'TokenBlacklist',
   },
 };
 
