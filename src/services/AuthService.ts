@@ -9,6 +9,7 @@ import { EmailCheckResult, SignUpSellerDTO, SignUpUserDTO } from '../utils/dtos'
 import AppError from '../utils/errors/AppError';
 import { generateAccessToken, generateCode, generateRefreshToken, decodeToken } from '../utils/helpers';
 import { sendEmail, renderTemplate } from '../utils/helpers/sendMail';
+import logger from '../utils/logger';
 import validator from 'validator';
 import { OAuth2Client } from 'google-auth-library';
 import { getFirebaseAdminAuth } from '../utils/firebaseAdmin';
@@ -350,13 +351,27 @@ export class AuthService extends BaseService implements IAuthService {
 
     const code = generateCode(6);
     const expiresIn = 10;
-    user.passwordResetToken = code;
+    user.passwordResetToken = crypto.createHash('md5').update(code).digest('hex');
     user.passwordResetExpires = new Date(Date.now() + expiresIn * 60 * 1000);
 
     await user.save();
-    await this.sendVerificationCode();
-    //TODO: send email with code
 
+    const userName = user.firstName || 'there';
+
+    try {
+      await sendEmail({
+        to: [email],
+        subject: 'Reset your password — St Cael',
+        html: renderTemplate('password-reset.html', { user: userName, code }),
+      });
+    } catch (emailError) {
+      logger.error('Forgot password email failed', { email, emailError });
+      if (process.env.NODE_ENV === 'development') {
+        logger.info(`[dev] Password reset code for ${email}: ${code}`);
+        return;
+      }
+      throw new AppError('Unable to send reset email. Please try again later.', 503);
+    }
   }
 
   async resetPassword(email: string, code: string, password: string): Promise<void> {
