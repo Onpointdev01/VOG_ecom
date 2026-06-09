@@ -176,7 +176,8 @@ export class AuthService extends BaseService implements IAuthService {
     let decoded: any;
     try {
       decoded = await getFirebaseAdminAuth().verifyIdToken(firebaseIdToken);
-    } catch {
+    } catch (err) {
+      logger.error(`Firebase verifyIdToken failed: ${(err as Error)?.message || err}`);
       throw new AppError('Invalid Firebase token', 401);
     }
 
@@ -432,21 +433,6 @@ export class AuthService extends BaseService implements IAuthService {
 
     if (user.verified) throw new AppError('Email already verified', 403);
     //TODO: send email with code
-  }
-
-  private async sendVerificationCode() {
-    const code = generateCode(6);
-    // const minutesToExpire = 10;
-    // user.verifyCode = crypto.createHash('md5').update(code).digest('hex');
-    // user.verifyCodeExpires = new Date(Date.now() + minutesToExpire * 60 * 1000); //should expire in 10 minutes
-
-    // await user.save();
-    const usersName = 'benjys' as string;
-    await sendEmail({
-      to: ['smtpbenjo@gmail.com'],
-      subject: 'Email Verification',
-      html: renderTemplate('src/utils/templates/password-reset.html', { usersName, code }),
-    });
   }
 
   async refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string }> {
