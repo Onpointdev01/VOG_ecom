@@ -96,13 +96,16 @@ export async function sendEmail({
   return { id: info.messageId || `smtp-${Date.now()}` };
 }
 
-/** Resolve email template from dist or src (dev). */
+/** Resolve email template — prefer src in development so HTML edits apply without a stale dist copy. */
 export function resolveTemplatePath(templateFileName: string): string {
-  const candidates = [
-    path.join(__dirname, '..', 'templates', templateFileName),
-    path.join(process.cwd(), 'dist', 'utils', 'templates', templateFileName),
-    path.join(process.cwd(), 'src', 'utils', 'templates', templateFileName),
-  ];
+  const srcPath = path.join(process.cwd(), 'src', 'utils', 'templates', templateFileName);
+  const distFromModule = path.join(__dirname, '..', 'templates', templateFileName);
+  const distFromCwd = path.join(process.cwd(), 'dist', 'utils', 'templates', templateFileName);
+
+  const candidates =
+    process.env.NODE_ENV === 'development'
+      ? [srcPath, distFromModule, distFromCwd]
+      : [distFromModule, distFromCwd, srcPath];
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
