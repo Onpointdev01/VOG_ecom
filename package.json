@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "build": "tsc",
-    "build:clean": "rimraf dist && tsc",
+    "build": "tsc && node -e \"require('fs').cpSync('src/utils/templates','dist/utils/templates',{recursive:true})\"",
+    "build:clean": "rimraf dist && tsc && node -e \"require('fs').cpSync('src/utils/templates','dist/utils/templates',{recursive:true})\"",
     "dev": "cross-env NODE_ENV=development  nodemon",
     "dev:docker": "docker compose -f docker-compose.dev.yml up --build",
     "dev:docker:detach": "docker compose -f docker-compose.dev.yml up --build -d",

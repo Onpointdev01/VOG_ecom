@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import nodemailer from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport';
+import logger from '../logger';
 
 export class EmailDeliveryError extends Error {
   constructor(message: string) {
@@ -69,8 +70,11 @@ export async function sendEmail({
   }
 
   const mailer = getTransporter();
+  const from = getFromAddress();
+  logger.info('SMTP sendMail', { from, to: recipients, subject });
+
   const info = await mailer.sendMail({
-    from: getFromAddress(),
+    from,
     to: recipients.join(', '),
     subject,
     html,

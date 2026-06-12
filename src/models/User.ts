@@ -175,6 +175,13 @@ const userSchema: Schema = new Schema<IUser>(
   { timestamps: true }
 );
 
+userSchema.pre('save', function (next) {
+  if (this.email && typeof this.email === 'string') {
+    this.email = this.email.trim().toLowerCase();
+  }
+  next();
+});
+
 userSchema.index({ email: 1 }, { unique: true });
 
 // Transform _id to id for API responses

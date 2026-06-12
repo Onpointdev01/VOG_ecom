@@ -16,6 +16,7 @@ import {
 } from '../utils/dtos';
 import logger from '../utils/logger';
 import AppError from '../utils/errors/AppError';
+import { normalizeEmail } from '../utils/helpers/userHelper';
 
 @controller('/api/v1/auth')
 export class AuthController extends BaseController {
@@ -69,7 +70,7 @@ export class AuthController extends BaseController {
   //forgot password
   @httpPost('/forgot-password')
   async forgotPassword(@response() res: Response, @requestBody() payload: { email: string }) {
-    const { email } = payload;
+    const email = normalizeEmail(payload.email);
     if (!email) throw new AppError('Email is required', 400);
     await this.authService.forgotPassword(email);
     return this.sendResponse(res, 200, 'Password reset code sent');
@@ -78,7 +79,8 @@ export class AuthController extends BaseController {
   //reset password
   @httpPost('/reset-password')
   async resetPassword(@response() res: Response, @requestBody() payload: ResetPasswordDTO) {
-    const { email, code, password } = payload;
+    const email = normalizeEmail(payload.email);
+    const { code, password } = payload;
     if (!email || !code || !password) throw new AppError('All fields are required', 400);
     await this.authService.resetPassword(email, code, password);
     return this.sendResponse(res, 200, 'Password reset successful');

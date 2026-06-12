@@ -7,7 +7,7 @@ import { TYPES } from '../di';
 import { IUser } from '../models';
 import { EmailCheckResult, SignUpSellerDTO, SignUpUserDTO } from '../utils/dtos';
 import AppError from '../utils/errors/AppError';
-import { generateAccessToken, generateCode, generateRefreshToken, decodeToken } from '../utils/helpers';
+import { generateAccessToken, generateCode, generateRefreshToken, decodeToken, normalizeEmail } from '../utils/helpers';
 import { sendEmail, renderTemplate } from '../utils/helpers/sendMail';
 import logger from '../utils/logger';
 import validator from 'validator';
@@ -58,10 +58,12 @@ export class AuthService extends BaseService implements IAuthService {
   }
 
   async signupUser(payload: SignUpUserDTO): Promise<Partial<IUser>> {
-    const { email, firstName, lastName, nationality, phoneNumber, currentLocation } = payload;
+    const email = normalizeEmail(payload.email);
+    const { firstName, lastName, nationality, phoneNumber, currentLocation } = payload;
     let { password } = payload;
+    if (!email || !validator.isEmail(email)) throw new AppError('Email is invalid', 400);
     //check if user exists
-    const prevUser = await this.User.findOne({ email });
+    const prevUser = await this.findUserByEmail(email);
     if (prevUser) throw new AppError(`Email ${email} already registered`, 400);
 
     //hash password
@@ -346,10 +348,35 @@ export class AuthService extends BaseService implements IAuthService {
     };
     return { user: trimedUser, token: token, refreshToken: refreshToken };
   }
+  private async findUserByEmail(email: string): Promise<IUser | null> {
+    const normalized = normalizeEmail(email);
+    if (!normalized || !validator.isEmail(normalized)) return null;
+
+    const exact = await this.User.findOne({ email: normalized });
+    if (exact) return exact;
+
+    const caseMatches = await this.User.find({
+      $expr: { $eq: [{ $toLower: '$email' }, normalized] },
+    });
+
+    if (caseMatches.length === 0) return null;
+    if (caseMatches.length > 1) {
+      logger.error('Ambiguous email lookup — multiple accounts differ only by case', {
+        normalized,
+        userIds: caseMatches.map((u) => u._id),
+      });
+      throw new AppError('Multiple accounts match this email. Contact support.', 409);
+    }
+
+    return caseMatches[0];
+  }
+
   async forgotPassword(email: string): Promise<void> {
-    const user = await this.User.findOne({ email });
+    const user = await this.findUserByEmail(email);
     if (!user) throw new AppError('User not found', 404);
 
+    const recipient = normalizeEmail(user.email);
+    if (!recipient) throw new AppError('User not found', 404);
     const code = generateCode(6);
     const expiresIn = 10;
     user.passwordResetToken = crypto.createHash('md5').update(code).digest('hex');
@@ -360,13 +387,18 @@ export class AuthService extends BaseService implements IAuthService {
     const userName = user.firstName || 'there';
 
     try {
+      logger.info('Sending password reset email', {
+        recipient,
+        requestedEmail: normalizeEmail(email),
+        userId: String(user._id),
+      });
       await sendEmail({
-        to: [email],
+        to: [recipient],
         subject: 'Reset your password — St Cael',
         html: renderTemplate('password-reset.html', { user: userName, code }),
       });
     } catch (emailError) {
-      logger.error('Forgot password email failed', { email, emailError });
+      logger.error('Forgot password email failed', { recipient, email, emailError });
       if (process.env.NODE_ENV === 'development') {
         logger.info(`[dev] Password reset code for ${email}: ${code}`);
         return;
@@ -376,7 +408,7 @@ export class AuthService extends BaseService implements IAuthService {
   }
 
   async resetPassword(email: string, code: string, password: string): Promise<void> {
-    const user = await this.User.findOne({ email });
+    const user = await this.findUserByEmail(email);
     if (!user) throw new AppError('User not found', 404);
 
     if (user.passwordResetExpires!.getTime() < Date.now()) throw new AppError('provided code is expired', 400);
