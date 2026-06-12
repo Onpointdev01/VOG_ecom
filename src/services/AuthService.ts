@@ -440,6 +440,7 @@ export class AuthService extends BaseService implements IAuthService {
       logger.error('Forgot password email failed', { recipient, email, emailError });
       if (process.env.NODE_ENV === 'development') {
         logger.info(`[dev] Password reset code for ${email}: ${code}`);
+        return;
       }
       throw new AppError('Unable to send reset email. Please try again later.', 503);
     }
