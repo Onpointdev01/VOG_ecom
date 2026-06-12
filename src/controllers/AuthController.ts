@@ -69,10 +69,10 @@ export class AuthController extends BaseController {
 
   //forgot password
   @httpPost('/forgot-password')
-  async forgotPassword(@response() res: Response, @requestBody() payload: { email: string }) {
+  async forgotPassword(@response() res: Response, @requestBody() payload: { email: string; resetOrigin?: string }) {
     const email = normalizeEmail(payload.email);
     if (!email) throw new AppError('Email is required', 400);
-    await this.authService.forgotPassword(email);
+    await this.authService.forgotPassword(email, payload.resetOrigin);
     return this.sendResponse(res, 200, 'Password reset code sent');
   }
 

@@ -24,7 +24,7 @@ export interface IAuthService {
     idToken: string,
     provider: string
   ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
-  forgotPassword(email: string): Promise<void>;
+  forgotPassword(email: string, resetOrigin?: string): Promise<void>;
   resetPassword(email: string, code: string, password: string): Promise<void>;
   verifyEmail(code: string, email: string): Promise<string>;
   resendVerification(email: string): Promise<void>;
@@ -371,7 +371,43 @@ export class AuthService extends BaseService implements IAuthService {
     return caseMatches[0];
   }
 
-  async forgotPassword(email: string): Promise<void> {
+  /** Allow reset links only for St Cael sites (or localhost in dev). */
+  private resolveResetBaseUrl(resetOrigin?: string): string {
+    const buyerDefault = (process.env.BUYER_WEBSITE_URL || 'https://market.st-cael.org').replace(/\/+$/, '');
+    const sellerDefault = (process.env.SELLER_WEBSITE_URL || 'https://seller.st-cael.org').replace(
+      /\/+$/,
+      ''
+    );
+
+    if (!resetOrigin?.trim()) return buyerDefault;
+
+    try {
+      const { hostname, protocol } = new URL(resetOrigin.trim());
+      const isLocal =
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname.endsWith('.localhost');
+      const isStCael =
+        hostname === 'st-cael.org' || hostname.endsWith('.st-cael.org');
+      if ((protocol === 'https:' || protocol === 'http:') && (isLocal || isStCael)) {
+        return new URL(resetOrigin.trim()).origin;
+      }
+    } catch {
+      /* use fallback below */
+    }
+
+    // Unknown origin: infer seller vs buyer from hostname when possible
+    try {
+      const host = new URL(resetOrigin.trim()).hostname;
+      if (host.startsWith('seller.') || host.includes('seller')) return sellerDefault;
+    } catch {
+      /* ignore */
+    }
+
+    return buyerDefault;
+  }
+
+  async forgotPassword(email: string, resetOrigin?: string): Promise<void> {
     const user = await this.findUserByEmail(email);
     if (!user) throw new AppError('User not found', 404);
 
@@ -385,10 +421,7 @@ export class AuthService extends BaseService implements IAuthService {
     await user.save();
 
     const userName = user.firstName || 'there';
-    const websiteBase = (process.env.BUYER_WEBSITE_URL || process.env.WEBSITE_URL || 'https://st-cael.org').replace(
-      /\/+$/,
-      ''
-    );
+    const websiteBase = this.resolveResetBaseUrl(resetOrigin);
     const resetUrl = `${websiteBase}/reset-password?email=${encodeURIComponent(recipient)}`;
 
     try {
@@ -396,6 +429,7 @@ export class AuthService extends BaseService implements IAuthService {
         recipient,
         requestedEmail: normalizeEmail(email),
         userId: String(user._id),
+        resetUrl,
       });
       await sendEmail({
         to: [recipient],
