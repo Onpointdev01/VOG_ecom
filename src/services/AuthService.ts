@@ -385,6 +385,11 @@ export class AuthService extends BaseService implements IAuthService {
     await user.save();
 
     const userName = user.firstName || 'there';
+    const websiteBase = (process.env.BUYER_WEBSITE_URL || process.env.WEBSITE_URL || 'https://st-cael.org').replace(
+      /\/+$/,
+      ''
+    );
+    const resetUrl = `${websiteBase}/reset-password?email=${encodeURIComponent(recipient)}`;
 
     try {
       logger.info('Sending password reset email', {
@@ -395,7 +400,7 @@ export class AuthService extends BaseService implements IAuthService {
       await sendEmail({
         to: [recipient],
         subject: 'Reset your password — St Cael',
-        html: renderTemplate('password-reset.html', { user: userName, code }),
+        html: renderTemplate('password-reset.html', { user: userName, code, resetUrl }),
       });
     } catch (emailError) {
       logger.error('Forgot password email failed', { recipient, email, emailError });
