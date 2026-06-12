@@ -24,9 +24,38 @@
         text-align: center;
         margin-bottom: 20px;
       }
-      .header img {
-        width: 100px;
-        height: auto;
+      .brand-panel {
+        padding: 32px 24px 26px;
+        margin-bottom: 20px;
+        background: linear-gradient(160deg, #1c2b2d 0%, #0f1a1c 55%, #1a2a2c 100%);
+        border-radius: 14px;
+        border: 1px solid rgba(212, 168, 83, 0.22);
+      }
+      .brand-tagline {
+        margin: 0 0 8px;
+        font-size: 10px;
+        letter-spacing: 0.45em;
+        text-transform: uppercase;
+        color: #8b9a9c;
+      }
+      .brand-name {
+        margin: 0;
+        font-family: Georgia, 'Times New Roman', Times, serif;
+        font-size: 46px;
+        line-height: 1.05;
+        letter-spacing: 0.05em;
+      }
+      .brand-line {
+        width: 64px;
+        height: 2px;
+        margin: 16px auto 0;
+        background: linear-gradient(90deg, transparent, #d4a853, #f5e6b8, #d4a853, transparent);
+      }
+      .email-title {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 600;
+        color: #1c2b2d;
       }
       .content {
         font-size: 16px;
@@ -68,8 +97,14 @@
   <body>
     <div class="container">
       <div class="header">
-        <img src="https://via.placeholder.com/100" alt="Company Logo" />
-        <h1>Verify Your Email Address</h1>
+        <div class="brand-panel">
+          <p class="brand-tagline">Marketplace</p>
+          <p class="brand-name">
+            <span style="color: #f5e6b8; font-weight: 300;">St</span><span style="color: #d4a853; font-weight: 400;">-</span><span style="color: #d4a853; font-weight: 700; text-shadow: 0 1px 0 #f5e6b8;">Cael</span>
+          </p>
+          <div class="brand-line"></div>
+        </div>
+        <h1 class="email-title">Verify Your Email Address</h1>
       </div>
       <div class="content">
         <p>Hi {{firstName}},</p>
