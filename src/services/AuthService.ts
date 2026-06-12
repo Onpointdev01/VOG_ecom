@@ -8,6 +8,7 @@ import { IUser } from '../models';
 import { EmailCheckResult, SignUpSellerDTO, SignUpUserDTO } from '../utils/dtos';
 import AppError from '../utils/errors/AppError';
 import { generateAccessToken, generateCode, generateRefreshToken, decodeToken } from '../utils/helpers';
+import { normalizeEmail } from '../utils/helpers/userHelper';
 import { sendEmail, renderTemplate } from '../utils/helpers/sendMail';
 import logger from '../utils/logger';
 import validator from 'validator';
@@ -23,7 +24,7 @@ export interface IAuthService {
     idToken: string,
     provider: string
   ): Promise<{ user: Partial<IUser>; token: string; refreshToken: string }>;
-  forgotPassword(email: string): Promise<void>;
+  forgotPassword(email: string, resetOrigin?: string): Promise<void>;
   resetPassword(email: string, code: string, password: string): Promise<void>;
   verifyEmail(code: string, email: string): Promise<string>;
   resendVerification(email: string): Promise<void>;
@@ -256,9 +257,64 @@ export class AuthService extends BaseService implements IAuthService {
     };
     return { user: trimedUser, token: token, refreshToken: refreshToken };
   }
-  async forgotPassword(email: string): Promise<void> {
-    const user = await this.User.findOne({ email });
+  private async findUserByEmail(email: string): Promise<IUser | null> {
+    const normalized = normalizeEmail(email);
+    if (!normalized || !validator.isEmail(normalized)) return null;
+
+    const exact = await this.User.findOne({ email: normalized });
+    if (exact) return exact;
+
+    const caseMatches = await this.User.find({
+      $expr: { $eq: [{ $toLower: '$email' }, normalized] },
+    });
+
+    if (caseMatches.length === 0) return null;
+    if (caseMatches.length > 1) {
+      logger.error('Ambiguous email lookup — multiple accounts differ only by case', {
+        normalized,
+        userIds: caseMatches.map((u) => u._id),
+      });
+      throw new AppError('Multiple accounts match this email. Contact support.', 409);
+    }
+
+    return caseMatches[0];
+  }
+
+  /** Allow reset links only for St Cael sites (or localhost in dev). */
+  private resolveResetBaseUrl(resetOrigin?: string): string {
+    const buyerDefault = (process.env.BUYER_WEBSITE_URL || 'https://market.st-cael.org').replace(/\/+$/, '');
+    const sellerDefault = (process.env.SELLER_WEBSITE_URL || 'https://seller.st-cael.org').replace(/\/+$/, '');
+
+    if (!resetOrigin?.trim()) return buyerDefault;
+
+    try {
+      const { hostname, protocol } = new URL(resetOrigin.trim());
+      const isLocal =
+        hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost');
+      const isStCael = hostname === 'st-cael.org' || hostname.endsWith('.st-cael.org');
+      if ((protocol === 'https:' || protocol === 'http:') && (isLocal || isStCael)) {
+        return new URL(resetOrigin.trim()).origin;
+      }
+    } catch {
+      /* use fallback below */
+    }
+
+    try {
+      const host = new URL(resetOrigin.trim()).hostname;
+      if (host.startsWith('seller.') || host.includes('seller')) return sellerDefault;
+    } catch {
+      /* ignore */
+    }
+
+    return buyerDefault;
+  }
+
+  async forgotPassword(email: string, resetOrigin?: string): Promise<void> {
+    const user = await this.findUserByEmail(email);
     if (!user) throw new AppError('User not found', 404);
+
+    const recipient = normalizeEmail(user.email);
+    if (!recipient) throw new AppError('User not found', 404);
 
     const code = generateCode(6);
     const expiresIn = 10;
@@ -268,25 +324,32 @@ export class AuthService extends BaseService implements IAuthService {
     await user.save();
 
     const userName = user.firstName || 'there';
+    const websiteBase = this.resolveResetBaseUrl(resetOrigin);
+    const resetUrl = `${websiteBase}/reset-password?email=${encodeURIComponent(recipient)}`;
 
     try {
+      logger.info('Sending password reset email', {
+        recipient,
+        requestedEmail: normalizeEmail(email),
+        userId: String(user._id),
+        resetUrl,
+      });
       await sendEmail({
-        to: [email],
+        to: [recipient],
         subject: 'Reset your password — St Cael',
-        html: renderTemplate('password-reset.html', { user: userName, code }),
+        html: renderTemplate('password-reset.html', { user: userName, code, resetUrl }),
       });
     } catch (emailError) {
-      logger.error('Forgot password email failed', { email, emailError });
+      logger.error('Forgot password email failed', { recipient, email, emailError });
       if (process.env.NODE_ENV === 'development') {
         logger.info(`[dev] Password reset code for ${email}: ${code}`);
-        return;
       }
       throw new AppError('Unable to send reset email. Please try again later.', 503);
     }
   }
 
   async resetPassword(email: string, code: string, password: string): Promise<void> {
-    const user = await this.User.findOne({ email });
+    const user = await this.findUserByEmail(email);
     if (!user) throw new AppError('User not found', 404);
 
     if (!user.passwordResetExpires || user.passwordResetExpires.getTime() < Date.now()) {

@@ -1,5 +1,10 @@
 import { IUser } from '../../models';
 
+/** Canonical email for lookups and outbound mail (trim + lowercase). */
+export function normalizeEmail(email: string): string {
+  return String(email || '').trim().toLowerCase();
+}
+
 function mapUserProfile(user: IUser): any {
   return {
     id: user._id,

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Email Verification</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f4f4f4;
+        color: #333;
+      }
+      .container {
+        max-width: 600px;
+        margin: 20px auto;
+        padding: 20px;
+        background: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      .brand-panel {
+        padding: 32px 24px 26px;
+        margin-bottom: 20px;
+        background: linear-gradient(160deg, #1c2b2d 0%, #0f1a1c 55%, #1a2a2c 100%);
+        border-radius: 14px;
+        border: 1px solid rgba(212, 168, 83, 0.22);
+      }
+      .brand-tagline {
+        margin: 0 0 8px;
+        font-size: 10px;
+        letter-spacing: 0.45em;
+        text-transform: uppercase;
+        color: #8b9a9c;
+      }
+      .brand-name {
+        margin: 0;
+        font-family: Georgia, 'Times New Roman', Times, serif;
+        font-size: 46px;
+        line-height: 1.05;
+        letter-spacing: 0.05em;
+      }
+      .brand-line {
+        width: 64px;
+        height: 2px;
+        margin: 16px auto 0;
+        background: linear-gradient(90deg, transparent, #d4a853, #f5e6b8, #d4a853, transparent);
+      }
+      .email-title {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 600;
+        color: #1c2b2d;
+      }
+      .content {
+        font-size: 16px;
+        line-height: 1.5;
+        margin-bottom: 20px;
+      }
+      .code {
+        text-align: center;
+        font-size: 24px;
+        background: #f1f1f1;
+        padding: 15px;
+        border-radius: 5px;
+        margin: 20px 0;
+        font-weight: bold;
+        letter-spacing: 3px;
+      }
+      .button {
+        display: inline-block;
+        padding: 12px 30px;
+        background-color: #007bff;
+        color: #ffffff;
+        text-decoration: none;
+        border-radius: 5px;
+        font-weight: bold;
+        margin: 20px 0;
+      }
+      .button-container {
+        text-align: center;
+        margin: 30px 0;
+      }
+      .footer {
+        text-align: center;
+        font-size: 14px;
+        color: #888;
+        margin-top: 30px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div class="brand-panel">
+          <p class="brand-tagline">Marketplace</p>
+          <p class="brand-name">
+            <span style="color: #f5e6b8; font-weight: 300;">St</span><span style="color: #d4a853; font-weight: 400;">-</span><span style="color: #d4a853; font-weight: 700; text-shadow: 0 1px 0 #f5e6b8;">Cael</span>
+          </p>
+          <div class="brand-line"></div>
+        </div>
+        <h1 class="email-title">Verify Your Email Address</h1>
+      </div>
+      <div class="content">
+        <p>Hi {{firstName}},</p>
+        <p>Thank you for signing up! Please verify your email address by clicking the button below or using the verification code:</p>
+        
+        <div class="button-container">
+          <a href="{{verificationLink}}" class="button">Verify Email</a>
+        </div>
+        
+        <p style="text-align: center; font-size: 14px; color: #666;">Or use this verification code:</p>
+        <div class="code">{{code}}</div>
+        
+        <p style="font-size: 14px; color: #666;">Or copy and paste this link in your browser:</p>
+        <p style="font-size: 12px; color: #999; word-break: break-all;">{{verificationLink}}</p>
+        
+        <p style="margin-top: 20px;">This code will expire in 24 hours. If you did not create an account, please ignore this email.</p>
+      </div>
+      <div class="footer">
+        <p>If you have any questions, please contact our support team.</p>
+      </div>
+    </div>
+  </body>
+</html>
+
