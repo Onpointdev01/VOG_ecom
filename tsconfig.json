@@ -35,9 +35,8 @@
     // "rootDirs": [],                                   /* Allow multiple folders to be treated as one when resolving modules. */
     // "typeRoots": [],                                  /* Specify multiple folders that act like `./node_modules/@types`. */
     "types": [
-      "reflect-metadata",
-      "mocha"
-    ] /* Specify type package names to be included without being referenced in a source file. */,
+      "reflect-metadata"
+    ] /* Mocha types live in tsconfig.test.json — not required for production build. */,
     // "allowUmdGlobalAccess": true,                     /* Allow accessing UMD globals from modules. */
     // "resolveJsonModule": true,                        /* Enable importing .json files */
     // "noResolve": true,                                /* Disallow `import`s, `require`s or `<reference>`s from expanding the number of files TypeScript should add to a project. */
@@ -105,5 +104,5 @@
     "skipLibCheck": true /* Skip type checking all .d.ts files. */
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "eslint.config.mjs", "src/tests"]
+  "exclude": ["node_modules", "dist", "eslint.config.mjs", "src/tests", "src/_test_"]
 }
