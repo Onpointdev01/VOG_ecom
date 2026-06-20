@@ -298,7 +298,7 @@ export class NotificationService {
       target: 'seller',
       title: 'New offer',
       body: `${buyerName} offered $${amount.toFixed(2)} on ${productName}`,
-      actionUrl: `/conversations`,
+      actionUrl: `/conversation/${conversationId}`,
       entityType: 'offer',
       entityId: offerId,
       conversationId,
@@ -322,7 +322,7 @@ export class NotificationService {
       target: 'buyer',
       title: 'Offer accepted',
       body: `Your offer of $${amount.toFixed(2)} on ${productName} was accepted. Add to cart within 24 hours.`,
-      actionUrl: '/conversations',
+      actionUrl: `/conversation/${conversationId}`,
       entityType: 'offer',
       entityId: offerId,
       conversationId,
@@ -345,7 +345,7 @@ export class NotificationService {
       target: 'buyer',
       title: 'Offer declined',
       body: `Your offer on ${productName} was not accepted.`,
-      actionUrl: '/conversations',
+      actionUrl: `/conversation/${conversationId}`,
       entityType: 'offer',
       entityId: offerId,
       conversationId,
@@ -369,7 +369,7 @@ export class NotificationService {
       target: 'buyer',
       title: 'Counter offer received',
       body: `Seller countered with $${amount.toFixed(2)} for ${productName}`,
-      actionUrl: '/conversations',
+      actionUrl: `/conversation/${conversationId}`,
       entityType: 'offer',
       entityId: offerId,
       conversationId,
@@ -389,8 +389,7 @@ export class NotificationService {
   }): Promise<NotificationDto | null> {
     const { recipientId, senderLabel, preview, messageId, conversationId, productId, recipientRole } =
       params;
-    const actionUrl =
-      recipientRole === 'seller' ? '/conversations' : '/conversations';
+    const actionUrl = `/conversation/${conversationId}`;
 
     return this.emit({
       userId: recipientId,
@@ -415,7 +414,7 @@ export class NotificationService {
     forSeller: boolean;
   }): Promise<void> {
     const { approverUserIds, orderId, orderNumber, forSeller } = params;
-    const actionUrl = forSeller ? '/orders' : '/orders';
+    const actionUrl = `/orders/${orderId}`;
     const title = forSeller ? 'New order to review' : 'New order pending approval';
     const body = forSeller
       ? `Order #${orderNumber} is waiting for your approval.`
@@ -453,7 +452,7 @@ export class NotificationService {
           target: 'seller',
           title: 'Order cancelled by buyer',
           body: `Order #${orderNumber} was cancelled by the buyer before confirmation.`,
-          actionUrl: '/orders',
+          actionUrl: `/orders/${orderId}`,
           entityType: 'order',
           entityId: orderId,
           dedupeKey: `order:${orderId}:cancelled_by_buyer:${userId}`,
@@ -479,7 +478,7 @@ export class NotificationService {
       target: 'buyer',
       title: 'Order placed',
       body: `Order #${orderNumber} was received. We'll keep you updated.`,
-      actionUrl: '/profile?tab=orders',
+      actionUrl: `/orders/${orderId}`,
       entityType: 'order',
       entityId: orderId,
       dedupeKey: `order:${orderId}:created`,
@@ -514,7 +513,7 @@ export class NotificationService {
       target: 'buyer',
       title: 'Order update',
       body: `Order #${displayOrderNumber}: ${message}`,
-      actionUrl: '/profile?tab=orders',
+      actionUrl: `/orders/${orderId}`,
       entityType: 'order',
       entityId: orderId,
       dedupeKey: `order:${orderId}:status:${status}`,
@@ -564,8 +563,9 @@ export class NotificationService {
   }
 
   private inferActionUrl(data: Record<string, unknown>): string | undefined {
-    if (data.orderId) return '/profile?tab=orders';
-    if (data.conversationId || data.offerId || data.bidId) return '/conversations';
+    if (data.orderId) return `/orders/${data.orderId}`;
+    if (data.conversationId) return `/conversation/${data.conversationId}`;
+    if (data.offerId || data.bidId) return '/conversations';
     if (data.productId) return `/product/${data.productId}`;
     return undefined;
   }
