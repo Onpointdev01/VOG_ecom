@@ -8,6 +8,10 @@ export interface IShippingZone extends Document {
   name: string;
   /** Unique lookup code (derived from name) */
   code: string;
+  /** City this zone belongs to (e.g. "Lubumbashi") */
+  city: string;
+  /** Province/state this zone belongs to (e.g. "Haut-Katanga") */
+  province: string;
   shippingFee: number;
   isActive: boolean;
   estimatedDeliveryDays: number;
@@ -28,6 +32,16 @@ const shippingZoneSchema: Schema<IShippingZone> = new Schema(
       required: [true, 'Neighborhood code is required'],
       unique: true,
       uppercase: true,
+      trim: true,
+    },
+    city: {
+      type: String,
+      required: [true, 'City is required'],
+      trim: true,
+    },
+    province: {
+      type: String,
+      required: [true, 'Province is required'],
       trim: true,
     },
     shippingFee: {

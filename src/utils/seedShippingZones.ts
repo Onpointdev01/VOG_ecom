@@ -27,6 +27,8 @@ export const defaultNeighborhoods = [
 ].map((name) => ({
   name,
   code: neighborhoodCodeFromName(name),
+  city: 'Lubumbashi',
+  province: 'Haut-Katanga',
   shippingFee: 10,
   estimatedDeliveryDays: 2,
   isActive: true,

@@ -9,6 +9,8 @@ import { DEFAULT_SHIPPING_FEE, neighborhoodCodeFromName } from '../utils/neighbo
 export interface CreateShippingZoneDTO {
   name: string;
   code?: string;
+  city: string;
+  province: string;
   shippingFee: number;
   estimatedDeliveryDays: number;
   isActive?: boolean;
@@ -17,6 +19,8 @@ export interface CreateShippingZoneDTO {
 export interface UpdateShippingZoneDTO {
   name?: string;
   code?: string;
+  city?: string;
+  province?: string;
   shippingFee?: number;
   estimatedDeliveryDays?: number;
   isActive?: boolean;
