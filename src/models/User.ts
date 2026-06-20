@@ -26,6 +26,8 @@ export interface IUser extends Document {
   profileImageUrl: string;
   nationality: string;
   phoneNumber: string;
+  gender?: string;
+  dateOfBirth?: Date;
   currentLocation: string;
   role: string;
   passwordResetToken?: string;
@@ -97,6 +99,13 @@ const userSchema: Schema = new Schema<IUser>(
     phoneNumber: {
       type: String,
       validate: [validator.isMobilePhone, 'Invalid phone number'],
+    },
+    gender: {
+      type: String,
+      enum: ['male', 'female', 'other'],
+    },
+    dateOfBirth: {
+      type: Date,
     },
     currentLocation: {
       type: String,

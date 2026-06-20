@@ -11,9 +11,15 @@ function mapUserProfile(user: IUser): any {
     firstName: user.firstName,
     lastName: user.lastName,
     email: user.email,
+    // Expose under both names so old and new app code both work
     profileImageUrl: user.profileImageUrl,
+    profilePicture: user.profileImageUrl,
     nationality: user.nationality,
+    // Expose under both names
     phoneNumber: user.phoneNumber,
+    phone: user.phoneNumber,
+    gender: user.gender,
+    dateOfBirth: user.dateOfBirth,
     currentLocation: user.currentLocation,
     role: user.role,
     verified: user.verified,
