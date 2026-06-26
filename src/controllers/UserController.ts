@@ -196,6 +196,51 @@ export class UserController extends BaseController {
     }
   }
 
+  // ──────────────────────────────── SET PASSWORD (social login users) ────────────
+  @httpPut('/set-password', TYPES.RequireSignIn)
+  public async setPassword(
+    @requestBody() body: { newPassword: string },
+    @response() res: Response
+  ) {
+    const { newPassword } = body;
+    if (!newPassword?.trim()) {
+      return this.sendResponse(res, 400, 'New password is required');
+    }
+    if (newPassword.length < 6) {
+      return this.sendResponse(res, 400, 'Password must be at least 6 characters long');
+    }
+    try {
+      await this.userService.setPassword(res.locals.user, newPassword);
+      return this.sendResponse(res, 200, 'Password set successfully');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to set password';
+      return this.sendResponse(res, 400, message);
+    }
+  }
+
+  // ──────────────────────────────── CHANGE PASSWORD ──────────────────────────────
+  @httpPut('/change-password', TYPES.RequireSignIn)
+  public async changePassword(
+    @requestBody() body: { oldPassword: string; newPassword: string },
+    @response() res: Response
+  ) {
+    const { oldPassword, newPassword } = body;
+    if (!oldPassword?.trim() || !newPassword?.trim()) {
+      return this.sendResponse(res, 400, 'Current password and new password are required');
+    }
+    if (newPassword.length < 6) {
+      return this.sendResponse(res, 400, 'New password must be at least 6 characters long');
+    }
+    try {
+      await this.userService.changePassword(res.locals.user, oldPassword, newPassword);
+      return this.sendResponse(res, 200, 'Password changed successfully');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to change password';
+      const status = error instanceof Error && error.message.includes('incorrect') ? 401 : 400;
+      return this.sendResponse(res, status, message);
+    }
+  }
+
   // ─────────────────────────────────── USERS LIST ────────────────────────────────
   @httpGet('/')
   public async getAllUsers(@response() res: Response) {

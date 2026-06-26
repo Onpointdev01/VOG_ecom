@@ -494,22 +494,24 @@ export class CartService extends BaseService implements ICartService {
     return {
       id: cart._id.toString(),
       user: cart.user.toString(),
-      items: cart.items.map((item) => ({
-        id: item._id,
-        product: {
-          id: ((item.product as IProduct)._id as any).toString(),
-          name: (item.product as IProduct).name,
-          images: (item.product as IProduct).images || [],
-          price: (item.product as IProduct).price || 0,
-        },
-        quantity: item.quantity,
-        sku: item.sku || '',
-        size: item.size || '',
-        color: item.color || '',
-        variantId: item.variantId?.toString(),
-        price: item.price,
-        isPending: pendingCartItemIds.has(item._id.toString()), // Always include pending status
-      })),
+      items: cart.items
+        .filter((item) => item.product != null)
+        .map((item) => ({
+          id: item._id,
+          product: {
+            id: ((item.product as IProduct)._id as any).toString(),
+            name: (item.product as IProduct).name,
+            images: (item.product as IProduct).images || [],
+            price: (item.product as IProduct).price || 0,
+          },
+          quantity: item.quantity,
+          sku: item.sku || '',
+          size: item.size || '',
+          color: item.color || '',
+          variantId: item.variantId?.toString(),
+          price: item.price,
+          isPending: pendingCartItemIds.has(item._id.toString()),
+        })),
       totalPrice: cart.totalPrice,
       updatedAt: cart.updatedAt,
     };

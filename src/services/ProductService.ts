@@ -233,20 +233,50 @@ export class ProductService extends BaseService implements IProductService {
     }
     const aggregationPipeline: any[] = [];
     
-    // Text search must be the first stage in aggregation pipeline
+    // Atlas Search supports prefix/autocomplete; $text only matches whole words
     if (search) {
       aggregationPipeline.push({
-        $match: {
-          $and: [{ $text: { $search: search } }, publicListingBaseMatch, filter],
+        $search: {
+          index: 'products_search',
+          compound: {
+            should: [
+              {
+                autocomplete: {
+                  query: search,
+                  path: 'name',
+                  fuzzy: { maxEdits: 1 },
+                  score: { boost: { value: 10 } },
+                },
+              },
+              {
+                autocomplete: {
+                  query: search,
+                  path: 'brand',
+                  fuzzy: { maxEdits: 1 },
+                  score: { boost: { value: 5 } },
+                },
+              },
+              {
+                text: {
+                  query: search,
+                  path: 'description',
+                  score: { boost: { value: 1 } },
+                },
+              },
+            ],
+            minimumShouldMatch: 1,
+          },
         },
       });
-      
-      // Add text score for search relevance
+
       aggregationPipeline.push({
-        $addFields: {
-          score: { $meta: 'textScore' }
-        }
+        $addFields: { score: { $meta: 'searchScore' } },
       });
+
+      // Apply non-search filters after $search
+      const extraFilters: any[] = [publicListingBaseMatch];
+      if (Object.keys(filter).length > 0) extraFilters.push(filter);
+      aggregationPipeline.push({ $match: { $and: extraFilters } });
     } else {
       aggregationPipeline.push({
         $match: {
@@ -387,9 +417,8 @@ export class ProductService extends BaseService implements IProductService {
 
     // Add sorting based on options or search relevance or default
     if (search && (!options?.sortBy || options.sortBy === 'relevance')) {
-      // For search results, use text score unless different sort is specified
       aggregationPipeline.push({
-        $sort: { score: { $meta: 'textScore' }, _id: 1 }
+        $sort: { score: -1, _id: 1 },
       });
     } else {
       // Custom sorting
@@ -484,44 +513,59 @@ export class ProductService extends BaseService implements IProductService {
   }
 
   async getSearchSuggestions(query: string): Promise<string[]> {
-    // Use MongoDB text search for better performance and relevance
     const productSuggestions = await this.Product.aggregate([
       {
-        $match: {
-          $and: [publicListingBaseMatch, { $text: { $search: query } }],
+        $search: {
+          index: 'products_search',
+          compound: {
+            should: [
+              {
+                autocomplete: {
+                  query,
+                  path: 'name',
+                  fuzzy: { maxEdits: 1 },
+                  score: { boost: { value: 10 } },
+                },
+              },
+              {
+                autocomplete: {
+                  query,
+                  path: 'brand',
+                  fuzzy: { maxEdits: 1 },
+                  score: { boost: { value: 5 } },
+                },
+              },
+            ],
+            minimumShouldMatch: 1,
+          },
         },
       },
+      { $match: publicListingBaseMatch },
       ...sellerLookupStages,
       variantsLookupStage,
       totalStockStage,
       inStockOnlyMatch,
       {
-        $addFields: {
-          score: { $meta: 'textScore' }  // Add relevance score
-        }
+        $addFields: { score: { $meta: 'searchScore' } },
       },
       {
         $project: {
           name: 1,
           brand: 1,
           nameLower: { $toLower: '$name' },
-          score: 1
-        }
+          score: 1,
+        },
       },
       {
         $group: {
           _id: '$nameLower',
           name: { $first: '$name' },
           brand: { $first: '$brand' },
-          score: { $max: '$score' }  // Keep highest relevance score
-        }
+          score: { $max: '$score' },
+        },
       },
-      {
-        $sort: { score: -1, name: 1 }  // Sort by relevance, then alphabetically
-      },
-      {
-        $limit: 8  // Reduced limit since text search is more accurate
-      }
+      { $sort: { score: -1, name: 1 } },
+      { $limit: 8 },
     ]);
 
     // Extract smart, concise suggestions

@@ -24,6 +24,8 @@ function mapUserProfile(user: IUser): any {
     role: user.role,
     verified: user.verified,
     wishlist: user.wishlist,
+    hasPassword: !!user.password,
+    socialLogin: user.socialLogin ?? [],
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

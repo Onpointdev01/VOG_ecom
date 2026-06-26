@@ -1,5 +1,6 @@
 import { inject, injectable } from 'inversify';
 import { Model } from 'mongoose';
+import bcrypt from 'bcryptjs';
 import TYPES from '../di';
 import { IUser } from '../models/User';
 import AppError from '../utils/errors/AppError';
@@ -18,6 +19,8 @@ export interface IUserService {
   getWishlist(userId: string): Promise<IUser['wishlist']>;
   addToWishlist(userId: string, productId: any): Promise<IProduct>;
   removeFromWishlist(userId: string, productId: any): Promise<void>;
+  changePassword(userId: string, oldPassword: string, newPassword: string): Promise<void>;
+  setPassword(userId: string, newPassword: string): Promise<void>;
 }
 
 @injectable()
@@ -138,6 +141,29 @@ export class UserService extends BaseService implements IUserService {
     user.wishlist = user.wishlist.filter(
       (wishlistItem) => wishlistItem.toString() !== productId.toString()
     );
+    await user.save();
+  }
+
+  async changePassword(userId: string, oldPassword: string, newPassword: string): Promise<void> {
+    const user = await this.User.findById(userId).select('+password');
+    if (!user) throw new AppError('User not found', 404);
+
+    if (!user.password) throw new AppError('No password set. Use set-password to add one.', 400);
+
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) throw new AppError('Current password is incorrect', 401);
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+  }
+
+  async setPassword(userId: string, newPassword: string): Promise<void> {
+    const user = await this.User.findById(userId).select('+password');
+    if (!user) throw new AppError('User not found', 404);
+
+    if (user.password) throw new AppError('A password is already set. Use change-password instead.', 400);
+
+    user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
   }
 }
