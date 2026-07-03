@@ -76,7 +76,7 @@ const userSchema: Schema = new Schema<IUser>(
     lastName: {
       type: String,
       trim: true,
-      required: [true, 'lastname is required'],
+      default: '',
     },
     email: {
       type: String,
