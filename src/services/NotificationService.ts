@@ -176,7 +176,14 @@ export class NotificationService {
         headings: { en: title },
         contents: { en: body },
         data,
+        ios_sound: 'default',
+        priority: 10,
       };
+
+      const androidChannelId = process.env.ONESIGNAL_ANDROID_CHANNEL_ID;
+      if (androidChannelId) {
+        payload.android_channel_id = androidChannelId;
+      }
 
       if (subscriptionIds.length) {
         payload.include_subscription_ids = subscriptionIds;
