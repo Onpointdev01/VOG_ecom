@@ -50,10 +50,11 @@ export class AdminMarketingCampaignController extends BaseController {
   @httpPost('/')
   public async create(
     @response() res: Response,
-    @requestBody() payload: CreateMarketingCampaignDTO
+    @requestBody() payload: CreateMarketingCampaignDTO & { notifyBuyers?: boolean }
   ) {
     const adminId = res.locals.admin;
-    const campaign = await this.campaignService.createCampaign(adminId, payload);
+    const { notifyBuyers = true, ...campaignPayload } = payload;
+    const campaign = await this.campaignService.createCampaign(adminId, campaignPayload, notifyBuyers);
     return this.sendResponse(res, 201, 'Campaign created', campaign);
   }
 

@@ -12,7 +12,10 @@ import {
 } from '../models/MarketingCampaign';
 import { Cart } from '../models/Cart';
 import { Address } from '../models/Address';
+import { IUser } from '../models/User';
 import { IShippingZoneService } from './ShippingZoneService';
+import { NotificationService } from './NotificationService';
+import { sendEmail, renderTemplate } from '../utils/helpers/sendMail';
 import AppError from '../utils/errors/AppError';
 
 export interface CreateMarketingCampaignDTO {
@@ -92,7 +95,7 @@ export interface CouponValidationResult {
 }
 
 export interface IMarketingCampaignService {
-  createCampaign(adminId: string, payload: CreateMarketingCampaignDTO): Promise<IMarketingCampaign>;
+  createCampaign(adminId: string, payload: CreateMarketingCampaignDTO, notify?: boolean): Promise<IMarketingCampaign>;
   updateCampaign(id: string, payload: UpdateMarketingCampaignDTO): Promise<IMarketingCampaign>;
   deleteCampaign(id: string): Promise<void>;
   getCampaignById(id: string): Promise<CampaignAdminView>;
@@ -166,7 +169,9 @@ function toPublicView(doc: IMarketingCampaign): CampaignPublicView {
 export class MarketingCampaignService extends BaseService implements IMarketingCampaignService {
   constructor(
     @inject(TYPES.MarketingCampaign) private Campaign: Model<IMarketingCampaign>,
-    @inject(TYPES.ShippingZoneService) private shippingZoneService: IShippingZoneService
+    @inject(TYPES.ShippingZoneService) private shippingZoneService: IShippingZoneService,
+    @inject(TYPES.NotificationService) private notificationService: NotificationService,
+    @inject(TYPES.User) private User: Model<IUser>
   ) {
     super();
   }
@@ -221,7 +226,8 @@ export class MarketingCampaignService extends BaseService implements IMarketingC
 
   async createCampaign(
     adminId: string,
-    payload: CreateMarketingCampaignDTO
+    payload: CreateMarketingCampaignDTO,
+    notify = true
   ): Promise<IMarketingCampaign> {
     const data = this.normalizePayload(payload);
     if (data.type === 'discount' && data.discountType === 'none') {
@@ -239,7 +245,93 @@ export class MarketingCampaignService extends BaseService implements IMarketingC
       isActive: data.isActive ?? true,
       priority: data.priority ?? 0,
     });
+
+    if (notify) {
+      void this.notifyBuyersOfNewCampaign(created);
+    }
+
     return created;
+  }
+
+  private async notifyBuyersOfNewCampaign(campaign: IMarketingCampaign): Promise<void> {
+    try {
+      const buyers = await this.User.find({
+        banned: { $ne: true },
+        $or: [{ role: 'buyer' }, { seller: { $exists: false } }, { seller: null }],
+      })
+        .select('_id email')
+        .lean();
+
+      const campaignId = String(campaign._id);
+      const title = campaign.title;
+      const body = campaign.subtitle || campaign.description || 'Check out our new campaign!';
+      const actionUrl = campaign.linkUrl || '/campaigns';
+
+      const notifyChunks = this.chunkArray(buyers, 20);
+      for (const chunk of notifyChunks) {
+        await Promise.all(
+          chunk.map((buyer) =>
+            this.notificationService.emit({
+              userId: String(buyer._id),
+              type: 'promotional',
+              target: 'buyer',
+              title,
+              body,
+              actionUrl,
+              entityType: 'product',
+              entityId: campaignId,
+              dedupeKey: `campaign:${campaignId}:new:${String(buyer._id)}`,
+              data: { campaignId, type: 'new_campaign' },
+            })
+          )
+        );
+      }
+
+      const emailRecipients = buyers
+        .map((b) => String(b.email || '').trim().toLowerCase())
+        .filter((e) => e.includes('@'));
+
+      if (emailRecipients.length === 0) return;
+
+      const frontendUrl = process.env.FRONTEND_URL || '';
+      const emailLink = campaign.linkUrl
+        ? (/^https?:\/\//i.test(campaign.linkUrl) ? campaign.linkUrl : `${frontendUrl}${campaign.linkUrl}`)
+        : `${frontendUrl}/campaigns`;
+
+      let html: string;
+      try {
+        const linkButton = `<div class="button-container"><a href="${emailLink}" class="button">View Campaign</a></div>`;
+        html = renderTemplate('notification-email.html', {
+          title,
+          message: body,
+          linkButton,
+          frontendUrl,
+        });
+      } catch {
+        html = `<p><strong>${title}</strong></p><p>${body}</p>`;
+      }
+
+      const emailChunks = this.chunkArray(emailRecipients, 20);
+      for (const chunk of emailChunks) {
+        await Promise.all(
+          chunk.map((email) =>
+            sendEmail({ subject: title, html, to: [email] }).catch((err) =>
+              console.error(`Campaign email failed for ${email}:`, err)
+            )
+          )
+        );
+      }
+    } catch (err) {
+      console.error('notifyBuyersOfNewCampaign error:', err);
+    }
+  }
+
+  private chunkArray<T>(arr: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) {
+      chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
   }
 
   async updateCampaign(id: string, payload: UpdateMarketingCampaignDTO): Promise<IMarketingCampaign> {
