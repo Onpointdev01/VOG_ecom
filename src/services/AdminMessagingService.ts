@@ -10,6 +10,7 @@ import { IMessageService } from './MessageService';
 import { IMessage } from '../models';
 import { resolveAdminChatUserId } from '../utils/resolveAdminChatUser';
 import { toIdString } from '../utils/mongoId';
+import { NotificationService } from './NotificationService';
 
 export type EmailAudience = 'buyers' | 'sellers' | 'everyone';
 
@@ -76,7 +77,8 @@ export class AdminMessagingService extends BaseService implements IAdminMessagin
     @inject(TYPES.AdminEmailBroadcast)
     private AdminEmailBroadcast: Model<IAdminEmailBroadcast>,
     @inject(TYPES.ConversationService) private conversationService: IConversationService,
-    @inject(TYPES.MessageService) private messageService: IMessageService
+    @inject(TYPES.MessageService) private messageService: IMessageService,
+    @inject(TYPES.NotificationService) private notificationService: NotificationService
   ) {
     super();
   }
@@ -96,40 +98,42 @@ export class AdminMessagingService extends BaseService implements IAdminMessagin
     };
   }
 
-  private async resolveRecipientEmails(audience: EmailAudience): Promise<string[]> {
+  private async resolveRecipients(audience: EmailAudience): Promise<{ id: string; email: string }[]> {
     const baseQuery = {
       banned: { $ne: true },
       email: { $exists: true, $nin: [null, ''] },
     };
 
-    let users: { email: string }[] = [];
+    let users: { _id: unknown; email: string }[] = [];
 
     if (audience === 'buyers') {
       users = await this.User.find({
         ...baseQuery,
         $or: [{ role: 'buyer' }, { seller: { $exists: false } }, { seller: null }],
       })
-        .select('email')
+        .select('_id email')
         .lean();
     } else if (audience === 'sellers') {
       users = await this.User.find({
         ...baseQuery,
         $or: [{ role: 'seller' }, { seller: { $exists: true, $ne: null } }],
       })
-        .select('email')
+        .select('_id email')
         .lean();
     } else {
-      users = await this.User.find(baseQuery).select('email').lean();
+      users = await this.User.find(baseQuery).select('_id email').lean();
     }
 
-    const emailSet = new Set<string>();
-    users.forEach((u) => {
-      const e = String(u.email || '').trim().toLowerCase();
-      if (e.includes('@')) emailSet.add(e);
-    });
-    const emails = Array.from(emailSet);
-
-    return emails;
+    const seen = new Set<string>();
+    const result: { id: string; email: string }[] = [];
+    for (const u of users) {
+      const email = String(u.email || '').trim().toLowerCase();
+      if (email.includes('@') && !seen.has(email)) {
+        seen.add(email);
+        result.push({ id: toIdString(u._id), email });
+      }
+    }
+    return result;
   }
 
   async listEmailBroadcasts(limit = 50): Promise<EmailBroadcastListItem[]> {
@@ -203,7 +207,7 @@ export class AdminMessagingService extends BaseService implements IAdminMessagin
       throw new AppError('Message body is required', 400);
     }
 
-    const recipients = await this.resolveRecipientEmails(params.audience);
+    const recipients = await this.resolveRecipients(params.audience);
     if (recipients.length === 0) {
       throw new AppError('No recipients found for this audience', 404);
     }
@@ -212,31 +216,47 @@ export class AdminMessagingService extends BaseService implements IAdminMessagin
     const failures: string[] = [];
     const concurrency = 5;
 
-    const sendOne = async (email: string) => {
+    const sendOne = async (recipient: { id: string; email: string }) => {
       try {
-        await sendEmail({ subject, html, to: [email] });
+        await sendEmail({ subject, html, to: [recipient.email] });
         sent += 1;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Send failed';
-        console.error(`Broadcast failed for ${email}:`, message);
-        failures.push(`${email}: ${message}`);
+        console.error(`Broadcast failed for ${recipient.email}:`, message);
+        failures.push(`${recipient.email}: ${message}`);
       }
     };
 
     for (let i = 0; i < recipients.length; i += concurrency) {
       const batch = recipients.slice(i, i + concurrency);
-      await Promise.all(batch.map((email) => sendOne(email)));
+      await Promise.all(batch.map((r) => sendOne(r)));
     }
 
     if (sent === 0) {
       const hint =
         failures[0] ||
-        'Check SMTP_USER, SMTP_PASS (Gmail app password), and EMAIL_FROM in .env';
+        'Check SMTP_USER, SMTP_PASS, and EMAIL_FROM in .env';
       throw new AppError(
         failures.length > 0 ? `Email delivery failed: ${hint}` : 'Email delivery failed',
         failures.some((f) => f.includes('SMTP')) ? 503 : 502
       );
     }
+
+    // Fire push + in-app notifications in the background — don't block the response
+    const notifTarget: 'buyer' | 'seller' | 'both' =
+      params.audience === 'buyers' ? 'buyer' : params.audience === 'sellers' ? 'seller' : 'both';
+    void Promise.all(
+      recipients.map((r) =>
+        this.notificationService.emit({
+          userId: r.id,
+          type: 'promotional',
+          target: notifTarget,
+          title: subject,
+          body: params.text?.trim() || subject,
+          inAppOnly: false,
+        })
+      )
+    );
 
     const failedCount = recipients.length - sent;
     const saved = await this.AdminEmailBroadcast.create({
@@ -257,7 +277,7 @@ export class AdminMessagingService extends BaseService implements IAdminMessagin
       total: recipients.length,
       sent,
       failed: failedCount,
-      recipients: recipients.slice(0, 20),
+      recipients: recipients.slice(0, 20).map((r) => r.email),
       ...(failures.length > 0 ? { failures: failures.slice(0, 5) } : {}),
     };
   }
